@@ -1,6 +1,7 @@
 #define _DEFAULT_SOURCE
 #include "swim_codec.h"
 #include "swim_errno.h"
+#include "swim_gossip_queue.h"
 #include <arpa/inet.h>
 #include <endian.h>
 #include <string.h>
@@ -131,101 +132,225 @@ int swim_encode_string(const char *str, uint8_t *p, uint8_t *q) {
   return (int)(2 + len);
 }
 
-// Decode a compactly encoded Node ID with overflow checks
-static int decode_node_id(swim_node_id_t *id, const uint8_t *buf, size_t limit,
-                          size_t *offset) {
-  if (*offset + 2 > limit) {
-    return -1;
-  }
-  size_t host_len = read_uint16(&buf[*offset]);
-  *offset += 2;
 
-  // Prevent buffer overflow (sizeof host is 64)
-  if (host_len >= sizeof(id->host)) {
-    return -1;
-  }
-  if (*offset + host_len + 2 + 2 > limit) {
+
+
+
+int swim_encode_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
+                        const swim_node_id_t *peer, struct swim_gossip_queue_t *q,
+                        uint32_t active_members, uint8_t *buf, int bufsz) {
+  if (!sender || !buf || bufsz <= 0) {
     return -1;
   }
 
-  memcpy(id->host, &buf[*offset], host_len);
-  id->host[host_len] = '\0';
-  *offset += host_len;
+  uint8_t *p = buf;
+  uint8_t *end = buf + bufsz;
+  int n;
 
-  id->port = read_uint16(&buf[*offset]);
-  *offset += 2;
+  // 1. Message Type (1 byte)
+  n = swim_encode_int8(type, p, end);
+  if (n < 0) { return -1; }
+  p += n;
 
-  size_t cookie_len = read_uint16(&buf[*offset]);
-  *offset += 2;
+  // 2. Sequence number (4 bytes)
+  n = swim_encode_int32(seq, p, end);
+  if (n < 0) { return -1; }
+  p += n;
 
-  // Prevent buffer overflow (sizeof cookie is 64)
-  if (cookie_len >= sizeof(id->cookie)) {
+  // 3. Sender Node ID
+  n = swim_encode_node_id(sender, p, end);
+  if (n < 0) { return -1; }
+  p += n;
+
+  // 4. Peer Node ID (target for ping_req, source for fwd_ack)
+  if (type == SWIM_MSG_PING_REQ || type == SWIM_MSG_FWD_ACK) {
+    if (!peer) {
+      return -1;
+    }
+    n = swim_encode_node_id(peer, p, end);
+    if (n < 0) { return -1; }
+    p += n;
+  }
+
+  // Cap gossip payload budget to min(1272, remaining packet room) per DESIGN §8
+  int remaining = (int)(end - p);
+  int budget = remaining > 0 ? remaining : 0;
+
+  int gossip_bytes;
+  if (q) {
+    gossip_bytes = swim_gossip_queue_pack_ex(
+        q, active_members, (char *)p, budget);
+  } else {
+    n = swim_encode_int16(0, p, end);
+    if (n < 0) { return -1; }
+    gossip_bytes = n;
+  }
+
+  if (gossip_bytes < 0) {
     return -1;
   }
-  if (*offset + cookie_len > limit) {
-    return -1;
-  }
 
-  memcpy(id->cookie, &buf[*offset], cookie_len);
-  id->cookie[cookie_len] = '\0';
-  *offset += cookie_len;
-
-  return 0;
+  p += gossip_bytes;
+  return (int)(p - buf);
 }
 
+int swim_decode_int8(uint8_t *val, const uint8_t *p, const uint8_t *q) {
+  if (p + 1 > q) {
+    return -1;
+  }
+  *val = *p;
+  return 1;
+}
 
+int swim_decode_int16(uint16_t *val, const uint8_t *p, const uint8_t *q) {
+  if (p + 2 > q) {
+    return -1;
+  }
+  uint16_t net_val;
+  memcpy(&net_val, p, 2);
+  *val = ntohs(net_val);
+  return 2;
+}
 
-int swim_codec_decode(const uint8_t *buf, size_t size, swim_message_t *msg) {
+int swim_decode_int32(uint32_t *val, const uint8_t *p, const uint8_t *q) {
+  if (p + 4 > q) {
+    return -1;
+  }
+  uint32_t net_val;
+  memcpy(&net_val, p, 4);
+  *val = ntohl(net_val);
+  return 4;
+}
+
+int swim_decode_int64(uint64_t *val, const uint8_t *p, const uint8_t *q) {
+  if (p + 8 > q) {
+    return -1;
+  }
+  uint64_t net_val;
+  memcpy(&net_val, p, 8);
+  *val = be64toh(net_val);
+  return 8;
+}
+
+int swim_decode_string(char *str, size_t max_len, const uint8_t *p, const uint8_t *q) {
+  if (p + 2 > q) {
+    return -1;
+  }
+  uint16_t net_len;
+  memcpy(&net_len, p, 2);
+  size_t len = ntohs(net_len);
+  if (p + 2 + len > q) {
+    return -1;
+  }
+  if (len >= max_len) {
+    return -1;
+  }
+  memcpy(str, p + 2, len);
+  str[len] = '\0';
+  return (int)(2 + len);
+}
+
+int swim_decode_node_id(swim_node_id_t *id, const uint8_t *p, const uint8_t *q) {
+  const uint8_t *start = p;
+  int n;
+
+  n = swim_decode_string(id->host, sizeof(id->host), p, q);
+  if (n < 0) { return -1; }
+  p += n;
+
+  uint16_t port;
+  n = swim_decode_int16(&port, p, q);
+  if (n < 0) { return -1; }
+  id->port = port;
+  p += n;
+
+  n = swim_decode_string(id->cookie, sizeof(id->cookie), p, q);
+  if (n < 0) { return -1; }
+  p += n;
+
+  return (int)(p - start);
+}
+
+int swim_decode_membership(swim_member_t *m, const uint8_t *p, const uint8_t *q) {
+  const uint8_t *start = p;
+  int n;
+
+  n = swim_decode_node_id(&m->id, p, q);
+  if (n < 0) { return -1; }
+  p += n;
+
+  uint8_t status;
+  n = swim_decode_int8(&status, p, q);
+  if (n < 0) { return -1; }
+  m->status = (swim_status_t)status;
+  p += n;
+
+  n = swim_decode_int64(&m->incarnation, p, q);
+  if (n < 0) { return -1; }
+  p += n;
+
+  m->dead_at = 0;
+
+  return (int)(p - start);
+}
+
+int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
   if (!buf || !msg) {
     return swim_set_error(SWIM_ERR_INVALID,
-                          "Invalid NULL arguments to swim_codec_decode");
+                          "Invalid NULL arguments to swim_decode_message");
   }
 
-  size_t offset = 0;
+  const uint8_t *p = buf;
+  const uint8_t *end = buf + size;
+  int n;
 
   // 1. Message Type
-  if (offset + 1 > size) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Buffer too short for message type");
+  n = swim_decode_int8(&msg->type, p, end);
+  if (n < 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for message type");
   }
-  msg->type = buf[offset++];
   if (msg->type < SWIM_MSG_PING || msg->type > SWIM_MSG_LEAVE) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid message type value");
   }
+  p += n;
 
   // 2. Sequence number
-  if (offset + 4 > size) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Buffer too short for sequence number");
+  n = swim_decode_int32(&msg->seq, p, end);
+  if (n < 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for sequence number");
   }
-  msg->seq = read_uint32(&buf[offset]);
-  offset += 4;
+  p += n;
 
   // 3. Sender Node ID
-  if (decode_node_id(&msg->sender, buf, size, &offset) != 0) {
+  n = swim_decode_node_id(&msg->sender, p, end);
+  if (n < 0) {
     return swim_set_error(SWIM_ERR_INVALID, "Failed to decode sender node ID");
   }
+  p += n;
 
   // 4. Peer Node ID
   if (msg->type == SWIM_MSG_PING_REQ || msg->type == SWIM_MSG_FWD_ACK) {
-    if (decode_node_id(&msg->peer, buf, size, &offset) != 0) {
+    n = swim_decode_node_id(&msg->peer, p, end);
+    if (n < 0) {
       return swim_set_error(SWIM_ERR_INVALID, "Failed to decode peer node ID");
     }
+    p += n;
   } else {
     memset(&msg->peer, 0, sizeof(msg->peer));
   }
 
   // 5. Gossip Events Payload
-  if (offset == size) {
+  if (p == end) {
     msg->event_count = 0;
     return 0;
   }
 
-  if (offset + 2 > size) {
+  uint16_t g_count;
+  n = swim_decode_int16(&g_count, p, end);
+  if (n < 0) {
     return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for gossip count");
   }
-  uint16_t g_count = read_uint16(&buf[offset]);
-  offset += 2;
+  p += n;
 
   if (g_count > SWIM_MAX_EVENTS) {
     return swim_set_error(SWIM_ERR_INVALID, "Event count exceeds maximum allowed");
@@ -236,90 +361,60 @@ int swim_codec_decode(const uint8_t *buf, size_t size, swim_message_t *msg) {
   for (int i = 0; i < g_count; i++) {
     swim_member_t *ev = &msg->events[i];
 
-    if (offset + 2 > size) {
+    uint16_t member_body_len;
+    n = swim_decode_int16(&member_body_len, p, end);
+    if (n < 0) {
       return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for member length");
     }
-    uint16_t member_body_len = read_uint16(&buf[offset]);
-    offset += 2;
+    p += n;
 
-    if (offset + member_body_len > size) {
+    if (p + member_body_len > end) {
       return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for member body");
     }
 
-    size_t member_end = offset + member_body_len;
+    const uint8_t *member_end = p + member_body_len;
 
-    // Decode node ID LEN
-    if (offset + 2 > member_end) {
+    // Decode node ID body length
+    uint16_t node_id_body_len;
+    n = swim_decode_int16(&node_id_body_len, p, member_end);
+    if (n < 0) {
       return swim_set_error(SWIM_ERR_INVALID, "Member body too short for node ID length");
     }
-    uint16_t node_id_body_len = read_uint16(&buf[offset]);
-    offset += 2;
+    p += n;
 
-    size_t node_id_end = offset + node_id_body_len;
+    const uint8_t *node_id_end = p + node_id_body_len;
     if (node_id_end > member_end) {
       return swim_set_error(SWIM_ERR_INVALID, "Node ID body exceeds member body size");
     }
 
-    // Decode host LEN
-    if (offset + 2 > node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Node ID body too short for host length");
+    // Decode the node ID
+    n = swim_decode_node_id(&ev->id, p, node_id_end);
+    if (n < 0) {
+      return swim_set_error(SWIM_ERR_INVALID, "Failed to decode node ID in gossip event");
     }
-    uint16_t host_len = read_uint16(&buf[offset]);
-    offset += 2;
+    p += n;
 
-    if (host_len >= sizeof(ev->id.host)) {
-      return swim_set_error(SWIM_ERR_INVALID, "Host name too long");
-    }
-    if (offset + host_len > node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Host characters exceed node ID body");
-    }
-    memcpy(ev->id.host, &buf[offset], host_len);
-    ev->id.host[host_len] = '\0';
-    offset += host_len;
-
-    // Decode port
-    if (offset + 2 > node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Node ID body too short for port");
-    }
-    ev->id.port = read_uint16(&buf[offset]);
-    offset += 2;
-
-    // Decode cookie LEN
-    if (offset + 2 > node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Node ID body too short for cookie length");
-    }
-    uint16_t cookie_len = read_uint16(&buf[offset]);
-    offset += 2;
-
-    if (cookie_len >= sizeof(ev->id.cookie)) {
-      return swim_set_error(SWIM_ERR_INVALID, "Cookie too long");
-    }
-    if (offset + cookie_len > node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Cookie characters exceed node ID body");
-    }
-    memcpy(ev->id.cookie, &buf[offset], cookie_len);
-    ev->id.cookie[cookie_len] = '\0';
-    offset += cookie_len;
-
-    if (offset != node_id_end) {
+    if (p != node_id_end) {
       return swim_set_error(SWIM_ERR_INVALID, "Inconsistent node ID body parsing offset");
     }
 
     // Decode status
-    if (offset + 1 > member_end) {
+    uint8_t status;
+    n = swim_decode_int8(&status, p, member_end);
+    if (n < 0) {
       return swim_set_error(SWIM_ERR_INVALID, "Member body too short for status");
     }
-    ev->status = (swim_status_t)buf[offset];
-    offset += 1;
+    ev->status = (swim_status_t)status;
+    p += n;
 
     // Decode incarnation
-    if (offset + 8 > member_end) {
+    n = swim_decode_int64(&ev->incarnation, p, member_end);
+    if (n < 0) {
       return swim_set_error(SWIM_ERR_INVALID, "Member body too short for incarnation");
     }
-    ev->incarnation = read_uint64(&buf[offset]);
-    offset += 8;
+    p += n;
 
-    if (offset != member_end) {
+    if (p != member_end) {
       return swim_set_error(SWIM_ERR_INVALID, "Inconsistent member body parsing offset");
     }
 

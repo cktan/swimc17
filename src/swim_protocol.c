@@ -342,75 +342,14 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
 // Helper functions moved above
 
-int pack_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
-                 const swim_node_id_t *peer, swim_gossip_queue_t *q,
-                 uint32_t active_members, uint8_t *buf, int bufsz) {
-  if (!sender || !buf || bufsz <= 0) {
-    return -1;
-  }
-
-  uint8_t *p = buf;
-  uint8_t *end = buf + bufsz;
-  int n;
-
-  // 1. Message Type (1 byte)
-  n = swim_encode_int8(type, p, end);
-  if (n < 0) { return -1; }
-  p += n;
-
-  // 2. Sequence number (4 bytes)
-  n = swim_encode_int32(seq, p, end);
-  if (n < 0) { return -1; }
-  p += n;
-
-  // 3. Sender Node ID
-  n = swim_encode_node_id(sender, p, end);
-  if (n < 0) { return -1; }
-  p += n;
-
-  // 4. Peer Node ID (target for ping_req, source for fwd_ack)
-  if (type == SWIM_MSG_PING_REQ || type == SWIM_MSG_FWD_ACK) {
-    if (!peer) {
-      return -1;
-    }
-    n = swim_encode_node_id(peer, p, end);
-    if (n < 0) { return -1; }
-    p += n;
-  }
-
-  int remaining = (int)(end - p);
-  int budget = remaining > 0 ? remaining : 0;
-
-  int gossip_bytes;
-  if (q) {
-    gossip_bytes = swim_gossip_queue_pack_ex(
-        q, active_members, (char *)p, budget);
-  } else {
-    n = swim_encode_int16(0, p, end);
-    if (n < 0) { return -1; }
-    gossip_bytes = n;
-  }
-
-  if (gossip_bytes < 0) {
-    return -1;
-  }
-
-  p += gossip_bytes;
-  return (int)(p - buf);
-}
-
-int unpack_message(const uint8_t *buf, int len, swim_message_t *msg) {
-  return swim_codec_decode(buf, len, msg);
-}
-
 // Helper to send messages
 static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
                          uint8_t type, const swim_node_id_t *sender,
                          uint32_t seq, const swim_node_id_t *peer) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   swim_gossip_queue_t *q_to_pass = (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
-  int len = pack_message(type, sender, seq, peer, q_to_pass,
-                         swim_membership_count(inst->membership), buf, sizeof(buf));
+  int len = swim_encode_message(type, sender, seq, peer, q_to_pass,
+                                swim_membership_count(inst->membership), buf, sizeof(buf));
   if (len > 0) {
     swim_udp_send(inst->udp, dest, buf, len);
   } else {
@@ -545,7 +484,7 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src, swim_message
   if (len <= 0) {
     return -1;
   }
-  return unpack_message(buf, len, msg);
+  return swim_decode_message(buf, len, msg);
 }
 
 // Packet receiver and protocol handler

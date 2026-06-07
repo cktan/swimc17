@@ -94,32 +94,7 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
  */
 int swim_hint_alive(const char *name, const swim_node_id_t *peer);
 
-/**
- * Pack a message and gossip events into a buffer.
- *
- * @param q            Gossip queue.
- * @param active_members Number of active members.
- * @param buf          Output buffer.
- * @param bufsz        Buffer size.
- * @param type         Message type.
- * @param sender       Sender Node ID.
- * @param seq          Sequence number.
- * @param peer         Peer Node ID (if applicable, otherwise NULL).
- * @return Number of bytes written on success, or -1 on error.
- */
-int pack_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
-                 const swim_node_id_t *peer, swim_gossip_queue_t *q,
-                 uint32_t active_members, uint8_t *buf, int bufsz);
 
-/**
- * Unpack a message buffer into a swim_message_t.
- *
- * @param buf          Input buffer.
- * @param len          Buffer length.
- * @param msg          Output message structure.
- * @return 0 on success, or -1 on error.
- */
-int unpack_message(const uint8_t *buf, int len, swim_message_t *msg);
 
 #ifdef __cplusplus
 }

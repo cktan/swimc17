@@ -15,12 +15,12 @@ TEST_CASE("codec: ping/ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001:my_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = pack_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_encode_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_codec_decode(buf, enc_len, &decoded);
+  int rc = swim_decode_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_PING);
@@ -35,12 +35,12 @@ TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&peer, "[::1]:9002:target_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = pack_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_codec_decode(buf, enc_len, &decoded);
+  int rc = swim_decode_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_PING_REQ);
@@ -67,12 +67,12 @@ TEST_CASE("codec: full message roundtrip with events") {
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_DEAD, &id3, 999ULL, 1) == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = pack_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3, buf, sizeof(buf));
+  int enc_len = swim_encode_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_codec_decode(buf, enc_len, &decoded);
+  int rc = swim_decode_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_ACK);
@@ -104,17 +104,17 @@ TEST_CASE("codec: error validation and bounds checking") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001") == 0);
 
   uint8_t buf[256];
-  int enc_len = pack_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_encode_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   // 1. Buffer too small for decode
   swim_message_t decoded;
-  int rc = swim_codec_decode(buf, 5, &decoded);
+  int rc = swim_decode_message(buf, 5, &decoded);
   CHECK(rc == -1);
 
   // 2. Corrupt message type value
   buf[0] = 99; // invalid type
-  rc = swim_codec_decode(buf, enc_len, &decoded);
+  rc = swim_decode_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
   // Reset type back to normal
@@ -124,7 +124,7 @@ TEST_CASE("codec: error validation and bounds checking") {
   // Offset of event count is 18 (1 type + 4 seq + 13 node_id)
   buf[18] = 0;
   buf[19] = 99; // event count 99 exceeds SWIM_MAX_EVENTS (64)
-  rc = swim_codec_decode(buf, enc_len, &decoded);
+  rc = swim_decode_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
   // Reset event count back to normal
@@ -134,7 +134,7 @@ TEST_CASE("codec: error validation and bounds checking") {
   // 4. Corrupt node ID length leading to out-of-bounds
   // Offset of sender host_len is 5
   buf[5] = 250; // host_len 250 (which overflows bounds check)
-  rc = swim_codec_decode(buf, enc_len, &decoded);
+  rc = swim_decode_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
   // Restore clean errno state so other test cases are not affected
@@ -229,5 +229,113 @@ TEST_CASE("codec: swim_encode_membership") {
 
   // Overflow check
   rc = swim_encode_membership(&member, buf, buf + 32);
+  CHECK(rc == -1);
+}
+
+TEST_CASE("codec: decode helpers") {
+  uint8_t buf[256];
+  
+  // 1. Test swim_decode_int8
+  buf[0] = 0x55;
+  uint8_t val8 = 0;
+  int rc = swim_decode_int8(&val8, buf, buf + 1);
+  CHECK(rc == 1);
+  CHECK(val8 == 0x55);
+  
+  rc = swim_decode_int8(&val8, buf, buf);
+  CHECK(rc == -1);
+
+  // 2. Test swim_decode_int16
+  buf[0] = 0x12;
+  buf[1] = 0x34;
+  uint16_t val16 = 0;
+  rc = swim_decode_int16(&val16, buf, buf + 2);
+  CHECK(rc == 2);
+  CHECK(val16 == 0x1234);
+
+  rc = swim_decode_int16(&val16, buf, buf + 1);
+  CHECK(rc == -1);
+
+  // 3. Test swim_decode_int32
+  buf[0] = 0x12;
+  buf[1] = 0x34;
+  buf[2] = 0x56;
+  buf[3] = 0x78;
+  uint32_t val32 = 0;
+  rc = swim_decode_int32(&val32, buf, buf + 4);
+  CHECK(rc == 4);
+  CHECK(val32 == 0x12345678);
+
+  rc = swim_decode_int32(&val32, buf, buf + 3);
+  CHECK(rc == -1);
+
+  // 4. Test swim_decode_int64
+  buf[0] = 0x11;
+  buf[1] = 0x22;
+  buf[2] = 0x33;
+  buf[3] = 0x44;
+  buf[4] = 0x55;
+  buf[5] = 0x66;
+  buf[6] = 0x77;
+  buf[7] = 0x88;
+  uint64_t val64 = 0;
+  rc = swim_decode_int64(&val64, buf, buf + 8);
+  CHECK(rc == 8);
+  CHECK(val64 == 0x1122334455667788ULL);
+
+  rc = swim_decode_int64(&val64, buf, buf + 7);
+  CHECK(rc == -1);
+
+  // 5. Test swim_decode_string
+  buf[0] = 0x00;
+  buf[1] = 0x05;
+  memcpy(buf + 2, "hello", 5);
+  char str[16];
+  rc = swim_decode_string(str, sizeof(str), buf, buf + 7);
+  CHECK(rc == 7);
+  CHECK(std::string(str) == "hello");
+
+  rc = swim_decode_string(str, sizeof(str), buf, buf + 6);
+  CHECK(rc == -1);
+
+  rc = swim_decode_string(str, 5, buf, buf + 7); // Dest too small for null term
+  CHECK(rc == -1);
+
+  // 6. Test swim_decode_node_id
+  swim_node_id_t node;
+  node.port = 8000;
+  strcpy(node.host, "127.0.0.1");
+  strcpy(node.cookie, "my_cookie");
+  uint8_t enc_buf[256];
+  int enc_len = swim_encode_node_id(&node, enc_buf, enc_buf + sizeof(enc_buf));
+  REQUIRE(enc_len > 0);
+
+  swim_node_id_t decoded_node;
+  rc = swim_decode_node_id(&decoded_node, enc_buf, enc_buf + enc_len);
+  REQUIRE(rc == enc_len);
+  CHECK(swim_node_id_compare(&node, &decoded_node) == 0);
+
+  rc = swim_decode_node_id(&decoded_node, enc_buf, enc_buf + enc_len - 1);
+  CHECK(rc == -1);
+
+  // 7. Test swim_decode_membership
+  swim_member_t member;
+  REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001:my_cookie") == 0);
+  member.status = SWIM_STATUS_ALIVE;
+  member.incarnation = 42;
+  member.dead_at = 0;
+  
+  enc_len = swim_encode_membership(&member, enc_buf, enc_buf + sizeof(enc_buf));
+  REQUIRE(enc_len > 0);
+
+  swim_member_t decoded_member;
+  rc = swim_decode_membership(&decoded_member, enc_buf, enc_buf + enc_len);
+  REQUIRE(rc == enc_len);
+  CHECK(swim_node_id_compare(&member.id, &decoded_member.id) == 0);
+  CHECK(decoded_member.status == SWIM_STATUS_ALIVE);
+  CHECK(decoded_member.incarnation == 42);
+  CHECK(decoded_member.dead_at == 0);
+
+  rc = swim_decode_membership(&decoded_member, enc_buf, enc_buf + enc_len - 1);
   CHECK(rc == -1);
 }
