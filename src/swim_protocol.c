@@ -83,6 +83,7 @@ struct swim_instance_t {
   swim_node_id_t self_id;
   uint64_t incarnation;
   uint32_t seq;
+  unsigned int rand_state; // per-instance PRNG state for rand_r()
 
   pthread_t thread;
   pthread_mutex_t mutex;
@@ -196,7 +197,7 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
           inst->membership, inst->shuffle_list, active_count, false);
       // Fisher-Yates Shuffle
       for (int i = inst->shuffle_count - 1; i > 0; i--) {
-        int j = rand() % (i + 1);
+        int j = rand_r(&inst->rand_state) % (i + 1);
         swim_member_t tmp = inst->shuffle_list[i];
         inst->shuffle_list[i] = inst->shuffle_list[j];
         inst->shuffle_list[j] = tmp;
@@ -272,7 +273,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
         // Pick up to k random helpers
         uint32_t k = inst->ping_req_fanout;
         for (uint32_t i = 0; i < k && count > 0; i++) {
-          int idx = rand() % count;
+          int idx = rand_r(&inst->rand_state) % count;
           send_ping_req(inst, &helpers[idx].id, &inst->pending_probe.target,
                         seq);
 
@@ -331,7 +332,7 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
       }
     } else {
       // In a cluster: Ping one random seed to heal partitions
-      int idx = rand() % inst->seed_count;
+      int idx = rand_r(&inst->rand_state) % inst->seed_count;
       send_ping(inst, &inst->seeds[idx], inst->seq++);
     }
   }
@@ -773,8 +774,10 @@ int swim_start(const swim_start_opts_t *opts) {
   pthread_mutex_init(&inst->mutex, NULL);
   atomic_store_explicit(&inst->running, true, memory_order_relaxed);
 
-  // Seed rand
-  srand((unsigned int)time(NULL) ^ (unsigned int)pthread_self());
+  // Seed this instance's private PRNG. Mix in the instance pointer so
+  // instances started in the same second diverge.
+  inst->rand_state = (unsigned int)time(NULL) ^
+                     (unsigned int)pthread_self() ^ (unsigned int)(uintptr_t)inst;
 
   // Enqueue self-announcement
   swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
@@ -864,7 +867,7 @@ int swim_leave(const char *name) {
       inst->incarnation = get_now_ms();
 
       for (uint32_t i = 0; i < fanout && count > 0; i++) {
-        int idx = rand() % count;
+        int idx = rand_r(&inst->rand_state) % count;
         send_message(inst, &list[idx].id, SWIM_MSG_LEAVE, &inst->self_id, inst->seq++, NULL);
         list[idx] = list[count - 1];
         count--;
