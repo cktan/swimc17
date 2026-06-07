@@ -25,4 +25,7 @@ test: timer_test
 clean:
 	rm -f *.o timer_test
 
-.PHONY: all test clean
+format:
+	clang-format -i *.cpp
+
+.PHONY: all test clean format

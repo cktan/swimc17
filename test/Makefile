@@ -10,6 +10,6 @@ clean:
 distclean: clean
 
 format:
-	clang-format -i timer/*.[ch] timer/*.cpp
+	$(MAKE) -C timer format
 
 .PHONY: all clean distclean format test
