@@ -267,14 +267,21 @@ TEST_CASE("ctx and param are passed through unchanged") {
 TEST_CASE("swim_errno interface works as expected") {
   // Verify default state
   CHECK(swim_errno == SWIM_OK);
-  CHECK(strcmp(swim_errmsg, "") == 0);
+  CHECK(strcmp(swim_errmsg(), "") == 0);
 
-  // Set thread-local error state
+  // Set thread-local error state directly
   swim_errno = SWIM_ERR_NOMEM;
-  snprintf(swim_errmsg, sizeof(swim_errmsg), "Failed to allocate memory");
-
   CHECK(swim_errno == SWIM_ERR_NOMEM);
-  CHECK(strcmp(swim_errmsg, "Failed to allocate memory") == 0);
+
+  // Set thread-local error state using swim_set_error
+  swim_set_error(SWIM_ERR_TIMEOUT, "Request timed out after %d ms", 5000);
+  CHECK(swim_errno == SWIM_ERR_TIMEOUT);
+  CHECK(strcmp(swim_errmsg(), "Request timed out after 5000 ms") == 0);
+
+  // Set with NULL format
+  swim_set_error(SWIM_ERR_INVALID, nullptr);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(strcmp(swim_errmsg(), "") == 0);
 
   // Test swim_strerror mapping
   CHECK(strcmp(swim_strerror(SWIM_OK), "Success") == 0);

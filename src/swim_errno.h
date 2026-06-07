@@ -16,7 +16,13 @@ extern "C" {
 
 // Per-thread error state variables
 extern _Thread_local int swim_errno;
-extern _Thread_local char swim_errmsg[200];
+
+/**
+ * Return the latest thread-local error message.
+ *
+ * @return the error message string.
+ */
+const char *swim_errmsg(void);
 
 /**
  * Return a read-only string description for a given swim_errno code.
@@ -25,6 +31,14 @@ extern _Thread_local char swim_errmsg[200];
  * @return string description of the error.
  */
 const char *swim_strerror(int err);
+
+/**
+ * Set the thread-local error state.
+ *
+ * @param e   the error code to set.
+ * @param fmt printf-like format string for the error message detail.
+ */
+void swim_set_error(int e, const char *fmt, ...);
 
 #ifdef __cplusplus
 }
