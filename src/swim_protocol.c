@@ -324,13 +324,34 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 static void send_message(swim_instance_t *inst, const swim_node_id_t *dest, swim_message_t *msg) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   
-  // Pack gossip events (limit budget to 1000 bytes for security and headers)
+  // Calculate actual header size to determine remaining room for gossip
+  int header_size = 6; // message type (1B) + seq (4B) + event_count (1B)
+  header_size += 4 + strlen(msg->sender.host) + strlen(msg->sender.cookie); // sender Node ID
+  if (msg->type == SWIM_MSG_PING_REQ || msg->type == SWIM_MSG_FWD_ACK) {
+    header_size += 4 + strlen(msg->peer.host) + strlen(msg->peer.cookie); // peer Node ID
+  }
+
+  // Cap gossip payload budget to min(1272, remaining packet room) per DESIGN §8
+  int budget = 1272;
+  int remaining = SWIM_MAX_PACKET_SIZE - header_size;
+  if (budget > remaining) {
+    budget = remaining;
+  }
+  if (budget < 0) {
+    budget = 0;
+  }
+
   int active_members = swim_membership_count(inst->membership);
-  msg->event_count = swim_gossip_queue_pack(inst->gossip_queue, active_members, 1000, msg->events, SWIM_MAX_EVENTS);
+  msg->event_count = swim_gossip_queue_pack(inst->gossip_queue, active_members, budget, msg->events, SWIM_MAX_EVENTS);
 
   int len = swim_codec_encode(msg, buf, sizeof(buf));
   if (len > 0) {
     swim_udp_send(inst->udp, dest, buf, len);
+  } else {
+    // Log dropped packet per DESIGN §12
+    fprintf(stderr, "(swim, message, dropped) # measurements: {count: 1} swim_node: {\"%s\", %u, \"%s\"} swim_peer: {\"%s\", %u, \"%s\"}\n",
+            inst->self_id.host, inst->self_id.port, inst->self_id.cookie,
+            dest->host, dest->port, dest->cookie);
   }
 }
 

@@ -474,3 +474,78 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe (
   }
   swim_set_error(SWIM_OK, nullptr);
 }
+
+TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
+  swim_node_id_t self_id, mock_id;
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501:c1") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502:mock") == 0);
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.host = "127.0.0.1";
+  opts.port = 20501;
+  opts.cookie = "c1";
+  opts.name = "m1_budget";
+  opts.protocol_period_ms = 10000; // slow
+  opts.ping_timeout_ms = 1000;
+
+  REQUIRE(swim_start(&opts) == 0);
+
+  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20502);
+  REQUIRE(mock_udp != nullptr);
+
+  // Send 5 PINGs, each containing 6 large gossip events, to populate
+  // the node's gossip queue with 30 large events.
+  for (uint32_t p = 0; p < 5; p++) {
+    swim_message_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = SWIM_MSG_PING;
+    msg.sender = mock_id;
+    msg.seq = 100 + p;
+    msg.event_count = 6;
+
+    for (int i = 0; i < 6; i++) {
+      int idx = p * 6 + i;
+      swim_member_t *ev = &msg.events[i];
+      char host[256];
+      sprintf(host, "node-with-a-very-long-name-to-make-it-large-and-fill-up-the-packet-budget-limit-domain-%d.com", idx);
+      strcpy(ev->id.host, host);
+      ev->id.port = 30000 + idx;
+      sprintf(ev->id.cookie, "cookie-cookie-cookie-cookie-%d", idx);
+      ev->status = SWIM_STATUS_ALIVE;
+      ev->incarnation = 100 + idx;
+    }
+
+    uint8_t send_buf[1024];
+    int len = swim_codec_encode(&msg, send_buf, sizeof(send_buf));
+    REQUIRE(len > 0);
+    REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
+
+    // Wait and drain the reply ACK for this PING so they don't pile up.
+    bool ack_seen = false;
+    uint8_t recv_buf[2048];
+    for (int attempt = 0; attempt < 50 && !ack_seen; attempt++) {
+      swim_node_id_t src;
+      int n = swim_udp_recv(mock_udp, &src, recv_buf, sizeof(recv_buf));
+      if (n > 0) {
+        swim_message_t in;
+        if (swim_codec_decode(recv_buf, n, &in) == 0 && in.type == SWIM_MSG_ACK && in.seq == 100 + p) {
+          ack_seen = true;
+          // For the last ACK (p == 4), verify the packet sizes and counts.
+          if (p == 4) {
+            CHECK(n <= SWIM_MAX_PACKET_SIZE);
+            CHECK(in.event_count > 0);
+            CHECK(in.event_count < 30);
+          }
+        }
+      } else {
+        usleep(10000);
+      }
+    }
+    REQUIRE(ack_seen == true);
+  }
+
+  swim_udp_final(mock_udp);
+  swim_leave("m1_budget");
+  swim_set_error(SWIM_OK, nullptr);
+}
