@@ -118,87 +118,227 @@ printf("Node: %s\n", buf);
 
 ## API Reference
 
-All public functions accept a `name` argument (defaults to
-`"swim"` if `NULL` is passed) to specify the named instance:
+All public functions accept a `name` argument to specify the
+named instance. If `NULL` is passed, the name defaults to
+`"swim"`.
 
-- `swim_start`
-- `swim_members`
-- `swim_subscribe`
-- `swim_unsubscribe`
-- `swim_hint_alive`
-- `swim_leave`
+---
 
-### Query membership
+### `swim_start`
 
+Starts the background protocol worker thread and registers
+a new named cluster membership instance.
+
+#### Signature
 ```c
-swim_member_t members[64];
-int count = swim_members("my_cluster", members, 64, false);
-if (count >= 0) {
-    for (int i = 0; i < count; i++) {
-        char host_buf[384];
-        swim_node_id_format(&members[i].id, host_buf, sizeof(host_buf));
-        printf("Member: %s status: %c incarnation: %llu\n",
-               host_buf, members[i].status, members[i].incarnation);
-    }
-}
+int swim_start(const swim_start_opts_t *opts);
 ```
 
-Each member is a `swim_member_t` struct where `status` is
-`SWIM_STATUS_ALIVE` (`'A'`), `SWIM_STATUS_SUSPECT` (`'S'`),
-or `SWIM_STATUS_DEAD` (`'D'`).
+#### Arguments
+- `opts`: Pointer to `swim_start_opts_t` structure. Must be
+  non-NULL, and `opts->host` and `opts->port` must be
+  configured.
 
-### Subscribe to events
+#### Return Value
+Returns `0` on success. On failure, returns `-1` and sets
+the thread-local `swim_errno` state to:
+- `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->host` /
+  `opts->port` are empty or invalid.
+- `SWIM_ERR_BAD_STATE`: An instance with the same name
+  is already running.
+- `SWIM_ERR_FULL`: Maximum active instances (16) exceeded.
+- `SWIM_ERR_NOMEM`: Memory allocation failed.
 
-Register a callback function to receive events when nodes
-join (`SWIM_NODE_UP`), are suspected (`SWIM_NODE_SUSPECT`),
-or are declared dead/leave (`SWIM_NODE_DOWN`).
+#### Mechanics & Thread-Safety
+Acquires the global instance registry mutex, registers the
+name, initializes internal sub-modules (gossip queue, UDP
+sockets, membership list, and delta-list timers), and Spawns
+the worker loop thread using `pthread_create`. Thread-safe.
 
+---
+
+### `swim_leave`
+
+Performs a graceful leave sequence, stops the background
+thread, and deallocates all associated resources.
+
+#### Signature
 ```c
-void my_event_cb(void *ctx, swim_event_t event, const swim_node_id_t *node) {
-    char host_buf[384];
-    swim_node_id_format(node, host_buf, sizeof(host_buf));
-
-    switch (event) {
-        case SWIM_NODE_UP:
-            printf("Node UP: %s\n", host_buf);
-            break;
-        case SWIM_NODE_SUSPECT:
-            printf("Node SUSPECT: %s\n", host_buf);
-            break;
-        case SWIM_NODE_DOWN:
-            printf("Node DOWN: %s\n", host_buf);
-            break;
-    }
-}
-
-// Subscribe
-swim_subscribe("my_cluster", my_event_cb, NULL);
-
-// Unsubscribe when done
-swim_unsubscribe("my_cluster", my_event_cb, NULL);
+int swim_leave(const char *name);
 ```
 
-### Hint that a node is alive
+#### Arguments
+- `name`: The name of the instance. Defaults to `"swim"`
+  if `NULL`.
 
-When your application already communicates with peers over
-another channel (e.g., a successful TCP/HTTP request), this
-exchange is first-hand proof of reachability. Use the hint
-API to feed this evidence into the failure detector:
+#### Return Value
+Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
+#### Mechanics & Thread-Safety
+Acquires the global registry lock, extracts the instance,
+stops the background loop, increments the incarnation count,
+directly broadcasts a `DEAD` gossip event to up to
+`max(⌈N×0.25⌉, 8)` random peers, closes the UDP socket,
+terminates active timers, joins the worker thread, and
+releases memory. Thread-safe.
+
+---
+
+### `swim_members`
+
+Retrieves a snapshot of the current membership registry.
+
+#### Signature
 ```c
-swim_node_id_t peer;
-swim_node_id_parse(&peer, "10.0.0.2:7771:c1");
-swim_hint_alive("my_cluster", &peer);
+int swim_members(const char *name, swim_member_t *out_list, int max_len, bool include_dead);
 ```
 
-This hint is asynchronous and advisory:
-- A **suspected** peer is restored to alive locally, its
-  suspicion timer cancelled, and an `alive` event is
-  re-gossiped.
-- An **alive** peer has no status change.
-- A **dead** peer is not revived.
-- In-flight probes to that target are cancelled to
-  avoid false-positive suspicion triggers.
+#### Arguments
+- `name`: The name of the instance. Defaults to `"swim"`
+  if `NULL`.
+- `out_list`: Pre-allocated buffer of `swim_member_t`
+  elements.
+- `max_len`: Capacity of the `out_list` buffer.
+- `include_dead`: If `true`, returns dead/quarantined entries.
+  If `false`, returns only alive and suspect nodes.
+
+#### Return Value
+Returns the number of elements written to `out_list` on
+success (can be `0` or greater). Returns `-1` on error:
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+- `SWIM_ERR_INVALID`: `out_list` is NULL or `max_len <= 0`.
+
+#### Mechanics & Thread-Safety
+Acquires the instance mutex, copies matching elements
+directly to the provided array, and releases the lock.
+Thread-safe.
+
+---
+
+### `swim_subscribe`
+
+Registers a subscriber callback function to receive
+membership events (joins, suspicions, and node failures).
+
+#### Signature
+```c
+int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
+```
+
+#### Arguments
+- `name`: The name of the instance. Defaults to `"swim"`
+  if `NULL`.
+- `callback`: A function pointer of type `swim_callback_t`.
+- `ctx`: Opaque context pointer passed back to the callback.
+
+#### Callback Prototype
+```c
+typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const swim_node_id_t *node);
+```
+Where `event` is:
+- `SWIM_NODE_UP`: A new node has joined or suspect node revived.
+- `SWIM_NODE_SUSPECT`: A node missed a ping.
+- `SWIM_NODE_DOWN`: A node was declared dead or left.
+
+#### Return Value
+Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+- `SWIM_ERR_INVALID`: `callback` is NULL.
+- `SWIM_ERR_FULL`: Maximum subscriber limit (16) reached.
+
+#### Mechanics & Thread-Safety
+Acquires the instance mutex to register the callback.
+**Caution**: Callback functions are executed in the context
+of the background worker thread. Callbacks must be quick,
+non-blocking, and thread-safe.
+
+---
+
+### `swim_unsubscribe`
+
+Deregisters a previously registered subscriber callback.
+
+#### Signature
+```c
+int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
+```
+
+#### Arguments
+- `name`: The name of the instance. Defaults to `"swim"`
+  if `NULL`.
+- `callback`: Callback function pointer to deregister.
+- `ctx`: Associated context pointer matching subscription.
+
+#### Return Value
+Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+
+#### Mechanics & Thread-Safety
+Acquires the instance lock, searches for a matching
+callback and context, swaps it with the last registered
+subscriber, and updates count. Thread-safe.
+
+---
+
+### `swim_hint_alive`
+
+Feeds an out-of-band reachability signal into the failure
+detector to cancel suspicion and revive a node.
+
+#### Signature
+```c
+int swim_hint_alive(const char *name, const swim_node_id_t *peer);
+```
+
+#### Arguments
+- `name`: The name of the instance. Defaults to `"swim"`
+  if `NULL`.
+- `peer`: Pointer to the `swim_node_id_t` identifying
+  the target peer node.
+
+#### Return Value
+Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+- `SWIM_ERR_INVALID`: `peer` is NULL.
+
+#### Mechanics & Thread-Safety
+Acquires the instance lock. If the peer is currently in
+`SUSPECT` status, it revives the node to `ALIVE` locally,
+cancels its suspicion timer, enqueues an `alive` gossip
+event, and triggers a `SWIM_NODE_UP` notification. Also
+cancels in-flight probe timeouts to avoid immediate
+re-suspicion. Releases the lock. Thread-safe.
+
+---
+
+### Node ID Helpers
+
+```c
+// Parse string format "host:port" or "host:port:cookie"
+int swim_node_id_parse(swim_node_id_t *id, const char *str);
+
+// Format node ID back to string
+int swim_node_id_format(const swim_node_id_t *id, char *buf, size_t size);
+
+// Compare two node IDs (returns negative, zero, or positive)
+int swim_node_id_compare(const swim_node_id_t *a, const swim_node_id_t *b);
+```
+
+---
+
+### Error Handling
+
+Thread-local error states can be inspected using the following
+utility functions:
+
+```c
+// Retrieve thread-local error details string
+const char *swim_errmsg(void);
+
+// Retrieve error code description
+const char *swim_strerror(int err);
+```
 
 ---
 
