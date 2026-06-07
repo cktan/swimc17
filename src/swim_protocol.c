@@ -35,6 +35,26 @@ typedef struct {
   void *ctx;
 } swim_sub_t;
 
+// A membership change discovered inside a critical section. Callbacks are
+// never run at the point of discovery (that would invoke user code while
+// holding inst->mutex, deadlocking if the callback re-enters the API).
+// Instead they are queued here and dispatched after the locks are released.
+typedef struct {
+  swim_event_t event;
+  swim_node_id_t node;
+} pending_notify_t;
+
+// A self-contained batch of work taken out of an instance under its lock and
+// then dispatched after unlocking. It holds copies only (no pointers into the
+// instance), so dispatch touches nothing owned by the instance and is immune
+// to the instance being freed concurrently (e.g. by swim_leave).
+typedef struct {
+  pending_notify_t *items;
+  int count;
+  swim_sub_t subs[16];
+  int sub_count;
+} notify_batch_t;
+
 typedef enum {
   PROBE_NONE = 0,
   PROBE_DIRECT,
@@ -93,7 +113,12 @@ struct swim_instance_t {
 
   swim_sub_t subscribers[16];
   int subscriber_count;
-  
+
+  // Notifications discovered under the lock, dispatched after unlocking.
+  pending_notify_t *pending;
+  int pending_count;
+  int pending_capacity;
+
   uint64_t current_tick;
 };
 
@@ -116,7 +141,7 @@ static swim_instance_t *find_instance(const char *name) {
 // Forward declarations
 static void *swim_protocol_thread_entry(void *arg);
 static void *swim_protocol_loop(swim_instance_t *instance);
-static void notify_subscribers(swim_instance_t *inst, swim_event_t event, const swim_node_id_t *node);
+static void queue_notification(swim_instance_t *inst, swim_event_t event, const swim_node_id_t *node);
 static void send_ping(swim_instance_t *inst, const swim_node_id_t *dest, uint32_t seq);
 static void send_ack(swim_instance_t *inst, const swim_node_id_t *dest, uint32_t seq);
 static void send_ping_req(swim_instance_t *inst, const swim_node_id_t *helper, const swim_node_id_t *target, uint32_t seq);
@@ -204,7 +229,7 @@ static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
       // Declare dead
       swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD, target, m->incarnation, get_monotonic_time_ms());
       swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_DEAD, target, m->incarnation, 1);
-      notify_subscribers(inst, SWIM_NODE_DOWN, target);
+      queue_notification(inst, SWIM_NODE_DOWN, target);
     }
   }
   free(target);
@@ -256,7 +281,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
     if (m && m->status == SWIM_STATUS_ALIVE) {
       swim_membership_apply_event(inst->membership, SWIM_STATUS_SUSPECT, &target, m->incarnation, get_monotonic_time_ms());
       swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_SUSPECT, &target, m->incarnation, 1);
-      notify_subscribers(inst, SWIM_NODE_SUSPECT, &target);
+      queue_notification(inst, SWIM_NODE_SUSPECT, &target);
 
       // Start suspicion timer
       swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
@@ -347,10 +372,53 @@ static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest, cons
   send_message(inst, dest, &msg);
 }
 
-static void notify_subscribers(swim_instance_t *inst, swim_event_t event, const swim_node_id_t *node) {
-  for (int i = 0; i < inst->subscriber_count; i++) {
-    inst->subscribers[i].cb(inst->subscribers[i].ctx, event, node);
+// Queue a membership change for later delivery. Caller must hold inst->mutex.
+// Does not invoke any callback. On allocation failure the notification is
+// dropped (membership state is still correct; only the observer signal is
+// lost), which is preferable to running callbacks under the lock.
+static void queue_notification(swim_instance_t *inst, swim_event_t event, const swim_node_id_t *node) {
+  if (inst->pending_count == inst->pending_capacity) {
+    int new_cap = inst->pending_capacity == 0 ? 16 : inst->pending_capacity * 2;
+    pending_notify_t *p = realloc(inst->pending, new_cap * sizeof(pending_notify_t));
+    if (!p) return;
+    inst->pending = p;
+    inst->pending_capacity = new_cap;
   }
+  inst->pending[inst->pending_count].event = event;
+  inst->pending[inst->pending_count].node = *node;
+  inst->pending_count++;
+}
+
+// Move the queued notifications and a snapshot of the subscriber list out of
+// the instance into a self-contained batch. Caller must hold inst->mutex.
+// After this returns the instance owns no pending work, so the batch can be
+// dispatched after every lock is dropped.
+static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
+  batch->items = inst->pending;
+  batch->count = inst->pending_count;
+  inst->pending = NULL;
+  inst->pending_count = 0;
+  inst->pending_capacity = 0;
+
+  batch->sub_count = inst->subscriber_count;
+  if (batch->sub_count > 0) {
+    memcpy(batch->subs, inst->subscribers, batch->sub_count * sizeof(swim_sub_t));
+  }
+}
+
+// Deliver a batch to its subscribers. MUST be called with no locks held: the
+// callbacks may re-enter the public API. Touches only the batch (stack/heap
+// copies), never the originating instance, so it is safe even if that instance
+// is being torn down concurrently. Consumes (frees) the batch.
+static void dispatch_notifications(notify_batch_t *batch) {
+  for (int i = 0; i < batch->count; i++) {
+    for (int s = 0; s < batch->sub_count; s++) {
+      batch->subs[s].cb(batch->subs[s].ctx, batch->items[i].event, &batch->items[i].node);
+    }
+  }
+  free(batch->items);
+  batch->items = NULL;
+  batch->count = 0;
 }
 
 static void update_node_alive(swim_instance_t *inst, const swim_node_id_t *node) {
@@ -363,7 +431,7 @@ static void update_node_alive(swim_instance_t *inst, const swim_node_id_t *node)
     int rc = swim_membership_apply_event(inst->membership, SWIM_STATUS_ALIVE, node, 0, get_monotonic_time_ms());
     if (rc == 0) {
       swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, node, 0, 1);
-      notify_subscribers(inst, SWIM_NODE_UP, node);
+      queue_notification(inst, SWIM_NODE_UP, node);
     }
   } else if (m->status == SWIM_STATUS_SUSPECT) {
     swim_membership_set_alive(inst->membership, node, m->incarnation);
@@ -373,7 +441,7 @@ static void update_node_alive(swim_instance_t *inst, const swim_node_id_t *node)
     swim_timer_cancel(inst->timer, alarm_name);
     
     swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, node, m->incarnation, 1);
-    notify_subscribers(inst, SWIM_NODE_UP, node);
+    queue_notification(inst, SWIM_NODE_UP, node);
   }
 }
 
@@ -419,13 +487,13 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, &ev->id, ev->incarnation, 1);
         
         if (ev->status == SWIM_STATUS_DEAD) {
-          notify_subscribers(inst, SWIM_NODE_DOWN, &ev->id);
+          queue_notification(inst, SWIM_NODE_DOWN, &ev->id);
           // Cancel suspicion timer if any
           char alarm_name[384];
           snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", ev->id.host, ev->id.port);
           swim_timer_cancel(inst->timer, alarm_name);
         } else if (ev->status == SWIM_STATUS_SUSPECT) {
-          notify_subscribers(inst, SWIM_NODE_SUSPECT, &ev->id);
+          queue_notification(inst, SWIM_NODE_SUSPECT, &ev->id);
           
           // Start suspicion timer
           swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
@@ -436,7 +504,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
             swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100, alarm_name, suspicion_timer_cb, inst, suspect_param);
           }
         } else if (ev->status == SWIM_STATUS_ALIVE) {
-          notify_subscribers(inst, SWIM_NODE_UP, &ev->id);
+          queue_notification(inst, SWIM_NODE_UP, &ev->id);
           // Cancel suspicion timer
           char alarm_name[384];
           snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", ev->id.host, ev->id.port);
@@ -522,10 +590,13 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
 
     // 1. Tick logical timer
     while (now > exp) {
+      notify_batch_t batch;
       pthread_mutex_lock(&instance->mutex);
       instance->current_tick++;
       swim_timer_tick(instance->timer);
+      take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
+      dispatch_notifications(&batch);
       exp += 100;
     }
 
@@ -540,9 +611,12 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
 
     int ret = poll(&pfd, 1, timeout_ms);
     if (ret > 0 && (pfd.revents & POLLIN)) {
+      notify_batch_t batch;
       pthread_mutex_lock(&instance->mutex);
       swim_protocol_handle_incoming(instance);
+      take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
+      dispatch_notifications(&batch);
     }
   }
   return NULL;
@@ -655,6 +729,7 @@ error_cleanup:
   if (inst->membership) swim_membership_final(inst->membership);
   if (inst->gossip_queue) swim_gossip_queue_final(inst->gossip_queue);
   free(inst->seeds);
+  free(inst->pending);
   free(inst);
   pthread_mutex_unlock(&g_instances_mutex);
   return -1;
@@ -740,6 +815,7 @@ int swim_leave(const char *name) {
   swim_gossip_queue_final(inst->gossip_queue);
   free(inst->seeds);
   free(inst->shuffle_list);
+  free(inst->pending);
   pthread_mutex_destroy(&inst->mutex);
   free(inst);
 
@@ -854,7 +930,7 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
       // Re-announce as alive
       swim_membership_set_alive(inst->membership, peer, m->incarnation);
       swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, peer, m->incarnation, 1);
-      notify_subscribers(inst, SWIM_NODE_UP, peer);
+      queue_notification(inst, SWIM_NODE_UP, peer);
     }
 
     // Cancel outstanding probes to this target
@@ -864,7 +940,13 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
       swim_timer_cancel(inst->timer, "probe_timeout");
     }
   }
+  notify_batch_t batch;
+  take_notifications(inst, &batch);
   pthread_mutex_unlock(&inst->mutex);
   pthread_mutex_unlock(&g_instances_mutex);
+
+  // Callbacks run with no locks held and touch only the batch, so they may
+  // re-enter the API and are unaffected if the instance is torn down meanwhile.
+  dispatch_notifications(&batch);
   return 0;
 }

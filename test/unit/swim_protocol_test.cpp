@@ -13,6 +13,7 @@ extern "C" {
 #include <unistd.h>
 #include <vector>
 #include <pthread.h>
+#include <atomic>
 
 namespace {
 
@@ -369,5 +370,107 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   swim_udp_final(requester);
   swim_udp_final(target);
   swim_leave("relay_node");
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// Regression for H3: a subscriber callback must be able to re-enter the public
+// API. Callbacks fire after the instance lock is released, so a callback that
+// calls swim_members() succeeds; before the fix this self-deadlocked the worker
+// thread (and would hang the whole suite here).
+static std::atomic<bool> g_reentrant_ok{false};
+static void reentrant_members_cb(void *ctx, swim_event_t event, const swim_node_id_t *node) {
+  (void)ctx; (void)event; (void)node;
+  swim_member_t m[8];
+  int n = swim_members("h3_reentrant", m, 8, true);
+  (void)n;
+  g_reentrant_ok = true;
+}
+
+TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
+  swim_node_id_t self_id, mock_id;
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20401:c1") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20402:mock") == 0);
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.host = "127.0.0.1";
+  opts.port = 20401;
+  opts.cookie = "c1";
+  opts.name = "h3_reentrant";
+  opts.protocol_period_ms = 400;
+  opts.ping_timeout_ms = 100;
+
+  g_reentrant_ok = false;
+  REQUIRE(swim_start(&opts) == 0);
+  REQUIRE(swim_subscribe("h3_reentrant", reentrant_members_cb, nullptr) == 0);
+
+  // A raw PING from a mock makes the node discover it -> NODE_UP -> callback.
+  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20402);
+  REQUIRE(mock_udp != nullptr);
+  swim_message_t msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.type = SWIM_MSG_PING;
+  msg.sender = mock_id;
+  msg.seq = 1;
+  uint8_t buf[256];
+  int len = swim_codec_encode(&msg, buf, sizeof(buf));
+  REQUIRE(len > 0);
+  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
+
+  usleep(200000); // if the callback deadlocked, the worker would be stuck here
+
+  CHECK(g_reentrant_ok == true);
+
+  swim_udp_final(mock_udp);
+  swim_leave("h3_reentrant");
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// Regression for H3 lifetime: swim_hint_alive must not touch the instance after
+// releasing its locks, so it can race swim_leave (which frees the instance)
+// without a use-after-free. Hammer hint_alive from several threads while the
+// main thread leaves. Meaningful under ASan/TSan.
+static std::atomic<bool> g_race_stop{false};
+struct RaceArg { const char *name; swim_node_id_t peer; };
+static void *hint_spammer(void *a) {
+  RaceArg *r = (RaceArg *)a;
+  while (!g_race_stop.load()) {
+    swim_hint_alive(r->name, &r->peer);
+  }
+  return nullptr;
+}
+static void noop_cb(void *ctx, swim_event_t e, const swim_node_id_t *n) {
+  (void)ctx; (void)e; (void)n;
+}
+
+TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe (H3)") {
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.host = "127.0.0.1";
+  opts.port = 20403;
+  opts.cookie = "c1";
+  opts.name = "h3_race";
+  opts.protocol_period_ms = 100;
+  opts.ping_timeout_ms = 50;
+
+  REQUIRE(swim_start(&opts) == 0);
+  REQUIRE(swim_subscribe("h3_race", noop_cb, nullptr) == 0);
+
+  RaceArg arg;
+  arg.name = "h3_race";
+  REQUIRE(swim_node_id_parse(&arg.peer, "127.0.0.1:20404:p") == 0);
+
+  g_race_stop = false;
+  pthread_t th[4];
+  for (int i = 0; i < 4; i++) {
+    REQUIRE(pthread_create(&th[i], nullptr, hint_spammer, &arg) == 0);
+  }
+
+  usleep(100000); // let the spammers spin against the live instance
+  CHECK(swim_leave("h3_race") == 0);
+  g_race_stop = true;
+  for (int i = 0; i < 4; i++) {
+    pthread_join(th[i], nullptr);
+  }
   swim_set_error(SWIM_OK, nullptr);
 }
