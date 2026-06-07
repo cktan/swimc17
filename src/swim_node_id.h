@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <assert.h>
 #include "swim_errno.h"
 
 #ifdef __cplusplus
@@ -28,8 +29,8 @@ typedef struct {
 static inline int swim_node_id_compare(const swim_node_id_t *a, const swim_node_id_t *b) {
   assert(a && b);
   int r = strcmp(a->host, b->host);
-  r = (r ? r :(a->port != b->port) ? ((a->port < b->port) ? -1 : 1));
-  r = (r ? r :strcmp(a->cookie, b->cookie));
+  r = (r ? r : (a->port != b->port) ? ((a->port < b->port) ? -1 : 1) : 0);
+  r = (r ? r : strcmp(a->cookie, b->cookie));
   return r;
 }
 
