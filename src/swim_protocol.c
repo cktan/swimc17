@@ -9,6 +9,7 @@
 #include <math.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,7 +86,7 @@ struct swim_instance_t {
 
   pthread_t thread;
   pthread_mutex_t mutex;
-  bool running;
+  atomic_bool running;
 
   uint64_t protocol_period_ms;
   uint64_t ping_timeout_ms;
@@ -643,7 +644,7 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
   uint64_t now = get_monotonic_time_ms();
   uint64_t exp = now + 100;
 
-  while (instance->running) {
+  while (atomic_load_explicit(&instance->running, memory_order_relaxed)) {
     now = get_monotonic_time_ms();
 
     // 1. Tick logical timer
@@ -770,7 +771,7 @@ int swim_start(const swim_start_opts_t *opts) {
 
   // Initialize thread synchronization
   pthread_mutex_init(&inst->mutex, NULL);
-  inst->running = true;
+  atomic_store_explicit(&inst->running, true, memory_order_relaxed);
 
   // Seed rand
   srand((unsigned int)time(NULL) ^ (unsigned int)pthread_self());
@@ -790,7 +791,7 @@ int swim_start(const swim_start_opts_t *opts) {
   // Start background event loop thread
   if (pthread_create(&inst->thread, NULL, swim_protocol_thread_entry, inst) !=
       0) {
-    inst->running = false;
+    atomic_store_explicit(&inst->running, false, memory_order_relaxed);
     pthread_mutex_destroy(&inst->mutex);
     goto error_cleanup;
   }
@@ -838,10 +839,9 @@ int swim_leave(const char *name) {
     }
   }
 
-  // Stop the protocol task
-  pthread_mutex_lock(&inst->mutex);
-  inst->running = false;
-  pthread_mutex_unlock(&inst->mutex);
+  // Stop the protocol task. running is atomic, so the worker's unlocked
+  // read in swim_protocol_loop sees this store without a data race.
+  atomic_store_explicit(&inst->running, false, memory_order_relaxed);
 
   pthread_mutex_unlock(&g_instances_mutex);
 
