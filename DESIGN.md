@@ -143,8 +143,9 @@ the design choices.
   `N` = count of alive + suspect nodes. Recalculated
   dynamically as membership changes.
 - **Piggyback budget:** fill outgoing messages up to the 1400-byte
-  MTU. To ensure headers fit, the gossip payload is capped
-  to MTU minus a safety margin (128 bytes).
+  MTU. Since headers are packed first and the remaining buffer space
+  is computed dynamically, the gossip payload fills the remaining
+  space directly without exceeding the 1400-byte limit.
 - **Event types:** `alive`, `suspect`, `dead`.
   No user-defined event type.
 - **Priority ordering:** dead → suspect → alive.
