@@ -22,6 +22,13 @@ static uint64_t get_monotonic_time_ms(void) {
   return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
+// Helper to get wall clock time in milliseconds
+static uint64_t get_now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
 // Structures for internal protocol use
 typedef struct {
   swim_callback_t cb;
@@ -602,8 +609,8 @@ int swim_start(const swim_start_opts_t *opts) {
   inst->self_id.port = opts->port;
   strncpy(inst->self_id.cookie, opts->cookie ? opts->cookie : "", sizeof(inst->self_id.cookie) - 1);
 
-  // Seed incarnation with current time
-  inst->incarnation = get_monotonic_time_ms();
+  // Seed incarnation with current time (wall-clock time in milliseconds)
+  inst->incarnation = get_now_ms();
   inst->seq = 1;
 
   // Copy seeds list
@@ -698,7 +705,7 @@ int swim_leave(const char *name) {
       if (fanout < 8) fanout = 8;
       
       // Bump incarnation first
-      inst->incarnation = get_monotonic_time_ms();
+      inst->incarnation = get_now_ms();
       
       // Send directly to up to fanout peers
       swim_message_t leave_msg;
