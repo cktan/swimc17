@@ -342,23 +342,45 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
 // Helper functions moved above
 
-// Helper to send messages
-static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
-                         swim_message_t *msg) {
-  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+int pack_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
+                 const swim_node_id_t *peer, swim_gossip_queue_t *q,
+                 uint32_t active_members, uint8_t *buf, int bufsz) {
+  if (!sender || !buf || bufsz <= 0) {
+    return -1;
+  }
 
-  // Calculate actual header size to determine remaining room for gossip
-  int header_size = 6; // message type (1B) + seq (4B) + event_count (1B)
-  header_size += 4 + strlen(msg->sender.host) +
-                 strlen(msg->sender.cookie); // sender Node ID
-  if (msg->type == SWIM_MSG_PING_REQ || msg->type == SWIM_MSG_FWD_ACK) {
-    header_size +=
-        4 + strlen(msg->peer.host) + strlen(msg->peer.cookie); // peer Node ID
+  uint8_t *p = buf;
+  uint8_t *end = buf + bufsz;
+  int n;
+
+  // 1. Message Type (1 byte)
+  n = swim_encode_int8(type, p, end);
+  if (n < 0) { return -1; }
+  p += n;
+
+  // 2. Sequence number (4 bytes)
+  n = swim_encode_int32(seq, p, end);
+  if (n < 0) { return -1; }
+  p += n;
+
+  // 3. Sender Node ID
+  n = swim_encode_node_id(sender, p, end);
+  if (n < 0) { return -1; }
+  p += n;
+
+  // 4. Peer Node ID (target for ping_req, source for fwd_ack)
+  if (type == SWIM_MSG_PING_REQ || type == SWIM_MSG_FWD_ACK) {
+    if (!peer) {
+      return -1;
+    }
+    n = swim_encode_node_id(peer, p, end);
+    if (n < 0) { return -1; }
+    p += n;
   }
 
   // Cap gossip payload budget to min(1272, remaining packet room) per DESIGN §8
   int budget = 1272;
-  int remaining = SWIM_MAX_PACKET_SIZE - header_size;
+  int remaining = (int)(end - p);
   if (budget > remaining) {
     budget = remaining;
   }
@@ -366,11 +388,36 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
     budget = 0;
   }
 
-  int active_members = swim_membership_count(inst->membership);
-  msg->event_count = swim_gossip_queue_pack(
-      inst->gossip_queue, active_members, budget, msg->events, SWIM_MAX_EVENTS);
+  int gossip_bytes;
+  if (q) {
+    gossip_bytes = swim_gossip_queue_pack_ex(
+        q, active_members, (char *)p, budget);
+  } else {
+    n = swim_encode_int16(0, p, end);
+    if (n < 0) { return -1; }
+    gossip_bytes = n;
+  }
 
-  int len = swim_codec_encode(msg, buf, sizeof(buf));
+  if (gossip_bytes < 0) {
+    return -1;
+  }
+
+  p += gossip_bytes;
+  return (int)(p - buf);
+}
+
+int unpack_message(const uint8_t *buf, int len, swim_message_t *msg) {
+  return swim_codec_decode(buf, len, msg);
+}
+
+// Helper to send messages
+static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
+                         uint8_t type, const swim_node_id_t *sender,
+                         uint32_t seq, const swim_node_id_t *peer) {
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  swim_gossip_queue_t *q_to_pass = (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
+  int len = pack_message(type, sender, seq, peer, q_to_pass,
+                         swim_membership_count(inst->membership), buf, sizeof(buf));
   if (len > 0) {
     swim_udp_send(inst->udp, dest, buf, len);
   } else {
@@ -385,44 +432,22 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
 
 static void send_ping(swim_instance_t *inst, const swim_node_id_t *dest,
                       uint32_t seq) {
-  swim_message_t msg;
-  memset(&msg, 0, sizeof(msg));
-  msg.type = SWIM_MSG_PING;
-  msg.sender = inst->self_id;
-  msg.seq = seq;
-  send_message(inst, dest, &msg);
+  send_message(inst, dest, SWIM_MSG_PING, &inst->self_id, seq, NULL);
 }
 
 static void send_ack(swim_instance_t *inst, const swim_node_id_t *dest,
                      uint32_t seq) {
-  swim_message_t msg;
-  memset(&msg, 0, sizeof(msg));
-  msg.type = SWIM_MSG_ACK;
-  msg.sender = inst->self_id;
-  msg.seq = seq;
-  send_message(inst, dest, &msg);
+  send_message(inst, dest, SWIM_MSG_ACK, &inst->self_id, seq, NULL);
 }
 
 static void send_ping_req(swim_instance_t *inst, const swim_node_id_t *helper,
                           const swim_node_id_t *target, uint32_t seq) {
-  swim_message_t msg;
-  memset(&msg, 0, sizeof(msg));
-  msg.type = SWIM_MSG_PING_REQ;
-  msg.sender = inst->self_id;
-  msg.seq = seq;
-  msg.peer = *target;
-  send_message(inst, helper, &msg);
+  send_message(inst, helper, SWIM_MSG_PING_REQ, &inst->self_id, seq, target);
 }
 
 static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest,
                          const swim_node_id_t *source, uint32_t seq) {
-  swim_message_t msg;
-  memset(&msg, 0, sizeof(msg));
-  msg.type = SWIM_MSG_FWD_ACK;
-  msg.sender = inst->self_id;
-  msg.seq = seq;
-  msg.peer = *source;
-  send_message(inst, dest, &msg);
+  send_message(inst, dest, SWIM_MSG_FWD_ACK, &inst->self_id, seq, source);
 }
 
 // Queue a membership change for later delivery. Caller must hold inst->mutex.
@@ -521,18 +546,22 @@ static void relay_gc(swim_instance_t *inst) {
   }
 }
 
+static int recv_message(swim_instance_t *inst, swim_node_id_t *src, swim_message_t *msg) {
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  int len = swim_udp_recv(inst->udp, src, buf, sizeof(buf));
+  if (len <= 0) {
+    return -1;
+  }
+  return unpack_message(buf, len, msg);
+}
+
 // Packet receiver and protocol handler
 static void swim_protocol_handle_incoming(swim_instance_t *inst) {
   swim_node_id_t src;
-  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  swim_message_t msg;
   int rc;
 
-  int len = swim_udp_recv(inst->udp, &src, buf, sizeof(buf));
-  if (len <= 0)
-    return;
-
-  swim_message_t msg;
-  if (swim_codec_decode(buf, len, &msg) != 0)
+  if (recv_message(inst, &src, &msg) != 0)
     return;
 
   // Since UDP recv doesn't contain the cookie, populate it from the decoded
@@ -647,6 +676,29 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       swim_timer_cancel(inst->timer, "probe_timeout");
     }
     break;
+
+  case SWIM_MSG_LEAVE: {
+    // Graceful leave notification: transition the sender node to DEAD.
+    uint64_t inc = 0;
+    const swim_member_t *m_info = swim_membership_get(inst->membership, &msg.sender);
+    if (m_info) {
+      inc = m_info->incarnation + 1;
+    } else {
+      inc = get_now_ms();
+    }
+    rc = swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD, &msg.sender,
+                                     inc, get_monotonic_time_ms());
+    if (rc == 0) {
+      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_DEAD, &msg.sender,
+                                inc, 1);
+      queue_notification(inst, SWIM_NODE_DOWN, &msg.sender);
+      char alarm_name[384];
+      snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", msg.sender.host,
+               msg.sender.port);
+      swim_timer_cancel(inst->timer, alarm_name);
+    }
+    break;
+  }
   }
 }
 
@@ -881,26 +933,11 @@ int swim_leave(const char *name) {
       // Bump incarnation first
       inst->incarnation = get_now_ms();
 
-      // Send directly to up to fanout peers
-      swim_message_t leave_msg;
-      memset(&leave_msg, 0, sizeof(leave_msg));
-      leave_msg.type = SWIM_MSG_ACK; // Graceful stop packet format
-      leave_msg.sender = inst->self_id;
-      leave_msg.seq = inst->seq++;
-      leave_msg.event_count = 1;
-      leave_msg.events[0].id = inst->self_id;
-      leave_msg.events[0].status = SWIM_STATUS_DEAD;
-      leave_msg.events[0].incarnation = inst->incarnation;
-
-      uint8_t buf[SWIM_MAX_PACKET_SIZE];
-      int len = swim_codec_encode(&leave_msg, buf, sizeof(buf));
-      if (len > 0) {
-        for (uint32_t i = 0; i < fanout && count > 0; i++) {
-          int idx = rand() % count;
-          swim_udp_send(inst->udp, &list[idx].id, buf, len);
-          list[idx] = list[count - 1];
-          count--;
-        }
+      for (uint32_t i = 0; i < fanout && count > 0; i++) {
+        int idx = rand() % count;
+        send_message(inst, &list[idx].id, SWIM_MSG_LEAVE, &inst->self_id, inst->seq++, NULL);
+        list[idx] = list[count - 1];
+        count--;
       }
       free(list);
     }

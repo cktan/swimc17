@@ -3,6 +3,21 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+static inline void write_uint16(uint8_t *p, uint16_t val) {
+  p[0] = (val >> 8) & 0xFF;
+  p[1] = val & 0xFF;
+}
+
+static inline void write_uint64(uint8_t *p, uint64_t val) {
+  p[0] = (val >> 56) & 0xFF;
+  p[1] = (val >> 48) & 0xFF;
+  p[2] = (val >> 40) & 0xFF;
+  p[3] = (val >> 32) & 0xFF;
+  p[4] = (val >> 24) & 0xFF;
+  p[5] = (val >> 16) & 0xFF;
+  p[6] = (val >> 8) & 0xFF;
+  p[7] = val & 0xFF;
+}
 
 typedef struct {
   swim_member_t event;
@@ -156,49 +171,112 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
   return 0;
 }
 
-int swim_gossip_queue_pack(swim_gossip_queue_t *q, uint32_t cluster_size,
-                           size_t max_bytes, swim_member_t *out_events,
-                           int max_len) {
-  if (!q || !out_events || max_len < 0) {
+int swim_gossip_queue_pack_ex(swim_gossip_queue_t *q, uint32_t cluster_size,
+                              char* buf, int bufsz) {
+  if (!q || !buf || bufsz < 0) {
     return swim_set_error(SWIM_ERR_INVALID,
-                          "Invalid arguments to swim_gossip_queue_pack");
+                          "Invalid arguments to swim_gossip_queue_pack_ex");
+  }
+
+  if (bufsz < 2) {
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Buffer too small for swim_gossip_queue_pack_ex header");
   }
 
   if (q->count == 0) {
-    return 0;
+    write_uint16((uint8_t *)buf, 0);
+    return 2;
   }
 
   // Sort entries to establish priority order (DEAD > SUSPECT > ALIVE) and
   // lowest transmit count
   qsort(q->entries, q->count, sizeof(gossip_entry_t), compare_entries);
 
+  bool keep[q->count];
+  memset(keep, 1, q->count);
+
   uint32_t limit = get_transmit_limit(cluster_size);
-  size_t current_bytes = 0;
   int packed_count = 0;
-  int write_idx = 0;
+  int offset = 2;
 
+  // First loop: Pack entries until buffer budget is exhausted
   for (int i = 0; i < q->count; i++) {
-    size_t esize = event_wire_size(&q->entries[i].event.id);
-    bool packed = false;
+    gossip_entry_t *entry = &q->entries[i];
+    const swim_member_t *ev = &entry->event;
 
-    if (packed_count < max_len && current_bytes + esize <= max_bytes) {
-      out_events[packed_count] = q->entries[i].event;
-      current_bytes += esize;
-      packed_count++;
-      packed = true;
+    size_t host_len = strlen(ev->id.host);
+    size_t cookie_len = strlen(ev->id.cookie);
+
+    // Calculate node ID body size:
+    // host:encoded-string -> 2 + host_len
+    // port:int2 -> 2
+    // cookie:string -> 2 + cookie_len
+    size_t node_id_body_size = 2 + host_len + 2 + 2 + cookie_len;
+    size_t node_id_total_size = 2 + node_id_body_size;
+
+    // Calculate member body size:
+    // {encoded-node_id} -> node_id_total_size
+    // {status:int1} -> 1
+    // {incarnation:int64} -> 8
+    size_t member_body_size = node_id_total_size + 1 + 8;
+    size_t member_total_size = 2 + member_body_size;
+
+    if (offset + member_total_size > (size_t)bufsz) {
+      // Out of buffer space: stop packing
+      break;
     }
 
-    if (packed) {
-      q->entries[i].transmit_count++;
-      // Keep in queue only if it hasn't reached the transmit limit
-      if (q->entries[i].transmit_count < limit * q->entries[i].multiplier) {
-        if (write_idx != i) {
-          q->entries[write_idx] = q->entries[i];
-        }
-        write_idx++;
-      }
-    } else {
-      // Keep unmodified
+    // Pack the member
+    uint8_t *p = (uint8_t *)buf + offset;
+
+    // member LEN
+    write_uint16(p, (uint16_t)member_body_size);
+    p += 2;
+
+    // node_id LEN
+    write_uint16(p, (uint16_t)node_id_body_size);
+    p += 2;
+
+    // host LEN
+    write_uint16(p, (uint16_t)host_len);
+    p += 2;
+
+    // host chars
+    memcpy(p, ev->id.host, host_len);
+    p += host_len;
+
+    // port
+    write_uint16(p, ev->id.port);
+    p += 2;
+
+    // cookie LEN
+    write_uint16(p, (uint16_t)cookie_len);
+    p += 2;
+
+    // cookie chars
+    memcpy(p, ev->id.cookie, cookie_len);
+    p += cookie_len;
+
+    // status
+    *p = (uint8_t)ev->status;
+    p += 1;
+
+    // incarnation
+    write_uint64(p, ev->incarnation);
+    p += 8;
+
+    offset += member_total_size;
+    packed_count++;
+
+    // Increment transmit count and check pruning threshold
+    entry->transmit_count++;
+    keep[i] = (entry->transmit_count < limit * entry->multiplier); 
+  }
+
+  // Second loop: Squeeze out all pruned (not-keep) entries
+  int write_idx = 0;
+  for (int i = 0; i < q->count; i++) {
+    if (keep[i]) {
       if (write_idx != i) {
         q->entries[write_idx] = q->entries[i];
       }
@@ -207,8 +285,11 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *q, uint32_t cluster_size,
   }
 
   q->count = write_idx;
-  return packed_count;
+
+  write_uint16((uint8_t *)buf, (uint16_t)packed_count);
+  return offset;
 }
+
 
 int swim_gossip_queue_size(const swim_gossip_queue_t *q) {
   return q ? q->count : 0;

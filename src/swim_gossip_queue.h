@@ -44,24 +44,21 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
                               const swim_node_id_t *id, uint64_t incarnation,
                               uint32_t multiplier);
 
+
+
 /**
- * Pack events into an outgoing message buffer up to max_bytes budget.
- * Automatically increments transmit counts for packed events, and prunes
- * events that exceed their transmit limit (calculated dynamically using
- * cluster_size).
+ * Pack events into an outgoing message buffer using the new custom format.
+ * Writes as many packed members as possible directly into the provided buffer.
  *
  * @param q            The gossip queue instance.
- * @param cluster_size Number of alive + suspect nodes in the cluster (excluding
- * self).
- * @param max_bytes    Maximum byte size budget on the wire for the packed
- * events.
- * @param out_events   Output array of swim_member_t to receive packed events.
- * @param max_len      Size of the out_events array.
- * @return The number of events packed, or -1 on error.
+ * @param cluster_size Number of alive + suspect nodes in the cluster.
+ * @param buf          The output character buffer.
+ * @param bufsz        The size of the output buffer.
+ * @return The number of bytes consumed in buf on success, or -1 on error.
  */
-int swim_gossip_queue_pack(swim_gossip_queue_t *q, uint32_t cluster_size,
-                           size_t max_bytes, swim_member_t *out_events,
-                           int max_len);
+int swim_gossip_queue_pack_ex(swim_gossip_queue_t *q, uint32_t cluster_size,
+                              char* buf, int bufsz);
+
 
 /**
  * Return the number of events currently in the gossip queue.
