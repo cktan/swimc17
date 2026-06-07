@@ -827,6 +827,17 @@ int swim_leave(const char *name) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
+  // Remove from the registry before releasing the lock so a racing
+  // swim_leave/lookup can no longer find this instance (it gets BAD_STATE).
+  // After this point inst is private to this call and is torn down without
+  // holding the global lock.
+  for (int i = 0; i < 16; i++) {
+    if (g_instances[i] == inst) {
+      g_instances[i] = NULL;
+      break;
+    }
+  }
+
   // Stop the protocol task
   pthread_mutex_lock(&inst->mutex);
   inst->running = false;
@@ -836,19 +847,6 @@ int swim_leave(const char *name) {
 
   // Join background thread
   pthread_join(inst->thread, NULL);
-
-  pthread_mutex_lock(&g_instances_mutex);
-  // Perform cleanup
-  int slot = -1;
-  for (int i = 0; i < 16; i++) {
-    if (g_instances[i] == inst) {
-      slot = i;
-      break;
-    }
-  }
-  if (slot != -1) {
-    g_instances[slot] = NULL;
-  }
 
   // Graceful broadcast of self death directly to random peers (not via gossip
   // queue)
@@ -887,7 +885,6 @@ int swim_leave(const char *name) {
   pthread_mutex_destroy(&inst->mutex);
   free(inst);
 
-  pthread_mutex_unlock(&g_instances_mutex);
   return 0;
 }
 
