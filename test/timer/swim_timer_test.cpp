@@ -3,6 +3,7 @@
 
 extern "C" {
 #include "swim_timer.h"
+#include "swim_errno.h"
 }
 
 #include <cstdint>
@@ -261,4 +262,26 @@ TEST_CASE("ctx and param are passed through unchanged") {
   CHECK(cap.ctx == &cap);
   CHECK(cap.param == &marker);
   swim_timer_final(t);
+}
+
+TEST_CASE("swim_errno interface works as expected") {
+  // Verify default state
+  CHECK(swim_errno == SWIM_OK);
+  CHECK(strcmp(swim_errmsg, "") == 0);
+
+  // Set thread-local error state
+  swim_errno = SWIM_ERR_NOMEM;
+  snprintf(swim_errmsg, sizeof(swim_errmsg), "Failed to allocate memory");
+
+  CHECK(swim_errno == SWIM_ERR_NOMEM);
+  CHECK(strcmp(swim_errmsg, "Failed to allocate memory") == 0);
+
+  // Test swim_strerror mapping
+  CHECK(strcmp(swim_strerror(SWIM_OK), "Success") == 0);
+  CHECK(strcmp(swim_strerror(SWIM_ERR_NOMEM), "Out of memory") == 0);
+  CHECK(strcmp(swim_strerror(SWIM_ERR_INVALID), "Invalid argument") == 0);
+  CHECK(strcmp(swim_strerror(SWIM_ERR_FULL), "Container is full") == 0);
+  CHECK(strcmp(swim_strerror(SWIM_ERR_TIMEOUT), "Operation timed out") == 0);
+  CHECK(strcmp(swim_strerror(SWIM_ERR_BAD_STATE), "Object in bad state") == 0);
+  CHECK(strcmp(swim_strerror(999), "Unknown error") == 0);
 }

@@ -1,5 +1,5 @@
-HFILES := swim_timer.h
-CFILES := swim_timer.c
+HFILES := swim_timer.h swim_errno.h
+CFILES := swim_timer.c swim_errno.c
 OBJ := $(CFILES:.c=.o)
 
 # set up LIB_SHARED
@@ -33,10 +33,10 @@ all: $(EXEC) $(LIB) $(LIB_SHARED)
 
 *.o: $(HFILES)
 
-libswimc17.a: swim_timer.o
+libswimc17.a: $(OBJ)
 	ar -rcs $@ $^
 
-$(LIB_SHARED): swim_timer.o
+$(LIB_SHARED): $(OBJ)
 	$(CC) -shared -o $@ $^
 
 -include $(OBJ:%.o=%.d) $(EXEC:%=%.d)
