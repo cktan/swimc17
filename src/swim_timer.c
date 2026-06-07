@@ -6,14 +6,15 @@
 
 /* One alarm in the delta list. tick is the delay relative to the
  * predecessor element (or to "now" for the head). */
-typedef struct entry_t {
+typedef struct entry_t entry_t;
+struct entry_t {
   int tick;
   swim_timer_cb_t cb;
   void *ctx;
   void *param;
-  struct entry_t *next;
+  entry_t *next;
   char name[128];
-} entry_t;
+};
 
 struct swim_timer_t {
   entry_t *head;
