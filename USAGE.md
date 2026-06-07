@@ -126,20 +126,17 @@ named instance. If `NULL` is passed, the name defaults to
 
 ### `swim_start`
 
-Starts the background protocol worker thread and registers
-a new named cluster membership instance.
-
-#### Signature
 ```c
 int swim_start(const swim_start_opts_t *opts);
 ```
 
-#### Arguments
-- `opts`: Pointer to `swim_start_opts_t` structure. Must be
-  non-NULL, and `opts->host` and `opts->port` must be
-  configured.
+Starts the background protocol worker thread and registers
+a new named cluster membership instance.
 
-#### Return Value
+The `opts` argument is a pointer to a `swim_start_opts_t`
+structure. It must be non-NULL, and `opts->host` and
+`opts->port` must be configured.
+
 Returns `0` on success. On failure, returns `-1` and sets
 the thread-local `swim_errno` state to:
 - `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->host` /
@@ -149,7 +146,6 @@ the thread-local `swim_errno` state to:
 - `SWIM_ERR_FULL`: Maximum active instances (16) exceeded.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
-#### Mechanics & Thread-Safety
 Acquires the global instance registry mutex, registers the
 name, initializes internal sub-modules (gossip queue, UDP
 sockets, membership list, and delta-list timers), and Spawns
@@ -159,23 +155,19 @@ the worker loop thread using `pthread_create`. Thread-safe.
 
 ### `swim_leave`
 
-Performs a graceful leave sequence, stops the background
-thread, and deallocates all associated resources.
-
-#### Signature
 ```c
 int swim_leave(const char *name);
 ```
 
-#### Arguments
-- `name`: The name of the instance. Defaults to `"swim"`
-  if `NULL`.
+Performs a graceful leave sequence, stops the background
+thread, and deallocates all associated resources.
 
-#### Return Value
+The `name` argument specifies the instance. Defaults to `"swim"`
+if `NULL`.
+
 Returns `0` on success. On failure, returns `-1` and sets:
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
-#### Mechanics & Thread-Safety
 Acquires the global registry lock, extracts the instance,
 stops the background loop, increments the incarnation count,
 directly broadcasts a `DEAD` gossip event to up to
@@ -187,29 +179,23 @@ releases memory. Thread-safe.
 
 ### `swim_members`
 
-Retrieves a snapshot of the current membership registry.
-
-#### Signature
 ```c
 int swim_members(const char *name, swim_member_t *out_list, int max_len, bool include_dead);
 ```
 
-#### Arguments
-- `name`: The name of the instance. Defaults to `"swim"`
-  if `NULL`.
-- `out_list`: Pre-allocated buffer of `swim_member_t`
-  elements.
-- `max_len`: Capacity of the `out_list` buffer.
-- `include_dead`: If `true`, returns dead/quarantined entries.
-  If `false`, returns only alive and suspect nodes.
+Retrieves a snapshot of the current membership registry.
 
-#### Return Value
+The `name` argument specifies the instance. Defaults to `"swim"`
+if `NULL`. `out_list` is a pre-allocated buffer of
+`swim_member_t` elements, and `max_len` is its capacity.
+Set `include_dead` to `true` to return dead/quarantined
+entries, or `false` for active nodes only.
+
 Returns the number of elements written to `out_list` on
 success (can be `0` or greater). Returns `-1` on error:
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 - `SWIM_ERR_INVALID`: `out_list` is NULL or `max_len <= 0`.
 
-#### Mechanics & Thread-Safety
 Acquires the instance mutex, copies matching elements
 directly to the provided array, and releases the lock.
 Thread-safe.
@@ -218,21 +204,19 @@ Thread-safe.
 
 ### `swim_subscribe`
 
-Registers a subscriber callback function to receive
-membership events (joins, suspicions, and node failures).
-
-#### Signature
 ```c
 int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
 ```
 
-#### Arguments
-- `name`: The name of the instance. Defaults to `"swim"`
-  if `NULL`.
-- `callback`: A function pointer of type `swim_callback_t`.
-- `ctx`: Opaque context pointer passed back to the callback.
+Registers a subscriber callback function to receive
+membership events (joins, suspicions, and node failures).
 
-#### Callback Prototype
+The `name` argument specifies the instance. Defaults to `"swim"`
+if `NULL`. `callback` is a function pointer of type
+`swim_callback_t`, and `ctx` is an opaque context pointer
+passed back to the callback.
+
+The callback prototype is defined as:
 ```c
 typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const swim_node_id_t *node);
 ```
@@ -241,13 +225,11 @@ Where `event` is:
 - `SWIM_NODE_SUSPECT`: A node missed a ping.
 - `SWIM_NODE_DOWN`: A node was declared dead or left.
 
-#### Return Value
 Returns `0` on success. On failure, returns `-1` and sets:
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 - `SWIM_ERR_INVALID`: `callback` is NULL.
 - `SWIM_ERR_FULL`: Maximum subscriber limit (16) reached.
 
-#### Mechanics & Thread-Safety
 Acquires the instance mutex to register the callback.
 **Caution**: Callback functions are executed in the context
 of the background worker thread. Callbacks must be quick,
@@ -257,52 +239,43 @@ non-blocking, and thread-safe.
 
 ### `swim_unsubscribe`
 
-Deregisters a previously registered subscriber callback.
-
-#### Signature
 ```c
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
 ```
 
-#### Arguments
-- `name`: The name of the instance. Defaults to `"swim"`
-  if `NULL`.
-- `callback`: Callback function pointer to deregister.
-- `ctx`: Associated context pointer matching subscription.
+Deregisters a previously registered subscriber callback.
 
-#### Return Value
+The `name` argument specifies the instance. Defaults to `"swim"`
+if `NULL`. `callback` is the callback function pointer to
+deregister, and `ctx` is the context pointer matching the
+subscription.
+
 Returns `0` on success. On failure, returns `-1` and sets:
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
-#### Mechanics & Thread-Safety
 Acquires the instance lock, searches for a matching
 callback and context, swaps it with the last registered
-subscriber, and updates count. Thread-safe.
+subscriber, and updates the count. Thread-safe.
 
 ---
 
 ### `swim_hint_alive`
 
-Feeds an out-of-band reachability signal into the failure
-detector to cancel suspicion and revive a node.
-
-#### Signature
 ```c
 int swim_hint_alive(const char *name, const swim_node_id_t *peer);
 ```
 
-#### Arguments
-- `name`: The name of the instance. Defaults to `"swim"`
-  if `NULL`.
-- `peer`: Pointer to the `swim_node_id_t` identifying
-  the target peer node.
+Feeds an out-of-band reachability signal into the failure
+detector to cancel suspicion and revive a node.
 
-#### Return Value
+The `name` argument specifies the instance. Defaults to `"swim"`
+if `NULL`. `peer` is a pointer to the `swim_node_id_t`
+identifying the target peer node.
+
 Returns `0` on success. On failure, returns `-1` and sets:
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 - `SWIM_ERR_INVALID`: `peer` is NULL.
 
-#### Mechanics & Thread-Safety
 Acquires the instance lock. If the peer is currently in
 `SUSPECT` status, it revives the node to `ALIVE` locally,
 cancels its suspicion timer, enqueues an `alive` gossip
