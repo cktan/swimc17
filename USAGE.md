@@ -100,9 +100,11 @@ typedef struct {
 ```
 
 `host` and `port` are required. `cookie` is a user-defined
-string (default `""`) that can distinguish multiple logically
-separate clusters sharing the same network. A different
-cookie on the same address represents a distinct node.
+string (default `""`) that distinguishes different instances,
+sessions, or restarts of a node running on the same host and
+port. A different cookie on the same address represents a
+distinct node. (Separating logically distinct clusters on the
+same network is the `name` argument's job, not the cookie's.)
 
 Helper functions are provided to format and parse node IDs:
 

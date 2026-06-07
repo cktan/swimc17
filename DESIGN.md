@@ -220,7 +220,7 @@ Join and seed handling are specified in `ALGORITHM.md`
 swim_start({
   host: "10.0.0.1",          # required
   port: 7771,                 # required
-  name: "my_cluster",         # optional, default "swim"
+  name: "my_cluster",         # required
   seeds: [{"10.0.0.2", 7771}],
   protocol_period: 1000,
   ping_timeout: 200,
@@ -231,13 +231,13 @@ swim_start({
 })
 ```
 
-All functions accept an optional `name` argument
-(default `"swim"`) to target a named instance.
+All functions take a mandatory `name` argument to target a
+named instance; it cannot be `NULL` or empty.
 
 ### Querying membership
 
 ```
-swim_members(name = "swim", opts = {})
+swim_members(name, opts = {})
 # opts: {include_dead: true}  ← default false
 # returns: [{"host", port, "cookie", status, incarnation}]
 ```
@@ -248,8 +248,8 @@ Membership changes are delivered through a registered
 callback:
 
 ```
-swim_subscribe(name = "swim", callback, ctx)   # register
-swim_unsubscribe(name = "swim", callback, ctx) # deregister
+swim_subscribe(name, callback, ctx)   # register
+swim_unsubscribe(name, callback, ctx) # deregister
 ```
 
 The callback has the shape:
@@ -270,7 +270,7 @@ non-blocking; offload any heavy work to another thread.
 ### Liveness hint
 
 ```
-swim_hint_alive(name = "swim", peer)
+swim_hint_alive(name, peer)
 ```
 
 Feeds out-of-band evidence that `peer` is alive into the
@@ -309,7 +309,7 @@ caller.
 ### Graceful leave
 
 ```
-swim_leave(name = "swim")
+swim_leave(name)
 ```
 
 1. Increments own incarnation number.
