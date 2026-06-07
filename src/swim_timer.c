@@ -19,6 +19,7 @@ struct entry_t {
 
 struct swim_timer_t {
   entry_t *head;
+  entry_t *free_list;
 };
 
 swim_timer_t *swim_timer_init(void) {
@@ -37,10 +38,17 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   assert(name && strlen(name) < sizeof(((entry_t *)0)->name));
   assert(cb);
 
-  entry_t *nw = calloc(1, sizeof(*nw));
-  if (!nw) {
-    return swim_set_error(
-        SWIM_ERR_NOMEM, "Failed to allocate entry_t node for alarm '%s'", name);
+  entry_t *nw;
+  if (t->free_list) {
+    nw = t->free_list;
+    t->free_list = nw->next;
+    memset(nw, 0, sizeof(*nw));
+  } else {
+    nw = calloc(1, sizeof(*nw));
+    if (!nw) {
+      return swim_set_error(
+          SWIM_ERR_NOMEM, "Failed to allocate entry_t node for alarm '%s'", name);
+    }
   }
   nw->cb = cb;
   nw->ctx = ctx;
@@ -90,7 +98,8 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
   }
   /* List is consistent now, so the callback may reenter safely. */
   victim->cb(victim->ctx, SWIM_TIMER_CANCEL, victim->param);
-  free(victim);
+  victim->next = t->free_list;
+  t->free_list = victim;
 }
 
 void swim_timer_cancel_all(swim_timer_t *t) {
@@ -100,7 +109,8 @@ void swim_timer_cancel_all(swim_timer_t *t) {
     entry_t *n = t->head;
     t->head = n->next;
     n->cb(n->ctx, SWIM_TIMER_CANCEL, n->param);
-    free(n);
+    n->next = t->free_list;
+    t->free_list = n;
   }
 }
 
@@ -109,6 +119,11 @@ void swim_timer_final(swim_timer_t *t) {
     return;
   }
   swim_timer_cancel_all(t);
+  while (t->free_list) {
+    entry_t *n = t->free_list;
+    t->free_list = n->next;
+    free(n);
+  }
   free(t);
 }
 
@@ -123,10 +138,11 @@ void swim_timer_tick(swim_timer_t *t) {
   /* Fire the head and any following alarms whose delta is 0 (i.e.
    * due on this same tick). Pop before firing so a reentrant
    * callback sees a consistent list. */
-  while (t->head && t->head->tick == 0) {
+  while (t->head && t->head->tick <= 0) {
     entry_t *n = t->head;
     t->head = n->next;
     n->cb(n->ctx, SWIM_TIMER_ALARM, n->param);
-    free(n);
+    n->next = t->free_list;
+    t->free_list = n;
   }
 }
