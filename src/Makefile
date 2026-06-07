@@ -1,5 +1,5 @@
-HFILES := swim_timer.h swim_errno.h swim_node_id.h
-CFILES := swim_timer.c swim_errno.c swim_node_id.c
+HFILES := swim_timer.h swim_errno.h swim_node_id.h swim_membership.h
+CFILES := swim_timer.c swim_errno.c swim_node_id.c swim_membership.c
 OBJ := $(CFILES:.c=.o)
 
 # set up LIB_SHARED
