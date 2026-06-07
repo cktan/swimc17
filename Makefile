@@ -37,8 +37,7 @@ install: all
 	install -d $(DESTDIR)${prefix}/include
 	install -d $(DESTDIR)${prefix}/lib
 	install -d $(DESTDIR)${prefix}/lib/pkgconfig
-	install -m 0644 src/swimc17.h $(DESTDIR)${prefix}/include/
-	install -m 0644 src/swimcpp.hpp $(DESTDIR)${prefix}/include/
+	install -m 0644 src/swim_timer.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/libswimc17.a $(DESTDIR)${prefix}/lib/
 	@echo "$$PCFILE" >> $(DESTDIR)${prefix}/lib/pkgconfig/libswimc17.pc
 

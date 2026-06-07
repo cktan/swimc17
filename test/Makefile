@@ -1,21 +1,15 @@
-CFLAGS := -O0 -g -fsanitize=address,undefined -std=c17 -Wmissing-declarations -Wall -Wextra -MMD 
-
-all: driver
-
-driver: parser.c
-	$(CC) $(CFLAGS) -o $@ parser.c
+all:
+	$(MAKE) -C timer all
 
 test: all
-	bash run.sh
+	$(MAKE) -C timer test
 
 clean:
-	rm -f *.o *.d driver
+	$(MAKE) -C timer clean
 
 distclean: clean
 
 format:
-	clang-format -i *.[ch]
-
--include driver.d
+	clang-format -i timer/*.[ch] timer/*.cpp
 
 .PHONY: all clean distclean format test
