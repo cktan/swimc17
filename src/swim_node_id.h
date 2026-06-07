@@ -16,32 +16,7 @@ typedef struct {
   char cookie[64];
 } swim_node_id_t;
 
-/**
- * Initialize a node ID.
- *
- * @param id      Pointer to the swim_node_id_t to initialize.
- * @param host    Host name or IP address; must not be NULL.
- * @param port    Port number.
- * @param cookie  Node cookie; can be NULL (defaults to "").
- * @return 0 on success, -1 on failure (e.g., arguments too long).
- */
-int swim_node_id_init(swim_node_id_t *id, const char *host, uint16_t port,
-                      const char *cookie);
 
-/**
- * Copy a node ID from src to dst.
- *
- * @param dst Destination pointer.
- * @param src Source pointer.
- * @return 0 on success, -1 on failure.
- */
-static inline int swim_node_id_copy(swim_node_id_t *dst, const swim_node_id_t *src) {
-  if (!dst || !src) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL argument to swim_node_id_copy");
-  }
-  *dst = *src;
-  return 0;
-}
 
 /**
  * Compare two node IDs for sorting/equality.

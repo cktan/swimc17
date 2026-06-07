@@ -6,28 +6,7 @@
 #include <string.h>
 #include <stdbool.h>
 
-int swim_node_id_init(swim_node_id_t *id, const char *host, uint16_t port,
-                      const char *cookie) {
-  if (!id || !host || port == 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL or zero argument to swim_node_id_init");
-  }
-  size_t host_len = strlen(host);
-  if (host_len >= sizeof(id->host)) {
-    return swim_set_error(SWIM_ERR_INVALID, "Host name too long");
-  }
-  if (cookie) {
-    size_t cookie_len = strlen(cookie);
-    if (cookie_len >= sizeof(id->cookie)) {
-      return swim_set_error(SWIM_ERR_INVALID, "Cookie too long");
-    }
-    strcpy(id->cookie, cookie);
-  } else {
-    id->cookie[0] = '\0';
-  }
-  strcpy(id->host, host);
-  id->port = port;
-  return 0;
-}
+
 
 
 

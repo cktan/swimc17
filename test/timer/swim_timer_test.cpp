@@ -301,22 +301,26 @@ TEST_CASE("swim_errno interface works as expected") {
   CHECK(strcmp(swim_strerror(999), "Unknown error") == 0);
 }
 
-TEST_CASE("swim_node_id initialization, formatting, and copying") {
-  swim_node_id_t id1, id2;
-  char buf[256];
+TEST_CASE("swim_node_id manual initialization, formatting, and copying") {
+  swim_node_id_t id1 = {};
+  strcpy(id1.host, "127.0.0.1");
+  id1.port = 8080;
+  strcpy(id1.cookie, "cookie1");
 
-  // Success init
-  REQUIRE(swim_node_id_init(&id1, "127.0.0.1", 8080, "cookie1") == 0);
   CHECK(strcmp(id1.host, "127.0.0.1") == 0);
   CHECK(id1.port == 8080);
   CHECK(strcmp(id1.cookie, "cookie1") == 0);
 
+  char buf[256];
   // Format check
   REQUIRE(swim_node_id_format(&id1, buf, sizeof(buf)) == 0);
   CHECK(strcmp(buf, "127.0.0.1:8080:cookie1") == 0);
 
-  // Success init without cookie
-  REQUIRE(swim_node_id_init(&id2, "example.com", 80, nullptr) == 0);
+  swim_node_id_t id2 = {};
+  strcpy(id2.host, "example.com");
+  id2.port = 80;
+  id2.cookie[0] = '\0';
+
   CHECK(strcmp(id2.host, "example.com") == 0);
   CHECK(id2.port == 80);
   CHECK(strcmp(id2.cookie, "") == 0);
@@ -325,33 +329,39 @@ TEST_CASE("swim_node_id initialization, formatting, and copying") {
   REQUIRE(swim_node_id_format(&id2, buf, sizeof(buf)) == 0);
   CHECK(strcmp(buf, "example.com:80") == 0);
 
-  // Copy check
-  swim_node_id_t copy_id;
-  REQUIRE(swim_node_id_copy(&copy_id, &id1) == 0);
+  // Copy check using structure assignment
+  swim_node_id_t copy_id = id1;
   CHECK(strcmp(copy_id.host, "127.0.0.1") == 0);
   CHECK(copy_id.port == 8080);
   CHECK(strcmp(copy_id.cookie, "cookie1") == 0);
 }
 
 TEST_CASE("swim_node_id comparison and sorting") {
-  swim_node_id_t a, b;
+  swim_node_id_t a = {};
+  strcpy(a.host, "host1");
+  a.port = 100;
+  strcpy(a.cookie, "cook");
 
-  // Equal
-  swim_node_id_init(&a, "host1", 100, "cook");
-  swim_node_id_init(&b, "host1", 100, "cook");
+  swim_node_id_t b = {};
+  strcpy(b.host, "host1");
+  b.port = 100;
+  strcpy(b.cookie, "cook");
+
   CHECK(swim_node_id_compare(&a, &b) == 0);
 
   // Host difference
-  swim_node_id_init(&b, "host2", 100, "cook");
+  strcpy(b.host, "host2");
   CHECK(swim_node_id_compare(&a, &b) < 0);
   CHECK(swim_node_id_compare(&b, &a) > 0);
 
   // Port difference
-  swim_node_id_init(&b, "host1", 101, "cook");
+  strcpy(b.host, "host1");
+  b.port = 101;
   CHECK(swim_node_id_compare(&a, &b) < 0);
 
   // Cookie difference
-  swim_node_id_init(&b, "host1", 100, "cook2");
+  b.port = 100;
+  strcpy(b.cookie, "cook2");
   CHECK(swim_node_id_compare(&a, &b) < 0);
 }
 
