@@ -370,6 +370,19 @@ static void update_node_alive(swim_instance_t *inst, const swim_node_id_t *node)
   }
 }
 
+// Drop relay entries whose indirect-probe window has elapsed. Without this,
+// entries for targets that never ack are never reclaimed and the table fills
+// up, permanently blocking new ping_req relay work.
+static void relay_gc(swim_instance_t *inst) {
+  for (int i = 0; i < inst->relay_count; i++) {
+    if (inst->current_tick >= inst->relays[i].expiry_tick) {
+      inst->relays[i] = inst->relays[inst->relay_count - 1];
+      inst->relay_count--;
+      i--;
+    }
+  }
+}
+
 // Packet receiver and protocol handler
 static void swim_protocol_handle_incoming(swim_instance_t *inst) {
   swim_node_id_t src;
@@ -464,6 +477,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 
     case SWIM_MSG_PING_REQ:
       // We act as a helper relay: ping msg.peer on behalf of msg.sender
+      relay_gc(inst);
       if (inst->relay_count < 32) {
         relay_probe_t *r = &inst->relays[inst->relay_count++];
         r->requester = msg.sender;

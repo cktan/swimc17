@@ -24,6 +24,9 @@
   inspection, save output to a file rather than repeatedly piping to
   grep. 
 
+- **Git Merges:** Always merge branches using `git merge --squash`.
+
+
 
 ### 2. Think Before Coding
 

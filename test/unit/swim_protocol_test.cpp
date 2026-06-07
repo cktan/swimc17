@@ -8,6 +8,7 @@ extern "C" {
 #include "swim_udp.h"
 }
 
+#include <cstdio>
 #include <cstring>
 #include <unistd.h>
 #include <vector>
@@ -281,5 +282,92 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   CHECK(down_found);
 
   swim_leave("failure_node");
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// Regression for H1: relay-table entries for ping_req targets that never ack
+// must be reclaimed, otherwise the table fills to 32 and the node permanently
+// stops relaying. We flood the node with 32 ping_reqs for dead targets, let
+// them expire, then verify a fresh ping_req still produces a relay ping.
+TEST_CASE("protocol: relay table does not permanently fill") {
+  clear_log();
+
+  swim_node_id_t node_id, requester_id, target_id;
+  REQUIRE(swim_node_id_parse(&node_id, "127.0.0.1:20301:c1") == 0);
+  REQUIRE(swim_node_id_parse(&requester_id, "127.0.0.1:20302:r") == 0);
+  REQUIRE(swim_node_id_parse(&target_id, "127.0.0.1:20303:t") == 0);
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.host = "127.0.0.1";
+  opts.port = 20301;
+  opts.cookie = "c1";
+  opts.name = "relay_node";
+  opts.protocol_period_ms = 1000; // keep the node's own probing out of the way
+  opts.ping_timeout_ms = 100;     // relay entries expire after ~1 tick
+
+  REQUIRE(swim_start(&opts) == 0);
+
+  swim_udp_t *requester = swim_udp_init("127.0.0.1", 20302);
+  REQUIRE(requester != nullptr);
+  swim_udp_t *target = swim_udp_init("127.0.0.1", 20303);
+  REQUIRE(target != nullptr);
+
+  auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
+    swim_message_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = SWIM_MSG_PING_REQ;
+    msg.sender = requester_id;
+    msg.seq = seq;
+    msg.peer = tgt; // target of the indirect probe
+    uint8_t buf[256];
+    int len = swim_codec_encode(&msg, buf, sizeof(buf));
+    REQUIRE(len > 0);
+    REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
+  };
+
+  // Flood the relay table (capacity 32) with ping_reqs for dead targets that
+  // will never ack.
+  for (uint32_t i = 0; i < 32; i++) {
+    swim_node_id_t dead;
+    char s[64];
+    snprintf(s, sizeof(s), "127.0.0.1:%u:d", 21000 + i);
+    REQUIRE(swim_node_id_parse(&dead, s) == 0);
+    send_ping_req(dead, 100 + i);
+    usleep(5000);
+  }
+
+  // Drain any relay pings the node sent to the dead targets so they don't
+  // linger and confuse the assertion below.
+  usleep(200000);
+
+  // Let the flooded entries expire (ping_timeout 100ms => ~1-2 ticks).
+  usleep(400000);
+
+  // A fresh ping_req for a live target must now produce a relay ping; without
+  // GC of expired entries the table is still full and nothing is sent.
+  send_ping_req(target_id, 9999);
+
+  bool relay_ping_seen = false;
+  for (int attempt = 0; attempt < 50 && !relay_ping_seen; attempt++) {
+    swim_node_id_t src;
+    uint8_t buf[256];
+    int n = swim_udp_recv(target, &src, buf, sizeof(buf));
+    if (n > 0) {
+      swim_message_t in;
+      if (swim_codec_decode(buf, n, &in) == 0 &&
+          in.type == SWIM_MSG_PING && in.seq == 9999 &&
+          swim_node_id_compare(&in.sender, &node_id) == 0) {
+        relay_ping_seen = true;
+      }
+    } else {
+      usleep(10000);
+    }
+  }
+  CHECK(relay_ping_seen);
+
+  swim_udp_final(requester);
+  swim_udp_final(target);
+  swim_leave("relay_node");
   swim_set_error(SWIM_OK, nullptr);
 }
