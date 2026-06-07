@@ -21,17 +21,23 @@ struct swim_timer_t {
 
 swim_timer_t *swim_timer_init(void) {
   swim_timer_t *t = calloc(1, sizeof(*t));
+  if (!t) {
+    return NULL;
+  }
   return t;
 }
 
-void swim_timer_add(swim_timer_t *t, int ticks, const char *name,
-                    swim_timer_cb_t cb, void *ctx, void *param) {
+int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
+                   swim_timer_cb_t cb, void *ctx, void *param) {
   assert(t);
   assert(ticks >= 1);
   assert(name && strlen(name) < sizeof(((node *)0)->name));
   assert(cb);
 
   node *nw = calloc(1, sizeof(*nw));
+  if (!nw) {
+    return -1;
+  }
   nw->cb = cb;
   nw->ctx = ctx;
   nw->param = param;
@@ -55,6 +61,8 @@ void swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   }
   nw->next = *pp;
   *pp = nw;
+
+  return 0;
 }
 
 void swim_timer_cancel(swim_timer_t *t, const char *name) {

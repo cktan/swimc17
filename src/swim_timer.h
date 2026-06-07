@@ -92,8 +92,8 @@ void swim_timer_final(swim_timer_t *t);
  * @param ctx   opaque context passed back to @cb.
  * @param param opaque per-alarm datum passed back to @cb.
  */
-void swim_timer_add(swim_timer_t *t, int ticks, const char *name,
-                    swim_timer_cb_t cb, void *ctx, void *param);
+int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
+                   swim_timer_cb_t cb, void *ctx, void *param);
 
 /**
  * Cancel the first pending alarm whose name equals @name.

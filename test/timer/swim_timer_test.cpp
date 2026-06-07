@@ -33,7 +33,8 @@ void periodic_cb(void *ctx, swim_timer_event_t ev, void *param) {
   g_log.push_back({ev, id_of(param)});
   if (ev == SWIM_TIMER_ALARM) {
     swim_timer_t *t = (swim_timer_t *)ctx;
-    swim_timer_add(t, 2, "p", periodic_cb, ctx, param);
+    int rc = swim_timer_add(t, 2, "p", periodic_cb, ctx, param);
+    REQUIRE(rc == 0);
   }
 }
 
@@ -55,7 +56,8 @@ std::vector<int> alarm_ids() {
 }
 
 void add(swim_timer_t *t, int ticks, const char *name, int id) {
-  swim_timer_add(t, ticks, name, rec_cb, nullptr, as_param(id));
+  int rc = swim_timer_add(t, ticks, name, rec_cb, nullptr, as_param(id));
+  REQUIRE(rc == 0);
 }
 
 }  // namespace
@@ -224,7 +226,8 @@ TEST_CASE("re-arm: cancel then add with the same name") {
 TEST_CASE("periodic: a self-rearming callback fires every period") {
   g_log.clear();
   swim_timer_t *t = swim_timer_init();
-  swim_timer_add(t, 2, "p", periodic_cb, t, as_param(9));
+  int rc = swim_timer_add(t, 2, "p", periodic_cb, t, as_param(9));
+  REQUIRE(rc == 0);
 
   for (int i = 0; i < 6; i++) swim_timer_tick(t);  // expect at 2,4,6
   CHECK(alarm_ids() == std::vector<int>({9, 9, 9}));
@@ -251,7 +254,8 @@ TEST_CASE("ctx and param are passed through unchanged") {
   };
 
   swim_timer_t *t = swim_timer_init();
-  swim_timer_add(t, 1, "k", cb, &cap, &marker);
+  int rc = swim_timer_add(t, 1, "k", cb, &cap, &marker);
+  REQUIRE(rc == 0);
   swim_timer_tick(t);
 
   CHECK(cap.ctx == &cap);
