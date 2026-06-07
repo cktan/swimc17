@@ -95,9 +95,11 @@ static swim_instance_t *g_instances[16] = {0};
 static pthread_mutex_t g_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static swim_instance_t *find_instance(const char *name) {
-  const char *target_name = name ? name : "swim";
+  if (!name || name[0] == '\0') {
+    return NULL;
+  }
   for (int i = 0; i < 16; i++) {
-    if (g_instances[i] && strcmp(g_instances[i]->name, target_name) == 0) {
+    if (g_instances[i] && strcmp(g_instances[i]->name, name) == 0) {
       return g_instances[i];
     }
   }
@@ -528,8 +530,8 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
 // --- Public API Implementations ---
 
 int swim_start(const swim_start_opts_t *opts) {
-  if (!opts || !opts->host || opts->port == 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid start options");
+  if (!opts || !opts->host || opts->port == 0 || !opts->name || opts->name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Invalid start options: host, port, and name are mandatory");
   }
 
   pthread_mutex_lock(&g_instances_mutex);
@@ -560,7 +562,7 @@ int swim_start(const swim_start_opts_t *opts) {
   }
 
   // Populate configuration
-  strncpy(inst->name, opts->name ? opts->name : "swim", sizeof(inst->name) - 1);
+  strncpy(inst->name, opts->name, sizeof(inst->name) - 1);
   inst->protocol_period_ms = opts->protocol_period_ms ? opts->protocol_period_ms : 1000;
   inst->ping_timeout_ms = opts->ping_timeout_ms ? opts->ping_timeout_ms : 200;
   inst->ping_req_fanout = opts->ping_req_fanout ? opts->ping_req_fanout : 3;
@@ -638,6 +640,9 @@ error_cleanup:
 }
 
 int swim_leave(const char *name) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
   pthread_mutex_lock(&g_instances_mutex);
   swim_instance_t *inst = find_instance(name);
   if (!inst) {
@@ -722,6 +727,9 @@ int swim_leave(const char *name) {
 }
 
 int swim_members(const char *name, swim_member_t *out_list, int max_len, bool include_dead) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
   pthread_mutex_lock(&g_instances_mutex);
   swim_instance_t *inst = find_instance(name);
   if (!inst) {
@@ -738,6 +746,9 @@ int swim_members(const char *name, swim_member_t *out_list, int max_len, bool in
 }
 
 int swim_subscribe(const char *name, swim_callback_t callback, void *ctx) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
   if (!callback) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL callback in swim_subscribe");
   }
@@ -766,6 +777,9 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx) {
 }
 
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
   pthread_mutex_lock(&g_instances_mutex);
   swim_instance_t *inst = find_instance(name);
   if (!inst) {
@@ -793,6 +807,9 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
 }
 
 int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
   if (!peer) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL peer in swim_hint_alive");
   }

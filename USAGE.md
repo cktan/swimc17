@@ -43,8 +43,9 @@ cc my_app.c $(pkg-config --cflags --libs libswimc17)
 ## Quick Start
 
 Initialize your configuration options and start the cluster
-membership protocol thread. The first node starts alone, and
-subsequent nodes join by pointing to one or more known
+membership protocol thread. All configuration options (host,
+port, and name) are mandatory. The first node starts alone,
+and subsequent nodes join by pointing to one or more known
 seeds.
 
 ```c
@@ -119,8 +120,9 @@ printf("Node: %s\n", buf);
 ## API Reference
 
 All public functions accept a `name` argument to specify the
-named instance. If `NULL` is passed, the name defaults to
-`"swim"`.
+named instance. The `name` argument is strictly mandatory and
+cannot be `NULL` or empty. Passing a `NULL` or empty name will
+trigger a `SWIM_ERR_INVALID` error.
 
 ---
 
@@ -134,13 +136,13 @@ Starts the background protocol worker thread and registers
 a new named cluster membership instance.
 
 The `opts` argument is a pointer to a `swim_start_opts_t`
-structure. It must be non-NULL, and `opts->host` and
-`opts->port` must be configured.
+structure. It must be non-NULL, and `opts->host`,
+`opts->port`, and `opts->name` must be configured.
 
 Returns `0` on success. On failure, returns `-1` and sets
 the thread-local `swim_errno` state to:
 - `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->host` /
-  `opts->port` are empty or invalid.
+  `opts->port` / `opts->name` are empty or invalid.
 - `SWIM_ERR_BAD_STATE`: An instance with the same name
   is already running.
 - `SWIM_ERR_FULL`: Maximum active instances (16) exceeded.
@@ -162,10 +164,11 @@ int swim_leave(const char *name);
 Performs a graceful leave sequence, stops the background
 thread, and deallocates all associated resources.
 
-The `name` argument specifies the instance. Defaults to `"swim"`
-if `NULL`.
+The `name` argument specifies the instance. It must be
+non-NULL and non-empty.
 
 Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
 Acquires the global registry lock, extracts the instance,
@@ -185,16 +188,17 @@ int swim_members(const char *name, swim_member_t *out_list, int max_len, bool in
 
 Retrieves a snapshot of the current membership registry.
 
-The `name` argument specifies the instance. Defaults to `"swim"`
-if `NULL`. `out_list` is a pre-allocated buffer of
-`swim_member_t` elements, and `max_len` is its capacity.
+The `name` argument specifies the instance. It must be
+non-NULL and non-empty. `out_list` is a pre-allocated buffer
+of `swim_member_t` elements, and `max_len` is its capacity.
 Set `include_dead` to `true` to return dead/quarantined
 entries, or `false` for active nodes only.
 
 Returns the number of elements written to `out_list` on
 success (can be `0` or greater). Returns `-1` on error:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty, or `out_list`
+  is NULL or `max_len <= 0`.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
-- `SWIM_ERR_INVALID`: `out_list` is NULL or `max_len <= 0`.
 
 Acquires the instance mutex, copies matching elements
 directly to the provided array, and releases the lock.
@@ -211,10 +215,10 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
 Registers a subscriber callback function to receive
 membership events (joins, suspicions, and node failures).
 
-The `name` argument specifies the instance. Defaults to `"swim"`
-if `NULL`. `callback` is a function pointer of type
-`swim_callback_t`, and `ctx` is an opaque context pointer
-passed back to the callback.
+The `name` argument specifies the instance. It must be
+non-NULL and non-empty. `callback` is a function pointer of
+type `swim_callback_t`, and `ctx` is an opaque context
+pointer passed back to the callback.
 
 The callback prototype is defined as:
 ```c
@@ -226,8 +230,9 @@ Where `event` is:
 - `SWIM_NODE_DOWN`: A node was declared dead or left.
 
 Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty, or `callback`
+  is NULL.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
-- `SWIM_ERR_INVALID`: `callback` is NULL.
 - `SWIM_ERR_FULL`: Maximum subscriber limit (16) reached.
 
 Acquires the instance mutex to register the callback.
@@ -245,12 +250,13 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
 
 Deregisters a previously registered subscriber callback.
 
-The `name` argument specifies the instance. Defaults to `"swim"`
-if `NULL`. `callback` is the callback function pointer to
-deregister, and `ctx` is the context pointer matching the
-subscription.
+The `name` argument specifies the instance. It must be
+non-NULL and non-empty. `callback` is the callback function
+pointer to deregister, and `ctx` is the context pointer
+matching the subscription.
 
 Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
 Acquires the instance lock, searches for a matching
@@ -268,13 +274,14 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer);
 Feeds an out-of-band reachability signal into the failure
 detector to cancel suspicion and revive a node.
 
-The `name` argument specifies the instance. Defaults to `"swim"`
-if `NULL`. `peer` is a pointer to the `swim_node_id_t`
-identifying the target peer node.
+The `name` argument specifies the instance. It must be
+non-NULL and non-empty. `peer` is a pointer to the
+`swim_node_id_t` identifying the target peer node.
 
 Returns `0` on success. On failure, returns `-1` and sets:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty, or `peer` is
+  NULL.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
-- `SWIM_ERR_INVALID`: `peer` is NULL.
 
 Acquires the instance lock. If the peer is currently in
 `SUSPECT` status, it revives the node to `ALIVE` locally,
@@ -323,8 +330,8 @@ Options are configured in the `swim_start_opts_t` struct:
 |--------|------|---------|-------------|
 | `host` | `const char*` | **required** | Hostname or IP to bind |
 | `port` | `uint16_t` | **required** | UDP port to bind |
+| `name` | `const char*` | **required** | Unique instance name |
 | `cookie` | `const char*` | `""` | User-defined node cookie |
-| `name` | `const char*` | `"swim"` | Instance name (for multi-cluster) |
 | `seed_list` | `const swim_node_id_t*` | `NULL` | Seed nodes for join |
 | `seed_count` | `int` | `0` | Count of seed nodes |
 | `protocol_period_ms` | `uint64_t` | `1000` | How often to probe one peer |
