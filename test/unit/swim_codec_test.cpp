@@ -233,7 +233,7 @@ TEST_CASE("codec: swim_encode_membership") {
 }
 
 TEST_CASE("codec: decode helpers") {
-  uint8_t buf[256];
+  uint8_t buf[256] = {0};
   
   // 1. Test swim_decode_int8
   buf[0] = 0x55;
