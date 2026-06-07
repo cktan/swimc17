@@ -1,9 +1,9 @@
 #include "swim_membership.h"
 #include "swim_errno.h"
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 
 struct swim_membership_t {
   swim_member_t *members;
@@ -12,8 +12,10 @@ struct swim_membership_t {
 };
 
 // Internal binary search helper.
-// Returns true if found and sets *out_idx. If not found, returns false and sets *out_idx to the insertion point.
-static bool find_node(const swim_membership_t *m, const swim_node_id_t *id, int *out_idx) {
+// Returns true if found and sets *out_idx. If not found, returns false and sets
+// *out_idx to the insertion point.
+static bool find_node(const swim_membership_t *m, const swim_node_id_t *id,
+                      int *out_idx) {
   int low = 0;
   int high = m->count - 1;
   while (low <= high) {
@@ -36,7 +38,8 @@ static bool find_node(const swim_membership_t *m, const swim_node_id_t *id, int 
 swim_membership_t *swim_membership_init(void) {
   swim_membership_t *m = calloc(1, sizeof(*m));
   if (!m) {
-    swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_membership_t container");
+    swim_set_error(SWIM_ERR_NOMEM,
+                   "Failed to allocate swim_membership_t container");
     return NULL;
   }
   m->members = NULL;
@@ -46,7 +49,8 @@ swim_membership_t *swim_membership_init(void) {
 }
 
 void swim_membership_final(swim_membership_t *m) {
-  if (!m) return;
+  if (!m)
+    return;
   free(m->members);
   free(m);
 }
@@ -59,7 +63,8 @@ int swim_membership_add(swim_membership_t *m, const swim_node_id_t *id,
 int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
                               uint64_t incarnation) {
   if (!m || !id) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL argument to swim_membership_set_alive");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid NULL argument to swim_membership_set_alive");
   }
   int idx;
   if (find_node(m, id, &idx)) {
@@ -74,7 +79,8 @@ int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
 
 const swim_member_t *swim_membership_get(const swim_membership_t *m,
                                          const swim_node_id_t *id) {
-  if (!m || !id) return NULL;
+  if (!m || !id)
+    return NULL;
   int idx;
   if (find_node(m, id, &idx)) {
     return &m->members[idx];
@@ -83,10 +89,12 @@ const swim_member_t *swim_membership_get(const swim_membership_t *m,
 }
 
 int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
-                                 const swim_node_id_t *id, uint64_t incarnation,
-                                 uint64_t now_ms) {
+                                const swim_node_id_t *id, uint64_t incarnation,
+                                uint64_t now_ms) {
   if (!m || !id) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL argument to swim_membership_apply_event");
+    return swim_set_error(
+        SWIM_ERR_INVALID,
+        "Invalid NULL argument to swim_membership_apply_event");
   }
 
   int idx;
@@ -95,8 +103,8 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
 
     // Node is already known, apply precedence rules:
     if (member->status == SWIM_STATUS_DEAD) {
-      // DEAD is terminal for a given incarnation. Revive only if inc is strictly higher
-      // and the incoming status is ALIVE.
+      // DEAD is terminal for a given incarnation. Revive only if inc is
+      // strictly higher and the incoming status is ALIVE.
       if (incarnation > member->incarnation && status == SWIM_STATUS_ALIVE) {
         member->status = SWIM_STATUS_ALIVE;
         member->incarnation = incarnation;
@@ -119,7 +127,8 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
         member->dead_at = now_ms;
         return 0; // State updated
       }
-      if (member->status == SWIM_STATUS_ALIVE && status == SWIM_STATUS_SUSPECT) {
+      if (member->status == SWIM_STATUS_ALIVE &&
+          status == SWIM_STATUS_SUSPECT) {
         member->status = SWIM_STATUS_SUSPECT;
         return 0; // State updated
       }
@@ -138,16 +147,19 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
     // Grow array capacity if full
     if (m->count == m->capacity) {
       int new_capacity = m->capacity == 0 ? 16 : m->capacity * 2;
-      swim_member_t *new_members = realloc(m->members, new_capacity * sizeof(swim_member_t));
+      swim_member_t *new_members =
+          realloc(m->members, new_capacity * sizeof(swim_member_t));
       if (!new_members) {
-        return swim_set_error(SWIM_ERR_NOMEM, "Failed to reallocate membership list");
+        return swim_set_error(SWIM_ERR_NOMEM,
+                              "Failed to reallocate membership list");
       }
       m->members = new_members;
       m->capacity = new_capacity;
     }
 
     // Shift subsequent elements to the right to maintain sorted order
-    memmove(&m->members[idx + 1], &m->members[idx], (m->count - idx) * sizeof(swim_member_t));
+    memmove(&m->members[idx + 1], &m->members[idx],
+            (m->count - idx) * sizeof(swim_member_t));
 
     swim_member_t *member = &m->members[idx];
     member->id = *id;
@@ -160,13 +172,16 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
   }
 }
 
-void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms, uint64_t now_ms) {
-  if (!m) return;
+void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms,
+                        uint64_t now_ms) {
+  if (!m)
+    return;
 
   int write_idx = 0;
   for (int read_idx = 0; read_idx < m->count; read_idx++) {
     swim_member_t *member = &m->members[read_idx];
-    if (member->status == SWIM_STATUS_DEAD && (now_ms - member->dead_at >= expiry_ms)) {
+    if (member->status == SWIM_STATUS_DEAD &&
+        (now_ms - member->dead_at >= expiry_ms)) {
       // GC/prune this node
       continue;
     }
@@ -179,7 +194,8 @@ void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms, uint64_t now_m
 }
 
 int swim_membership_count(const swim_membership_t *m) {
-  if (!m) return 0;
+  if (!m)
+    return 0;
   int active = 0;
   for (int i = 0; i < m->count; i++) {
     if (m->members[i].status != SWIM_STATUS_DEAD) {
@@ -192,7 +208,8 @@ int swim_membership_count(const swim_membership_t *m) {
 int swim_membership_list(const swim_membership_t *m, swim_member_t *out_list,
                          int max_len, bool include_dead) {
   if (!m || !out_list || max_len < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_membership_list");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid arguments to swim_membership_list");
   }
 
   int copied = 0;

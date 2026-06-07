@@ -1,8 +1,8 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_membership.h"
 #include "swim_errno.h"
+#include "swim_membership.h"
 #include "swim_node_id.h"
 }
 
@@ -190,7 +190,8 @@ TEST_CASE("membership: event precedence rules for SUSPECT nodes") {
 
   // Add and make SUSPECT at incarnation 10
   REQUIRE(swim_membership_add(m, &id1, 10) == 0);
-  REQUIRE(swim_membership_apply_event(m, SWIM_STATUS_SUSPECT, &id1, 10, 100) == 0);
+  REQUIRE(swim_membership_apply_event(m, SWIM_STATUS_SUSPECT, &id1, 10, 100) ==
+          0);
 
   // Same incarnation ALIVE should be ignored (DEAD > SUSPECT > ALIVE)
   int rc = swim_membership_apply_event(m, SWIM_STATUS_ALIVE, &id1, 10, 150);
@@ -231,7 +232,8 @@ TEST_CASE("membership: event precedence rules for DEAD nodes") {
   rc = swim_membership_apply_event(m, SWIM_STATUS_ALIVE, &id1, 9, 150);
   CHECK(rc == 1);
 
-  // 2. Higher incarnation SUSPECT or DEAD are ignored (cannot revive except via ALIVE)
+  // 2. Higher incarnation SUSPECT or DEAD are ignored (cannot revive except via
+  // ALIVE)
   rc = swim_membership_apply_event(m, SWIM_STATUS_SUSPECT, &id1, 11, 150);
   CHECK(rc == 1);
   CHECK(swim_membership_get(m, &id1)->status == SWIM_STATUS_DEAD);
@@ -305,8 +307,8 @@ TEST_CASE("membership: list and count members") {
   REQUIRE(swim_membership_add(m, &id2, 1) == 0);
   REQUIRE(swim_membership_add(m, &id3, 1) == 0);
 
-  // Since it's sorted, the order in list should be: id2 (8001), id3 (8002), id1 (8003)
-  // Let's check active count
+  // Since it's sorted, the order in list should be: id2 (8001), id3 (8002), id1
+  // (8003) Let's check active count
   CHECK(swim_membership_count(m) == 3);
 
   swim_member_t list[5];
@@ -332,7 +334,8 @@ TEST_CASE("membership: list and count members") {
   count = swim_membership_list(m, list, 2, true);
   REQUIRE(count == 2);
   CHECK(swim_node_id_compare(&list[0].id, &id2) == 0);
-  CHECK(swim_node_id_compare(&list[1].id, &id3) == 0); // id3 is included here because it's second in sorted order
+  CHECK(swim_node_id_compare(&list[1].id, &id3) ==
+        0); // id3 is included here because it's second in sorted order
 
   swim_membership_final(m);
 }

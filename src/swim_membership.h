@@ -2,23 +2,23 @@
 #define SWIM_MEMBERSHIP_H
 
 #include "swim_node_id.h"
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef char swim_status_t;
-#define SWIM_STATUS_ALIVE   'A'
+#define SWIM_STATUS_ALIVE 'A'
 #define SWIM_STATUS_SUSPECT 'S'
-#define SWIM_STATUS_DEAD    'D'
+#define SWIM_STATUS_DEAD 'D'
 
 typedef struct {
   swim_node_id_t id;
   swim_status_t status;
   uint64_t incarnation;
-  uint64_t dead_at;  // Monotonic time in milliseconds when marked dead
+  uint64_t dead_at; // Monotonic time in milliseconds when marked dead
 } swim_member_t;
 
 typedef struct swim_membership_t swim_membership_t;
@@ -78,20 +78,23 @@ const swim_member_t *swim_membership_get(const swim_membership_t *m,
  * @param id          The unique ID of the node.
  * @param incarnation Incarnation number from the gossip event.
  * @param now_ms      Current monotonic time in milliseconds.
- * @return 0 if the state was updated, 1 if the event was ignored (stale), -1 on error.
+ * @return 0 if the state was updated, 1 if the event was ignored (stale), -1 on
+ * error.
  */
 int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
-                                 const swim_node_id_t *id, uint64_t incarnation,
-                                 uint64_t now_ms);
+                                const swim_node_id_t *id, uint64_t incarnation,
+                                uint64_t now_ms);
 
 /**
  * Garbage collect nodes that have been dead for longer than expiry_ms.
  *
  * @param m         The membership list instance.
- * @param expiry_ms How long a dead node should be kept around (quarantined) in milliseconds.
+ * @param expiry_ms How long a dead node should be kept around (quarantined) in
+ * milliseconds.
  * @param now_ms    Current monotonic time in milliseconds.
  */
-void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms, uint64_t now_ms);
+void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms,
+                        uint64_t now_ms);
 
 /**
  * Return the count of active members (non-dead: ALIVE or SUSPECT).

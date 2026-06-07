@@ -2,17 +2,17 @@
 #include "swim_udp.h"
 #include "swim_errno.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 struct swim_udp_t {
   int fd;
@@ -28,9 +28,9 @@ swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
 
   struct addrinfo hints, *res = NULL;
   memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;     // IPv4 or IPv6
-  hints.ai_socktype = SOCK_DGRAM;  // UDP
-  hints.ai_flags = AI_PASSIVE;     // wildcard addresses if host is NULL
+  hints.ai_family = AF_UNSPEC;    // IPv4 or IPv6
+  hints.ai_socktype = SOCK_DGRAM; // UDP
+  hints.ai_flags = AI_PASSIVE;    // wildcard addresses if host is NULL
 
   char port_str[16];
   snprintf(port_str, sizeof(port_str), "%u", port);
@@ -45,7 +45,8 @@ swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
   struct addrinfo *rp;
   for (rp = res; rp != NULL; rp = rp->ai_next) {
     fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (fd == -1) continue;
+    if (fd == -1)
+      continue;
 
     // Enable SO_REUSEADDR to make test binds robust
     int opt = 1;
@@ -62,7 +63,8 @@ swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
   freeaddrinfo(res);
 
   if (fd == -1) {
-    swim_set_error(SWIM_ERR_BAD_STATE, "Failed to bind socket to %s:%u", host, port);
+    swim_set_error(SWIM_ERR_BAD_STATE, "Failed to bind socket to %s:%u", host,
+                   port);
     return NULL;
   }
 
@@ -88,17 +90,20 @@ swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
 }
 
 void swim_udp_final(swim_udp_t *u) {
-  if (!u) return;
+  if (!u)
+    return;
   if (u->fd != -1) {
     close(u->fd);
   }
   free(u);
 }
 
-int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
-                  const uint8_t *buf, size_t size) {
+int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
+                  size_t size) {
   if (!u || !dest || !buf || size == 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL or zero size arguments to swim_udp_send");
+    return swim_set_error(
+        SWIM_ERR_INVALID,
+        "Invalid NULL or zero size arguments to swim_udp_send");
   }
 
   struct addrinfo hints, *res = NULL;
@@ -111,7 +116,9 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
 
   int s = getaddrinfo(dest->host, port_str, &hints, &res);
   if (s != 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "getaddrinfo failed for destination: %s", gai_strerror(s));
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "getaddrinfo failed for destination: %s",
+                          gai_strerror(s));
   }
 
   ssize_t n = sendto(u->fd, buf, size, 0, res->ai_addr, res->ai_addrlen);
@@ -124,16 +131,19 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
   return 0;
 }
 
-int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
-                  uint8_t *buf, size_t size) {
+int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
+                  size_t size) {
   if (!u || !out_src || !buf || size == 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid NULL or zero size arguments to swim_udp_recv");
+    return swim_set_error(
+        SWIM_ERR_INVALID,
+        "Invalid NULL or zero size arguments to swim_udp_recv");
   }
 
   struct sockaddr_storage src_addr;
   socklen_t addr_len = sizeof(src_addr);
 
-  ssize_t n = recvfrom(u->fd, buf, size, 0, (struct sockaddr *)&src_addr, &addr_len);
+  ssize_t n =
+      recvfrom(u->fd, buf, size, 0, (struct sockaddr *)&src_addr, &addr_len);
   if (n < 0) {
     if (errno == EWOULDBLOCK || errno == EAGAIN) {
       return 0; // No data available
@@ -144,12 +154,12 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
   // Parse host/port back from sockaddr
   char host_buf[NI_MAXHOST];
   char port_buf[NI_MAXSERV];
-  int s = getnameinfo((struct sockaddr *)&src_addr, addr_len,
-                      host_buf, sizeof(host_buf),
-                      port_buf, sizeof(port_buf),
+  int s = getnameinfo((struct sockaddr *)&src_addr, addr_len, host_buf,
+                      sizeof(host_buf), port_buf, sizeof(port_buf),
                       NI_NUMERICHOST | NI_NUMERICSERV);
   if (s != 0) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "getnameinfo failed: %s", gai_strerror(s));
+    return swim_set_error(SWIM_ERR_BAD_STATE, "getnameinfo failed: %s",
+                          gai_strerror(s));
   }
 
   // Populate out_src (cookie cleared since socket sender doesn't carry it)
@@ -161,6 +171,4 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
   return (int)n;
 }
 
-int swim_udp_fd(const swim_udp_t *u) {
-  return u ? u->fd : -1;
-}
+int swim_udp_fd(const swim_udp_t *u) { return u ? u->fd : -1; }

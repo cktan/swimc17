@@ -1,8 +1,8 @@
 #ifndef SWIM_PROTOCOL_H
 #define SWIM_PROTOCOL_H
 
-#include "swim_node_id.h"
 #include "swim_membership.h"
+#include "swim_node_id.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,7 +15,8 @@ typedef enum {
   SWIM_NODE_DOWN     // Node is declared dead
 } swim_event_t;
 
-typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const swim_node_id_t *node);
+typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
+                                const swim_node_id_t *node);
 
 typedef struct {
   const char *host;
@@ -26,11 +27,11 @@ typedef struct {
   int seed_count;                  // Number of seeds
 
   uint64_t protocol_period_ms;     // default 1000
-  uint64_t ping_timeout_ms;         // default 200
+  uint64_t ping_timeout_ms;        // default 200
   uint32_t ping_req_fanout;        // default 3
-  uint64_t suspicion_timeout_ms;    // default 3000
+  uint64_t suspicion_timeout_ms;   // default 3000
   uint64_t seed_retry_interval_ms; // default 5000
-  uint64_t dead_node_expiry_ms;     // default 6000
+  uint64_t dead_node_expiry_ms;    // default 6000
 } swim_start_opts_t;
 
 /**
@@ -42,7 +43,8 @@ typedef struct {
 int swim_start(const swim_start_opts_t *opts);
 
 /**
- * Stop a named instance, perform a graceful leave (notify peers), and free resources.
+ * Stop a named instance, perform a graceful leave (notify peers), and free
+ * resources.
  *
  * @param name The name of the instance (mandatory).
  * @return 0 on success, -1 on failure.
@@ -58,7 +60,8 @@ int swim_leave(const char *name);
  * @param include_dead Whether to include dead nodes in the list.
  * @return The number of members copied, or -1 on error.
  */
-int swim_members(const char *name, swim_member_t *out_list, int max_len, bool include_dead);
+int swim_members(const char *name, swim_member_t *out_list, int max_len,
+                 bool include_dead);
 
 /**
  * Subscribe a callback to receive membership events from a named instance.

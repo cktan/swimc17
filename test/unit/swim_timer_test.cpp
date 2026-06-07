@@ -3,8 +3,8 @@
 
 extern "C" {
 #include "swim_errno.h"
-#include "swim_timer.h"
 #include "swim_node_id.h"
+#include "swim_timer.h"
 }
 
 #include <cstdint>
@@ -396,8 +396,8 @@ TEST_CASE("swim_node_id parsing functionality") {
   CHECK(strcmp(id.cookie, "") == 0);
 
   // Failures
-  CHECK(swim_node_id_parse(&id, "127.0.0.1") == -1);  // No port
-  CHECK(swim_node_id_parse(&id, "127.0.0.1:abc") == -1); // Invalid port
+  CHECK(swim_node_id_parse(&id, "127.0.0.1") == -1);       // No port
+  CHECK(swim_node_id_parse(&id, "127.0.0.1:abc") == -1);   // Invalid port
   CHECK(swim_node_id_parse(&id, "127.0.0.1:65536") == -1); // Port out of range
   CHECK(swim_node_id_parse(&id, "[::1]") == -1); // Missing port after brackets
   CHECK(swim_node_id_parse(&id, "[::1:80") == -1); // Unclosed bracket

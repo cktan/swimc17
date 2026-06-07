@@ -37,8 +37,8 @@ void swim_udp_final(swim_udp_t *u);
  * @param size The size of the payload.
  * @return 0 on success, -1 on failure.
  */
-int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
-                  const uint8_t *buf, size_t size);
+int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
+                  size_t size);
 
 /**
  * Receive a packet. Non-blocking.
@@ -47,10 +47,11 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
  * @param out_src Pointer to a swim_node_id_t to receive the sender's host/port.
  * @param buf     Buffer to store the received payload.
  * @param size    Size of the buffer.
- * @return The number of bytes received on success, 0 if no data is available (EWOULDBLOCK), -1 on error.
+ * @return The number of bytes received on success, 0 if no data is available
+ * (EWOULDBLOCK), -1 on error.
  */
-int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
-                  uint8_t *buf, size_t size);
+int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
+                  size_t size);
 
 /**
  * Return the underlying socket file descriptor.

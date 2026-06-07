@@ -1,19 +1,19 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_protocol.h"
+#include "swim_codec.h"
 #include "swim_errno.h"
 #include "swim_node_id.h"
-#include "swim_codec.h"
+#include "swim_protocol.h"
 #include "swim_udp.h"
 }
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <pthread.h>
 #include <unistd.h>
 #include <vector>
-#include <pthread.h>
-#include <atomic>
 
 namespace {
 
@@ -226,7 +226,8 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   // Wait for failure detector to execute:
   // - Direct probe will fail (ping_timeout = 100ms)
   // - Indirect probe will fail (ping_timeout = 100ms)
-  // - Node will declare SUSPECT and log event (400ms protocol period + timeouts ~ 600ms)
+  // - Node will declare SUSPECT and log event (400ms protocol period + timeouts
+  // ~ 600ms)
   usleep(700000);
 
   // Verify node is SUSPECT
@@ -356,9 +357,8 @@ TEST_CASE("protocol: relay table does not permanently fill") {
     int n = swim_udp_recv(target, &src, buf, sizeof(buf));
     if (n > 0) {
       swim_message_t in;
-      if (swim_codec_decode(buf, n, &in) == 0 &&
-          in.type == SWIM_MSG_PING && in.seq == 9999 &&
-          swim_node_id_compare(&in.sender, &node_id) == 0) {
+      if (swim_codec_decode(buf, n, &in) == 0 && in.type == SWIM_MSG_PING &&
+          in.seq == 9999 && swim_node_id_compare(&in.sender, &node_id) == 0) {
         relay_ping_seen = true;
       }
     } else {
@@ -378,8 +378,11 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 // calls swim_members() succeeds; before the fix this self-deadlocked the worker
 // thread (and would hang the whole suite here).
 static std::atomic<bool> g_reentrant_ok{false};
-static void reentrant_members_cb(void *ctx, swim_event_t event, const swim_node_id_t *node) {
-  (void)ctx; (void)event; (void)node;
+static void reentrant_members_cb(void *ctx, swim_event_t event,
+                                 const swim_node_id_t *node) {
+  (void)ctx;
+  (void)event;
+  (void)node;
   swim_member_t m[8];
   int n = swim_members("h3_reentrant", m, 8, true);
   (void)n;
@@ -431,7 +434,10 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
 // without a use-after-free. Hammer hint_alive from several threads while the
 // main thread leaves. Meaningful under ASan/TSan.
 static std::atomic<bool> g_race_stop{false};
-struct RaceArg { const char *name; swim_node_id_t peer; };
+struct RaceArg {
+  const char *name;
+  swim_node_id_t peer;
+};
 static void *hint_spammer(void *a) {
   RaceArg *r = (RaceArg *)a;
   while (!g_race_stop.load()) {
@@ -440,10 +446,13 @@ static void *hint_spammer(void *a) {
   return nullptr;
 }
 static void noop_cb(void *ctx, swim_event_t e, const swim_node_id_t *n) {
-  (void)ctx; (void)e; (void)n;
+  (void)ctx;
+  (void)e;
+  (void)n;
 }
 
-TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe (H3)") {
+TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
+          "(H3)") {
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
   opts.host = "127.0.0.1";
@@ -508,7 +517,10 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
       int idx = p * 6 + i;
       swim_member_t *ev = &msg.events[i];
       char host[256];
-      sprintf(host, "node-with-a-very-long-name-to-make-it-large-and-fill-up-the-packet-budget-limit-domain-%d.com", idx);
+      sprintf(host,
+              "node-with-a-very-long-name-to-make-it-large-and-fill-up-the-"
+              "packet-budget-limit-domain-%d.com",
+              idx);
       strcpy(ev->id.host, host);
       ev->id.port = 30000 + idx;
       sprintf(ev->id.cookie, "cookie-cookie-cookie-cookie-%d", idx);
@@ -529,7 +541,8 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
       int n = swim_udp_recv(mock_udp, &src, recv_buf, sizeof(recv_buf));
       if (n > 0) {
         swim_message_t in;
-        if (swim_codec_decode(recv_buf, n, &in) == 0 && in.type == SWIM_MSG_ACK && in.seq == 100 + p) {
+        if (swim_codec_decode(recv_buf, n, &in) == 0 &&
+            in.type == SWIM_MSG_ACK && in.seq == 100 + p) {
           ack_seen = true;
           // For the last ACK (p == 4), verify the packet sizes and counts.
           if (p == 4) {

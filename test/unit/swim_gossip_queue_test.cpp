@@ -1,8 +1,8 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_gossip_queue.h"
 #include "swim_errno.h"
+#include "swim_gossip_queue.h"
 #include "swim_node_id.h"
 }
 
@@ -53,7 +53,8 @@ TEST_CASE("gossip_queue: basic enqueue and supersession") {
   REQUIRE(count == 1);
   CHECK(peek[0].status == SWIM_STATUS_SUSPECT);
 
-  // 5. Higher incarnation, lower priority (ALIVE at 11 > SUSPECT at 10) -> replace
+  // 5. Higher incarnation, lower priority (ALIVE at 11 > SUSPECT at 10) ->
+  // replace
   rc = swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 11, 1);
   CHECK(rc == 0);
   count = swim_gossip_queue_peek(q, peek, 5);
@@ -113,14 +114,17 @@ TEST_CASE("gossip_queue: transmit count priority tie-breaker") {
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &idB, 1, 1) == 0);
 
   // Pack with a budget that only fits one event.
-  // Wire sizes: type (1) + inc (8) + host_len (1) + host (9) + port (2) + cookie_len (1) + cookie (0) = 22 bytes
+  // Wire sizes: type (1) + inc (8) + host_len (1) + host (9) + port (2) +
+  // cookie_len (1) + cookie (0) = 22 bytes
   swim_member_t out[1];
   int packed = swim_gossip_queue_pack(q, 5, 25, out, 1);
   REQUIRE(packed == 1);
-  CHECK(swim_node_id_compare(&out[0].id, &idA) == 0); // idA packed first (sorted by node ID tie-breaker)
+  CHECK(swim_node_id_compare(&out[0].id, &idA) ==
+        0); // idA packed first (sorted by node ID tie-breaker)
 
   // Now idA has transmit_count = 1, idB has transmit_count = 0.
-  // Next pack should prioritize idB because its transmit count is lower (0 < 1).
+  // Next pack should prioritize idB because its transmit count is lower (0 <
+  // 1).
   packed = swim_gossip_queue_pack(q, 5, 25, out, 1);
   REQUIRE(packed == 1);
   CHECK(swim_node_id_compare(&out[0].id, &idB) == 0);
@@ -146,7 +150,9 @@ TEST_CASE("gossip_queue: event size limit packing budget") {
   // So it should pack exactly 2 events.
   int packed = swim_gossip_queue_pack(q, 5, 50, out, 5);
   CHECK(packed == 2);
-  CHECK(swim_gossip_queue_size(q) == 3); // Since transmit count hasn't reached limit, all 3 are still in queue (2 have tc=1, 1 has tc=0)
+  CHECK(swim_gossip_queue_size(q) ==
+        3); // Since transmit count hasn't reached limit, all 3 are still in
+            // queue (2 have tc=1, 1 has tc=0)
 
   swim_gossip_queue_final(q);
 }

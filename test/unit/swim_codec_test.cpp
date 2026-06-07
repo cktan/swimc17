@@ -120,7 +120,8 @@ TEST_CASE("codec: error validation and bounds checking") {
   uint8_t buf[256];
 
   // 1. Buffer too small for encode
-  // Minimal encode size is: 1 (type) + 4 (seq) + 1 (count) + 1 (host_len) + 9 (host) + 2 (port) + 1 (cookie_len) + 0 (cookie) = 19 bytes.
+  // Minimal encode size is: 1 (type) + 4 (seq) + 1 (count) + 1 (host_len) + 9
+  // (host) + 2 (port) + 1 (cookie_len) + 0 (cookie) = 19 bytes.
   int enc_len = swim_codec_encode(&orig, buf, 10);
   CHECK(enc_len == -1);
 
@@ -146,7 +147,7 @@ TEST_CASE("codec: error validation and bounds checking") {
   CHECK(rc == -1);
 
   // 5. Corrupt node ID length leading to out-of-bounds
-  buf[5] = 0; // count 0
+  buf[5] = 0;   // count 0
   buf[6] = 250; // host_len 250 (which overflows bounds check)
   rc = swim_codec_decode(buf, enc_len, &decoded);
   CHECK(rc == -1);

@@ -1,9 +1,9 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_udp.h"
 #include "swim_errno.h"
 #include "swim_node_id.h"
+#include "swim_udp.h"
 }
 
 #include <cstring>
@@ -33,15 +33,17 @@ TEST_CASE("udp: ipv4 loopback packet exchange") {
   int rc = swim_udp_send(u1, &dest2, (const uint8_t *)msg, strlen(msg));
   REQUIRE(rc == 0);
 
-  // Allow a tiny window or simply read since it's loopback and synchronous in OS
+  // Allow a tiny window or simply read since it's loopback and synchronous in
+  // OS
   swim_node_id_t src;
   uint8_t recv_buf[256];
   int n = 0;
   for (int i = 0; i < 100; i++) {
     n = swim_udp_recv(u2, &src, recv_buf, sizeof(recv_buf));
-    if (n > 0) break;
+    if (n > 0)
+      break;
   }
-  
+
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
   CHECK(strcmp((const char *)recv_buf, msg) == 0);
@@ -53,7 +55,8 @@ TEST_CASE("udp: ipv4 loopback packet exchange") {
 }
 
 TEST_CASE("udp: ipv6 loopback packet exchange") {
-  // Try to bind IPv6, skip test if IPv6 loopback is not supported in this environment
+  // Try to bind IPv6, skip test if IPv6 loopback is not supported in this
+  // environment
   swim_udp_t *u1 = swim_udp_init("::1", 18004);
   if (!u1) {
     // IPv6 might not be supported/enabled on this machine's loopback interface
@@ -74,7 +77,8 @@ TEST_CASE("udp: ipv6 loopback packet exchange") {
   int n = 0;
   for (int i = 0; i < 100; i++) {
     n = swim_udp_recv(u2, &src, recv_buf, sizeof(recv_buf));
-    if (n > 0) break;
+    if (n > 0)
+      break;
   }
 
   REQUIRE(n == (int)strlen(msg));

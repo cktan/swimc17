@@ -1,8 +1,8 @@
 #include "swim_gossip_queue.h"
 #include "swim_errno.h"
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 
 typedef struct {
   swim_member_t event;
@@ -18,7 +18,8 @@ struct swim_gossip_queue_t {
 
 // Calculate size on the wire for a node ID
 static inline size_t event_wire_size(const swim_node_id_t *id) {
-  // 1 byte type + 8 bytes incarnation + 1 byte host length + host bytes + 2 bytes port + 1 byte cookie length + cookie bytes
+  // 1 byte type + 8 bytes incarnation + 1 byte host length + host bytes + 2
+  // bytes port + 1 byte cookie length + cookie bytes
   return 1 + 8 + 1 + strlen(id->host) + 2 + 1 + strlen(id->cookie);
 }
 
@@ -70,7 +71,8 @@ static inline uint32_t get_transmit_limit(uint32_t cluster_size) {
 swim_gossip_queue_t *swim_gossip_queue_init(void) {
   swim_gossip_queue_t *q = calloc(1, sizeof(*q));
   if (!q) {
-    swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_gossip_queue_t container");
+    swim_set_error(SWIM_ERR_NOMEM,
+                   "Failed to allocate swim_gossip_queue_t container");
     return NULL;
   }
   q->entries = NULL;
@@ -80,7 +82,8 @@ swim_gossip_queue_t *swim_gossip_queue_init(void) {
 }
 
 void swim_gossip_queue_final(swim_gossip_queue_t *q) {
-  if (!q) return;
+  if (!q)
+    return;
   free(q->entries);
   free(q);
 }
@@ -98,7 +101,8 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
                               const swim_node_id_t *id, uint64_t incarnation,
                               uint32_t multiplier) {
   if (!q || !id || multiplier < 1) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_gossip_queue_enqueue");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid arguments to swim_gossip_queue_enqueue");
   }
 
   int idx = find_entry(q, id);
@@ -106,9 +110,11 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
     // Brand new event, insert at end
     if (q->count == q->capacity) {
       int new_capacity = q->capacity == 0 ? 8 : q->capacity * 2;
-      gossip_entry_t *new_entries = realloc(q->entries, new_capacity * sizeof(gossip_entry_t));
+      gossip_entry_t *new_entries =
+          realloc(q->entries, new_capacity * sizeof(gossip_entry_t));
       if (!new_entries) {
-        return swim_set_error(SWIM_ERR_NOMEM, "Failed to reallocate gossip queue entries");
+        return swim_set_error(SWIM_ERR_NOMEM,
+                              "Failed to reallocate gossip queue entries");
       }
       q->entries = new_entries;
       q->capacity = new_capacity;
@@ -135,7 +141,9 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
   } else if (incarnation == existing->event.incarnation) {
     int incoming_prio = get_priority(status);
     int existing_prio = get_priority(existing->event.status);
-    if (incoming_prio < existing_prio) { // Lower priority value is higher priority: DEAD=0 > SUSPECT=1 > ALIVE=2
+    if (incoming_prio <
+        existing_prio) { // Lower priority value is higher priority: DEAD=0 >
+                         // SUSPECT=1 > ALIVE=2
       existing->event.status = status;
       existing->transmit_count = 0;
       if (multiplier > existing->multiplier) {
@@ -143,22 +151,25 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
       }
     }
   }
-  // Otherwise, ignore (stale incarnation, or same incarnation but lower/equal priority)
+  // Otherwise, ignore (stale incarnation, or same incarnation but lower/equal
+  // priority)
   return 0;
 }
 
 int swim_gossip_queue_pack(swim_gossip_queue_t *q, uint32_t cluster_size,
-                            size_t max_bytes, swim_member_t *out_events,
-                            int max_len) {
+                           size_t max_bytes, swim_member_t *out_events,
+                           int max_len) {
   if (!q || !out_events || max_len < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_gossip_queue_pack");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid arguments to swim_gossip_queue_pack");
   }
 
   if (q->count == 0) {
     return 0;
   }
 
-  // Sort entries to establish priority order (DEAD > SUSPECT > ALIVE) and lowest transmit count
+  // Sort entries to establish priority order (DEAD > SUSPECT > ALIVE) and
+  // lowest transmit count
   qsort(q->entries, q->count, sizeof(gossip_entry_t), compare_entries);
 
   uint32_t limit = get_transmit_limit(cluster_size);
@@ -203,10 +214,11 @@ int swim_gossip_queue_size(const swim_gossip_queue_t *q) {
   return q ? q->count : 0;
 }
 
-int swim_gossip_queue_peek(const swim_gossip_queue_t *q, swim_member_t *out_events,
-                            int max_len) {
+int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
+                           swim_member_t *out_events, int max_len) {
   if (!q || !out_events || max_len < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_gossip_queue_peek");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid arguments to swim_gossip_queue_peek");
   }
 
   int n = q->count;
@@ -216,7 +228,8 @@ int swim_gossip_queue_peek(const swim_gossip_queue_t *q, swim_member_t *out_even
 
   gossip_entry_t *temp = malloc(n * sizeof(gossip_entry_t));
   if (!temp) {
-    return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate temporary copy for peek");
+    return swim_set_error(SWIM_ERR_NOMEM,
+                          "Failed to allocate temporary copy for peek");
   }
   memcpy(temp, q->entries, n * sizeof(gossip_entry_t));
   qsort(temp, n, sizeof(gossip_entry_t), compare_entries);
