@@ -88,7 +88,7 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
  * Garbage collect nodes that have been dead for longer than expiry_ms.
  *
  * @param m         The membership list instance.
- * @param expiry_ms Time threshold in milliseconds.
+ * @param expiry_ms How long a dead node should be kept around (quarantined) in milliseconds.
  * @param now_ms    Current monotonic time in milliseconds.
  */
 void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms, uint64_t now_ms);
