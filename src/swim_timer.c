@@ -6,17 +6,17 @@
 
 /* One alarm in the delta list. tick is the delay relative to the
  * predecessor element (or to "now" for the head). */
-typedef struct node {
+typedef struct entry_t {
   int tick;
   swim_timer_cb_t cb;
   void *ctx;
   void *param;
-  struct node *next;
+  struct entry_t *next;
   char name[128];
-} node;
+} entry_t;
 
 struct swim_timer_t {
-  node *head;
+  entry_t *head;
 };
 
 swim_timer_t *swim_timer_init(void) {
@@ -31,10 +31,10 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
                    swim_timer_cb_t cb, void *ctx, void *param) {
   assert(t);
   assert(ticks >= 1);
-  assert(name && strlen(name) < sizeof(((node *)0)->name));
+  assert(name && strlen(name) < sizeof(((entry_t *)0)->name));
   assert(cb);
 
-  node *nw = calloc(1, sizeof(*nw));
+  entry_t *nw = calloc(1, sizeof(*nw));
   if (!nw) {
     return -1;
   }
@@ -47,7 +47,7 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
    * deltas we step over. Tie (S + cur->tick == ticks) -> we go
    * after the existing alarm, so it fires first. */
   int s = 0;
-  node **pp = &t->head;
+  entry_t **pp = &t->head;
   while (*pp && s + (*pp)->tick <= ticks) {
     s += (*pp)->tick;
     pp = &(*pp)->next;
@@ -69,7 +69,7 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
   assert(t);
   assert(name);
 
-  node **pp = &t->head;
+  entry_t **pp = &t->head;
   while (*pp && strcmp((*pp)->name, name) != 0) {
     pp = &(*pp)->next;
   }
@@ -77,7 +77,7 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
     return;
   }
 
-  node *victim = *pp;
+  entry_t *victim = *pp;
   *pp = victim->next;
   if (*pp) {
     /* The successor was measured from victim; restore it relative
@@ -93,7 +93,7 @@ void swim_timer_cancel_all(swim_timer_t *t) {
   assert(t);
 
   while (t->head) {
-    node *n = t->head;
+    entry_t *n = t->head;
     t->head = n->next;
     n->cb(n->ctx, SWIM_TIMER_CANCEL, n->param);
     free(n);
@@ -120,7 +120,7 @@ void swim_timer_tick(swim_timer_t *t) {
    * due on this same tick). Pop before firing so a reentrant
    * callback sees a consistent list. */
   while (t->head && t->head->tick == 0) {
-    node *n = t->head;
+    entry_t *n = t->head;
     t->head = n->next;
     n->cb(n->ctx, SWIM_TIMER_ALARM, n->param);
     free(n);
