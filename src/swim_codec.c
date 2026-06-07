@@ -87,7 +87,7 @@ int swim_encode_membership(const swim_member_t *m, uint8_t *p, uint8_t *q) {
 }
 
 int swim_encode_int8(uint8_t val, uint8_t *p, uint8_t *q) {
-  if (p + 1 >= q) {
+  if (p + 1 > q) {
     return -1;
   }
   *p = val;
@@ -95,7 +95,7 @@ int swim_encode_int8(uint8_t val, uint8_t *p, uint8_t *q) {
 }
 
 int swim_encode_int16(uint16_t val, uint8_t *p, uint8_t *q) {
-  if (p + 2 >= q) {
+  if (p + 2 > q) {
     return -1;
   }
   uint16_t net_val = htons(val);
@@ -104,7 +104,7 @@ int swim_encode_int16(uint16_t val, uint8_t *p, uint8_t *q) {
 }
 
 int swim_encode_int32(uint32_t val, uint8_t *p, uint8_t *q) {
-  if (p + 4 >= q) {
+  if (p + 4 > q) {
     return -1;
   }
   uint32_t net_val = htonl(val);
@@ -113,7 +113,7 @@ int swim_encode_int32(uint32_t val, uint8_t *p, uint8_t *q) {
 }
 
 int swim_encode_int64(uint64_t val, uint8_t *p, uint8_t *q) {
-  if (p + 8 >= q) {
+  if (p + 8 > q) {
     return -1;
   }
   uint64_t net_val = htobe64(val);
@@ -123,7 +123,7 @@ int swim_encode_int64(uint64_t val, uint8_t *p, uint8_t *q) {
 
 int swim_encode_string(const char *str, uint8_t *p, uint8_t *q) {
   size_t len = strlen(str);
-  if (p + 2 + len >= q) {
+  if (p + 2 + len > q) {
     return -1;
   }
   uint16_t net_len = htons((uint16_t)len);
@@ -172,22 +172,15 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq
     p += n;
   }
 
-  // Cap gossip payload budget to min(1272, remaining packet room) per DESIGN §8
-  int remaining = (int)(end - p);
-  int budget = remaining > 0 ? remaining : 0;
-
-  int gossip_bytes;
+  // Fill gossip into the remaining packet room (DESIGN §8). With no queue
+  // (e.g. leave messages) the packet simply ends after the header; the
+  // decoder treats a missing gossip section as zero events.
+  int gossip_bytes = 0;
   if (q) {
-    gossip_bytes = swim_gossip_queue_pack_ex(
-        q, active_members, (char *)p, budget);
-  } else {
-    n = swim_encode_int16(0, p, end);
-    if (n < 0) { return -1; }
-    gossip_bytes = n;
-  }
-
-  if (gossip_bytes < 0) {
-    return -1;
+    gossip_bytes = swim_gossip_queue_pack_ex(q, active_members, p, end);
+    if (gossip_bytes < 0) {
+      return -1;
+    }
   }
 
   p += gossip_bytes;
@@ -339,87 +332,21 @@ int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
     memset(&msg->peer, 0, sizeof(msg->peer));
   }
 
-  // 5. Gossip Events Payload
-  if (p == end) {
-    msg->event_count = 0;
-    return 0;
+  // 5. Gossip Events Payload: a list of members filling the rest of the
+  // packet. There is no count; the list runs until the end of the buffer.
+  int count = 0;
+  while (p < end) {
+    if (count >= SWIM_MAX_EVENTS) {
+      return swim_set_error(SWIM_ERR_INVALID, "Event count exceeds maximum allowed");
+    }
+    n = swim_decode_membership(&msg->events[count], p, end);
+    if (n < 0) {
+      return swim_set_error(SWIM_ERR_INVALID, "Failed to decode gossip event");
+    }
+    p += n;
+    count++;
   }
 
-  uint16_t g_count;
-  n = swim_decode_int16(&g_count, p, end);
-  if (n < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for gossip count");
-  }
-  p += n;
-
-  if (g_count > SWIM_MAX_EVENTS) {
-    return swim_set_error(SWIM_ERR_INVALID, "Event count exceeds maximum allowed");
-  }
-
-  msg->event_count = (uint8_t)g_count;
-
-  for (int i = 0; i < g_count; i++) {
-    swim_member_t *ev = &msg->events[i];
-
-    uint16_t member_body_len;
-    n = swim_decode_int16(&member_body_len, p, end);
-    if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for member length");
-    }
-    p += n;
-
-    if (p + member_body_len > end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for member body");
-    }
-
-    const uint8_t *member_end = p + member_body_len;
-
-    // Decode node ID body length
-    uint16_t node_id_body_len;
-    n = swim_decode_int16(&node_id_body_len, p, member_end);
-    if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Member body too short for node ID length");
-    }
-    p += n;
-
-    const uint8_t *node_id_end = p + node_id_body_len;
-    if (node_id_end > member_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Node ID body exceeds member body size");
-    }
-
-    // Decode the node ID
-    n = swim_decode_node_id(&ev->id, p, node_id_end);
-    if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Failed to decode node ID in gossip event");
-    }
-    p += n;
-
-    if (p != node_id_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Inconsistent node ID body parsing offset");
-    }
-
-    // Decode status
-    uint8_t status;
-    n = swim_decode_int8(&status, p, member_end);
-    if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Member body too short for status");
-    }
-    ev->status = (swim_status_t)status;
-    p += n;
-
-    // Decode incarnation
-    n = swim_decode_int64(&ev->incarnation, p, member_end);
-    if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Member body too short for incarnation");
-    }
-    p += n;
-
-    if (p != member_end) {
-      return swim_set_error(SWIM_ERR_INVALID, "Inconsistent member body parsing offset");
-    }
-
-    ev->dead_at = 0;
-  }
-
+  msg->event_count = (uint8_t)count;
   return 0;
 }

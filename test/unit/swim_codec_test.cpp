@@ -120,18 +120,7 @@ TEST_CASE("codec: error validation and bounds checking") {
   // Reset type back to normal
   buf[0] = SWIM_MSG_PING;
 
-  // 3. Corrupt event count (too high)
-  // Offset of event count is 18 (1 type + 4 seq + 13 node_id)
-  buf[18] = 0;
-  buf[19] = 99; // event count 99 exceeds SWIM_MAX_EVENTS (64)
-  rc = swim_decode_message(buf, enc_len, &decoded);
-  CHECK(rc == -1);
-
-  // Reset event count back to normal
-  buf[18] = 0;
-  buf[19] = 0;
-
-  // 4. Corrupt node ID length leading to out-of-bounds
+  // 3. Corrupt node ID length leading to out-of-bounds
   // Offset of sender host_len is 5
   buf[5] = 250; // host_len 250 (which overflows bounds check)
   rc = swim_decode_message(buf, enc_len, &decoded);
@@ -226,6 +215,10 @@ TEST_CASE("codec: swim_encode_membership") {
   CHECK(buf[24] == SWIM_STATUS_ALIVE);
   CHECK(buf[25] == 0);
   CHECK(buf[32] == 42);
+
+  // Exact-fit encode must succeed (q is one past the end)
+  rc = swim_encode_membership(&member, buf, buf + 33);
+  CHECK(rc == 33);
 
   // Overflow check
   rc = swim_encode_membership(&member, buf, buf + 32);

@@ -47,17 +47,17 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 
 
 /**
- * Pack events into an outgoing message buffer using the new custom format.
- * Writes as many packed members as possible directly into the provided buffer.
+ * Pack events into an outgoing message buffer using the gossip wire format.
+ * Writes as many packed members as possible into the range [p, q).
  *
- * @param q            The gossip queue instance.
+ * @param queue        The gossip queue instance.
  * @param cluster_size Number of alive + suspect nodes in the cluster.
- * @param buf          The output character buffer.
- * @param bufsz        The size of the output buffer.
- * @return The number of bytes consumed in buf on success, or -1 on error.
+ * @param p            Pointer to start of the first free byte.
+ * @param q            Pointer to the end of the buffer (one past the end).
+ * @return The number of bytes written on success, or -1 on error.
  */
-int swim_gossip_queue_pack_ex(swim_gossip_queue_t *q, uint32_t cluster_size,
-                              char* buf, int bufsz);
+int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
+                              uint8_t *p, uint8_t *q);
 
 
 /**
