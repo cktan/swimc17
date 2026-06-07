@@ -49,7 +49,7 @@ clean:
 distclean: clean
 
 format:
-	clang-format -i *.[ch] *.hpp
+	clang-format -i *.[ch] 
 
 
 .PHONY: all clean distclean format

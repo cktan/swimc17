@@ -2,8 +2,8 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_timer.h"
 #include "swim_errno.h"
+#include "swim_timer.h"
 }
 
 #include <cstdint>
@@ -15,7 +15,7 @@ namespace {
 // One recorded callback invocation.
 struct Rec {
   swim_timer_event_t ev;
-  int id;  // taken from param
+  int id; // taken from param
 };
 
 std::vector<Rec> g_log;
@@ -43,7 +43,8 @@ void periodic_cb(void *ctx, swim_timer_event_t ev, void *param) {
 size_t count_ev(swim_timer_event_t ev) {
   size_t n = 0;
   for (auto &r : g_log) {
-    if (r.ev == ev) n++;
+    if (r.ev == ev)
+      n++;
   }
   return n;
 }
@@ -51,7 +52,8 @@ size_t count_ev(swim_timer_event_t ev) {
 std::vector<int> alarm_ids() {
   std::vector<int> v;
   for (auto &r : g_log) {
-    if (r.ev == SWIM_TIMER_ALARM) v.push_back(r.id);
+    if (r.ev == SWIM_TIMER_ALARM)
+      v.push_back(r.id);
   }
   return v;
 }
@@ -61,7 +63,7 @@ void add(swim_timer_t *t, int ticks, const char *name, int id) {
   REQUIRE(rc == 0);
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("empty timer: tick and final are no-ops") {
   g_log.clear();
@@ -78,16 +80,16 @@ TEST_CASE("single alarm fires on the exact tick") {
   swim_timer_t *t = swim_timer_init();
   add(t, 3, "a", 1);
 
-  swim_timer_tick(t);  // 1
+  swim_timer_tick(t); // 1
   CHECK(g_log.empty());
-  swim_timer_tick(t);  // 2
+  swim_timer_tick(t); // 2
   CHECK(g_log.empty());
-  swim_timer_tick(t);  // 3 -> fire
+  swim_timer_tick(t); // 3 -> fire
   REQUIRE(g_log.size() == 1);
   CHECK(g_log[0].ev == SWIM_TIMER_ALARM);
   CHECK(g_log[0].id == 1);
 
-  swim_timer_tick(t);  // nothing left
+  swim_timer_tick(t); // nothing left
   CHECK(g_log.size() == 1);
   swim_timer_final(t);
 }
@@ -101,7 +103,7 @@ TEST_CASE("alarms due on the same tick fire in insertion order") {
 
   swim_timer_tick(t);
   CHECK(g_log.empty());
-  swim_timer_tick(t);  // all three due now
+  swim_timer_tick(t); // all three due now
 
   CHECK(alarm_ids() == std::vector<int>({10, 20, 30}));
   swim_timer_final(t);
@@ -114,7 +116,8 @@ TEST_CASE("out-of-order inserts fire in time order") {
   add(t, 1, "a", 1);
   add(t, 5, "c", 3);
 
-  for (int i = 0; i < 5; i++) swim_timer_tick(t);
+  for (int i = 0; i < 5; i++)
+    swim_timer_tick(t);
 
   CHECK(alarm_ids() == std::vector<int>({1, 2, 3}));
   swim_timer_final(t);
@@ -130,7 +133,8 @@ TEST_CASE("cancel fires CANCEL, not ALARM, and stops the alarm") {
   CHECK(g_log[0].ev == SWIM_TIMER_CANCEL);
   CHECK(g_log[0].id == 7);
 
-  for (int i = 0; i < 5; i++) swim_timer_tick(t);
+  for (int i = 0; i < 5; i++)
+    swim_timer_tick(t);
   CHECK(count_ev(SWIM_TIMER_ALARM) == 0);
   swim_timer_final(t);
 }
@@ -138,14 +142,15 @@ TEST_CASE("cancel fires CANCEL, not ALARM, and stops the alarm") {
 TEST_CASE("cancel preserves the successor's fire time") {
   g_log.clear();
   swim_timer_t *t = swim_timer_init();
-  add(t, 2, "a", 1);  // stored delta 2
-  add(t, 5, "b", 2);  // stored delta 3 (relative to a)
+  add(t, 2, "a", 1); // stored delta 2
+  add(t, 5, "b", 2); // stored delta 3 (relative to a)
 
-  swim_timer_cancel(t, "a");  // b must still fire at absolute 5
+  swim_timer_cancel(t, "a"); // b must still fire at absolute 5
 
-  for (int i = 0; i < 4; i++) swim_timer_tick(t);  // ticks 1..4
+  for (int i = 0; i < 4; i++)
+    swim_timer_tick(t); // ticks 1..4
   CHECK(count_ev(SWIM_TIMER_ALARM) == 0);
-  swim_timer_tick(t);  // tick 5 -> b
+  swim_timer_tick(t); // tick 5 -> b
   REQUIRE(alarm_ids() == std::vector<int>({2}));
   swim_timer_final(t);
 }
@@ -156,12 +161,13 @@ TEST_CASE("cancel removes only the first match of a duplicate name") {
   add(t, 2, "dup", 1);
   add(t, 4, "dup", 2);
 
-  swim_timer_cancel(t, "dup");  // removes id 1 (first/earliest)
+  swim_timer_cancel(t, "dup"); // removes id 1 (first/earliest)
   REQUIRE(g_log.size() == 1);
   CHECK(g_log[0].ev == SWIM_TIMER_CANCEL);
   CHECK(g_log[0].id == 1);
 
-  for (int i = 0; i < 4; i++) swim_timer_tick(t);
+  for (int i = 0; i < 4; i++)
+    swim_timer_tick(t);
   CHECK(alarm_ids() == std::vector<int>({2}));
   swim_timer_final(t);
 }
@@ -219,7 +225,7 @@ TEST_CASE("re-arm: cancel then add with the same name") {
 
   swim_timer_tick(t);
   CHECK(count_ev(SWIM_TIMER_ALARM) == 0);
-  swim_timer_tick(t);  // fires the re-armed alarm at 2
+  swim_timer_tick(t); // fires the re-armed alarm at 2
   CHECK(alarm_ids() == std::vector<int>({2}));
   swim_timer_final(t);
 }
@@ -230,7 +236,8 @@ TEST_CASE("periodic: a self-rearming callback fires every period") {
   int rc = swim_timer_add(t, 2, "p", periodic_cb, t, as_param(9));
   REQUIRE(rc == 0);
 
-  for (int i = 0; i < 6; i++) swim_timer_tick(t);  // expect at 2,4,6
+  for (int i = 0; i < 6; i++)
+    swim_timer_tick(t); // expect at 2,4,6
   CHECK(alarm_ids() == std::vector<int>({9, 9, 9}));
 
   // The last re-armed alarm is still pending; final cancels it.

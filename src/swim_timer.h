@@ -50,8 +50,7 @@ typedef enum {
  * @param ev    why the callback fired (alarm vs cancel).
  * @param param opaque per-alarm datum supplied to swim_timer_add().
  */
-typedef void (*swim_timer_cb_t)(void *ctx, swim_timer_event_t ev,
-                                void *param);
+typedef void (*swim_timer_cb_t)(void *ctx, swim_timer_event_t ev, void *param);
 
 /**
  * Create an empty timer.

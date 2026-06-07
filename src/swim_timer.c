@@ -39,7 +39,8 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
 
   entry_t *nw = calloc(1, sizeof(*nw));
   if (!nw) {
-    return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate entry_t node for alarm '%s'", name);
+    return swim_set_error(
+        SWIM_ERR_NOMEM, "Failed to allocate entry_t node for alarm '%s'", name);
   }
   nw->cb = cb;
   nw->ctx = ctx;
