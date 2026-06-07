@@ -106,24 +106,46 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
         "Invalid NULL or zero size arguments to swim_udp_send");
   }
 
-  struct addrinfo hints, *res = NULL;
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_DGRAM;
+  // Resolve the destination to a sockaddr. IP-literal hosts (the common case
+  // here, since recv normalizes every peer to a numeric address) are built
+  // directly with inet_pton, avoiding a synchronous DNS lookup in the protocol
+  // loop. getaddrinfo is used only for actual hostnames.
+  struct sockaddr_storage ss;
+  socklen_t ss_len = 0;
+  memset(&ss, 0, sizeof(ss));
 
-  char port_str[16];
-  snprintf(port_str, sizeof(port_str), "%u", dest->port);
+  struct sockaddr_in *sin = (struct sockaddr_in *)&ss;
+  struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&ss;
 
-  int s = getaddrinfo(dest->host, port_str, &hints, &res);
-  if (s != 0) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "getaddrinfo failed for destination: %s",
-                          gai_strerror(s));
+  if (inet_pton(AF_INET, dest->host, &sin->sin_addr) == 1) {
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(dest->port);
+    ss_len = sizeof(*sin);
+  } else if (inet_pton(AF_INET6, dest->host, &sin6->sin6_addr) == 1) {
+    sin6->sin6_family = AF_INET6;
+    sin6->sin6_port = htons(dest->port);
+    ss_len = sizeof(*sin6);
+  } else {
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%u", dest->port);
+
+    int s = getaddrinfo(dest->host, port_str, &hints, &res);
+    if (s != 0) {
+      return swim_set_error(SWIM_ERR_INVALID,
+                            "getaddrinfo failed for destination: %s",
+                            gai_strerror(s));
+    }
+    memcpy(&ss, res->ai_addr, res->ai_addrlen);
+    ss_len = res->ai_addrlen;
+    freeaddrinfo(res);
   }
 
-  ssize_t n = sendto(u->fd, buf, size, 0, res->ai_addr, res->ai_addrlen);
-  freeaddrinfo(res);
-
+  ssize_t n = sendto(u->fd, buf, size, 0, (struct sockaddr *)&ss, ss_len);
   if (n < 0) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "sendto failed");
   }
@@ -151,21 +173,24 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
     return swim_set_error(SWIM_ERR_BAD_STATE, "recvfrom failed");
   }
 
-  // Parse host/port back from sockaddr
-  char host_buf[NI_MAXHOST];
-  char port_buf[NI_MAXSERV];
-  int s = getnameinfo((struct sockaddr *)&src_addr, addr_len, host_buf,
-                      sizeof(host_buf), port_buf, sizeof(port_buf),
-                      NI_NUMERICHOST | NI_NUMERICSERV);
-  if (s != 0) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "getnameinfo failed: %s",
-                          gai_strerror(s));
+  // Format the source address numerically (no DNS / reverse lookup). cookie is
+  // cleared since the socket sender doesn't carry it.
+  const char *ok = NULL;
+  if (src_addr.ss_family == AF_INET) {
+    struct sockaddr_in *sin = (struct sockaddr_in *)&src_addr;
+    ok = inet_ntop(AF_INET, &sin->sin_addr, out_src->host,
+                   sizeof(out_src->host));
+    out_src->port = ntohs(sin->sin_port);
+  } else if (src_addr.ss_family == AF_INET6) {
+    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&src_addr;
+    ok = inet_ntop(AF_INET6, &sin6->sin6_addr, out_src->host,
+                   sizeof(out_src->host));
+    out_src->port = ntohs(sin6->sin6_port);
   }
-
-  // Populate out_src (cookie cleared since socket sender doesn't carry it)
-  strncpy(out_src->host, host_buf, sizeof(out_src->host) - 1);
-  out_src->host[sizeof(out_src->host) - 1] = '\0';
-  out_src->port = (uint16_t)atoi(port_buf);
+  if (!ok) {
+    return swim_set_error(SWIM_ERR_BAD_STATE,
+                          "Failed to format source address");
+  }
   out_src->cookie[0] = '\0';
 
   return (int)n;
