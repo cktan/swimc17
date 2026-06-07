@@ -9,11 +9,10 @@
 extern "C" {
 #endif
 
-typedef enum {
-  SWIM_STATUS_ALIVE = 0,
-  SWIM_STATUS_SUSPECT = 1,
-  SWIM_STATUS_DEAD = 2
-} swim_status_t;
+typedef char swim_status_t;
+#define SWIM_STATUS_ALIVE   'A'
+#define SWIM_STATUS_SUSPECT 'S'
+#define SWIM_STATUS_DEAD    'D'
 
 typedef struct {
   swim_node_id_t id;
