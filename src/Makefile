@@ -1,5 +1,5 @@
-HFILES := swim_timer.h swim_errno.h swim_node_id.h swim_membership.h swim_gossip_queue.h swim_codec.h swim_udp.h
-CFILES := swim_timer.c swim_errno.c swim_node_id.c swim_membership.c swim_gossip_queue.c swim_codec.c swim_udp.c
+HFILES := swim_timer.h swim_errno.h swim_node_id.h swim_membership.h swim_gossip_queue.h swim_codec.h swim_udp.h swim_protocol.h
+CFILES := swim_timer.c swim_errno.c swim_node_id.c swim_membership.c swim_gossip_queue.c swim_codec.c swim_udp.c swim_protocol.c
 OBJ := $(CFILES:.c=.o)
 
 # set up LIB_SHARED
@@ -16,7 +16,7 @@ endif
 EXEC =
 
 # set up CFLAGS / CXXFLAGS
-CFLAGS := -std=c17 -Wmissing-declarations -Wall -Wextra -MMD
+CFLAGS := -std=c17 -Wmissing-declarations -Wall -Wextra -MMD -pthread
 
 ifdef DEBUG
     CFLAGS += -O0 -g -fsanitize=address,undefined
@@ -37,7 +37,7 @@ libswimc17.a: $(OBJ)
 	ar -rcs $@ $^
 
 $(LIB_SHARED): $(OBJ)
-	$(CC) -shared -o $@ $^
+	$(CC) -shared -pthread -o $@ $^ -lm
 
 -include $(OBJ:%.o=%.d) $(EXEC:%=%.d)
 

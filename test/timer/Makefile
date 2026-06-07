@@ -2,13 +2,13 @@ CC  ?= cc
 CXX ?= c++
 
 SAN      := -fsanitize=address,undefined
-CFLAGS   := -std=c17   -Wall -Wextra -Wmissing-declarations -g $(SAN) -I../../src
-CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include
+CFLAGS   := -std=c17   -Wall -Wextra -Wmissing-declarations -g $(SAN) -I../../src -pthread
+CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -pthread
 
 all: timer_test
 
-timer_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o
-	$(CXX) $(CXXFLAGS) -o $@ $^
+timer_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm -pthread
 
 swim_timer_test.o: swim_timer_test.cpp ../../ext/include/doctest.h ../../src/swim_timer.h ../../src/swim_errno.h ../../src/swim_node_id.h
 	$(CXX) $(CXXFLAGS) -c $<
@@ -23,6 +23,9 @@ swim_codec_test.o: swim_codec_test.cpp ../../ext/include/doctest.h ../../src/swi
 	$(CXX) $(CXXFLAGS) -c $<
 
 swim_udp_test.o: swim_udp_test.cpp ../../ext/include/doctest.h ../../src/swim_udp.h ../../src/swim_errno.h ../../src/swim_node_id.h
+	$(CXX) $(CXXFLAGS) -c $<
+
+swim_protocol_test.o: swim_protocol_test.cpp ../../ext/include/doctest.h ../../src/swim_protocol.h ../../src/swim_errno.h ../../src/swim_node_id.h
 	$(CXX) $(CXXFLAGS) -c $<
 
 swim_timer.o: ../../src/swim_timer.c ../../src/swim_timer.h
@@ -45,6 +48,9 @@ swim_codec.o: ../../src/swim_codec.c ../../src/swim_codec.h
 
 swim_udp.o: ../../src/swim_udp.c ../../src/swim_udp.h
 	$(CC) $(CFLAGS) -c ../../src/swim_udp.c
+
+swim_protocol.o: ../../src/swim_protocol.c ../../src/swim_protocol.h
+	$(CC) $(CFLAGS) -c ../../src/swim_protocol.c
 
 test: timer_test
 	./timer_test

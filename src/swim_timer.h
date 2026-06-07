@@ -85,7 +85,7 @@ void swim_timer_final(swim_timer_t *t);
  * @param t     the timer.
  * @param ticks delay in ticks; must be >= 1.
  * @param name  lookup key for swim_timer_cancel(); copied into the
- *              alarm. Must be non-NULL and at most 128 bytes
+ *              alarm. Must be non-NULL and at most 384 bytes
  *              including the terminating NUL. Need not be unique.
  * @param cb    callback to fire; must be non-NULL.
  * @param ctx   opaque context passed back to @cb.

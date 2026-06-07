@@ -14,7 +14,7 @@ struct entry_t {
   void *ctx;
   void *param;
   entry_t *next;
-  char name[128];
+  char name[384];
 };
 
 struct swim_timer_t {
