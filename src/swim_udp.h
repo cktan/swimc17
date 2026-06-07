@@ -1,0 +1,67 @@
+#ifndef SWIM_UDP_H
+#define SWIM_UDP_H
+
+#include "swim_node_id.h"
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct swim_udp_t swim_udp_t;
+
+/**
+ * Create and bind a non-blocking UDP socket.
+ * Supports both IPv4 and IPv6 local addresses.
+ *
+ * @param host The local address to bind to.
+ * @param port The local port to bind to.
+ * @return a new swim_udp_t instance, or NULL on failure.
+ */
+swim_udp_t *swim_udp_init(const char *host, uint16_t port);
+
+/**
+ * Destroy the UDP transport and close the socket.
+ *
+ * @param u The UDP transport instance.
+ */
+void swim_udp_final(swim_udp_t *u);
+
+/**
+ * Send a packet to a target destination.
+ *
+ * @param u    The UDP transport instance.
+ * @param dest The target node ID (contains host and port).
+ * @param buf  The binary payload to send.
+ * @param size The size of the payload.
+ * @return 0 on success, -1 on failure.
+ */
+int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
+                  const uint8_t *buf, size_t size);
+
+/**
+ * Receive a packet. Non-blocking.
+ *
+ * @param u       The UDP transport instance.
+ * @param out_src Pointer to a swim_node_id_t to receive the sender's host/port.
+ * @param buf     Buffer to store the received payload.
+ * @param size    Size of the buffer.
+ * @return The number of bytes received on success, 0 if no data is available (EWOULDBLOCK), -1 on error.
+ */
+int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
+                  uint8_t *buf, size_t size);
+
+/**
+ * Return the underlying socket file descriptor.
+ *
+ * @param u The UDP transport instance.
+ * @return The socket file descriptor, or -1.
+ */
+int swim_udp_fd(const swim_udp_t *u);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // SWIM_UDP_H
