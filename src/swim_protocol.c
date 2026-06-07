@@ -378,15 +378,8 @@ int pack_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
     p += n;
   }
 
-  // Cap gossip payload budget to min(1272, remaining packet room) per DESIGN §8
-  int budget = 1272;
   int remaining = (int)(end - p);
-  if (budget > remaining) {
-    budget = remaining;
-  }
-  if (budget < 0) {
-    budget = 0;
-  }
+  int budget = remaining > 0 ? remaining : 0;
 
   int gossip_bytes;
   if (q) {
