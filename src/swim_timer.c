@@ -1,4 +1,5 @@
 #include "swim_timer.h"
+#include "swim_errno.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@ struct swim_timer_t {
 swim_timer_t *swim_timer_init(void) {
   swim_timer_t *t = calloc(1, sizeof(*t));
   if (!t) {
+    swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_timer_t container");
     return NULL;
   }
   return t;
@@ -37,7 +39,7 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
 
   entry_t *nw = calloc(1, sizeof(*nw));
   if (!nw) {
-    return -1;
+    return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate entry_t node for alarm '%s'", name);
   }
   nw->cb = cb;
   nw->ctx = ctx;

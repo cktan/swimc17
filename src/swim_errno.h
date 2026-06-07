@@ -37,8 +37,9 @@ const char *swim_strerror(int err);
  *
  * @param e   the error code to set.
  * @param fmt printf-like format string for the error message detail.
+ * @return always returns -1.
  */
-void swim_set_error(int e, const char *fmt, ...);
+int swim_set_error(int e, const char *fmt, ...);
 
 #ifdef __cplusplus
 }

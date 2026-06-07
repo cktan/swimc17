@@ -29,7 +29,7 @@ const char *swim_strerror(int err) {
   }
 }
 
-void swim_set_error(int e, const char *fmt, ...) {
+int swim_set_error(int e, const char *fmt, ...) {
   swim_errno = e;
   if (fmt) {
     va_list ap;
@@ -39,4 +39,5 @@ void swim_set_error(int e, const char *fmt, ...) {
   } else {
     swim_errbuf[0] = '\0';
   }
+  return -1;
 }
