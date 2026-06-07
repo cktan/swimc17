@@ -5,9 +5,9 @@ SAN      := -fsanitize=address,undefined
 CFLAGS   := -std=c17   -Wall -Wextra -Wmissing-declarations -g $(SAN) -I../../src -pthread
 CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -pthread
 
-all: timer_test
+all: unit_test
 
-timer_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o
+unit_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm -pthread
 
 swim_timer_test.o: swim_timer_test.cpp ../../ext/include/doctest.h ../../src/swim_timer.h ../../src/swim_errno.h ../../src/swim_node_id.h
@@ -52,11 +52,11 @@ swim_udp.o: ../../src/swim_udp.c ../../src/swim_udp.h
 swim_protocol.o: ../../src/swim_protocol.c ../../src/swim_protocol.h
 	$(CC) $(CFLAGS) -c ../../src/swim_protocol.c
 
-test: timer_test
-	./timer_test
+test: unit_test
+	./unit_test
 
 clean:
-	rm -f *.o timer_test
+	rm -f *.o unit_test
 
 format:
 	clang-format -i *.cpp

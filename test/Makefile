@@ -1,15 +1,15 @@
 all:
-	$(MAKE) -C timer all
+	$(MAKE) -C unit all
 
 test: all
-	$(MAKE) -C timer test
+	$(MAKE) -C unit test
 
 clean:
-	$(MAKE) -C timer clean
+	$(MAKE) -C unit clean
 
 distclean: clean
 
 format:
-	$(MAKE) -C timer format
+	$(MAKE) -C unit format
 
 .PHONY: all clean distclean format test
