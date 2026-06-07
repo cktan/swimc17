@@ -42,6 +42,7 @@ install: all
 	install -m 0644 src/swim_node_id.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/swim_membership.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/swim_gossip_queue.h $(DESTDIR)${prefix}/include/
+	install -m 0644 src/swim_codec.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/libswimc17.a $(DESTDIR)${prefix}/lib/
 	@echo "$$PCFILE" >> $(DESTDIR)${prefix}/lib/pkgconfig/libswimc17.pc
 

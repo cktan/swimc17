@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 typedef struct {
-  char host[64];
+  char host[256]; // RFC 1035 hostnames can be up to 253 characters, plus space for IPv6 addresses
   uint16_t port;
   char cookie[64];
 } swim_node_id_t;
