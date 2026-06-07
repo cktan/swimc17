@@ -26,18 +26,11 @@ typedef struct {
  * @return negative if a < b, 0 if a == b, positive if a > b.
  */
 static inline int swim_node_id_compare(const swim_node_id_t *a, const swim_node_id_t *b) {
-  if (a == b) return 0;
-  if (!a) return -1;
-  if (!b) return 1;
-
+  assert(a && b);
   int r = strcmp(a->host, b->host);
-  if (r != 0) return r;
-
-  if (a->port != b->port) {
-    return (a->port < b->port) ? -1 : 1;
-  }
-
-  return strcmp(a->cookie, b->cookie);
+  r = (r ? r :(a->port != b->port) ? ((a->port < b->port) ? -1 : 1));
+  r = (r ? r :strcmp(a->cookie, b->cookie));
+  return r;
 }
 
 /**
