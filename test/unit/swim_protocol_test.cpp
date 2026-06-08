@@ -284,7 +284,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   CHECK(suspect_found);
 
   // Provide a liveness hint to revive the suspected node
-  rc = swim_hint_alive("failure_node", &mock_id);
+  rc = swim_hint_alive("failure_node", "127.0.0.1:20202/mock");
   CHECK(rc == 0);
 
   // Verify it is ALIVE again
@@ -463,12 +463,12 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
 static std::atomic<bool> g_race_stop{false};
 struct RaceArg {
   const char *name;
-  swim_node_id_t peer;
+  const char *peer;
 };
 static void *hint_spammer(void *a) {
   RaceArg *r = (RaceArg *)a;
   while (!g_race_stop.load()) {
-    swim_hint_alive(r->name, &r->peer);
+    swim_hint_alive(r->name, r->peer);
   }
   return nullptr;
 }
@@ -494,7 +494,7 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
 
   RaceArg arg;
   arg.name = "h3_race";
-  REQUIRE(swim_node_id_parse(&arg.peer, "127.0.0.1:20404/p") == 0);
+  arg.peer = "127.0.0.1:20404/p";
 
   g_race_stop = false;
   pthread_t th[4];

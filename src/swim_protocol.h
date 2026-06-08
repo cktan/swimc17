@@ -201,6 +201,6 @@ SWIM_EXTERN int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
  * @param peer The node ID of the peer.
  * @return 0 on success, -1 on failure.
  */
-SWIM_EXTERN int swim_hint_alive(const char *name, const swim_node_id_t *peer);
+SWIM_EXTERN int swim_hint_alive(const char *name, const char *peer);
 
 #endif // SWIM_PROTOCOL_H

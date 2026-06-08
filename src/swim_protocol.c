@@ -1151,7 +1151,7 @@ int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
   return rc;
 }
 
-int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
+int swim_hint_alive(const char *name, const char *peer) {
   if (!name || name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
   }
@@ -1159,30 +1159,33 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid NULL peer in swim_hint_alive");
   }
+  swim_node_id_t peer_id;
+  if (swim_node_id_parse(&peer_id, peer) != 0)
+    return -1;
 
   swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  const swim_member_t *m = swim_membership_get(inst->membership, peer);
+  const swim_member_t *m = swim_membership_get(inst->membership, &peer_id);
   if (m) {
     if (m->status == SWIM_STATUS_SUSPECT) {
       // Cancel suspicion timer
       char alarm_name[384];
-      suspect_key(alarm_name, sizeof(alarm_name), peer);
+      suspect_key(alarm_name, sizeof(alarm_name), &peer_id);
       swim_timer_cancel(inst->timer, alarm_name);
 
       // Re-announce as alive
-      swim_membership_set_alive(inst->membership, peer, m->incarnation);
-      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, peer,
+      swim_membership_set_alive(inst->membership, &peer_id, m->incarnation);
+      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, &peer_id,
                                 m->incarnation, 1);
-      queue_notification(inst, SWIM_NODE_UP, peer);
+      queue_notification(inst, SWIM_NODE_UP, &peer_id);
     }
 
     // Cancel outstanding probes to this target
     if (inst->pending_probe.state != PROBE_NONE &&
-        swim_node_id_compare(&inst->pending_probe.target, peer) == 0) {
+        swim_node_id_compare(&inst->pending_probe.target, &peer_id) == 0) {
       inst->pending_probe.state = PROBE_NONE;
       swim_timer_cancel(inst->timer, "probe_timeout");
     }
