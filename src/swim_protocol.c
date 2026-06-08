@@ -75,6 +75,7 @@ typedef struct {
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
 
+// TODO: comment
 typedef struct {
   probe_state_t state;
   swim_node_id_t target;
@@ -82,6 +83,7 @@ typedef struct {
   uint64_t sent_ms; // monotonic send time of the direct ping, for RTT
 } pending_probe_t;
 
+// TODO: comment
 typedef struct {
   swim_node_id_t requester;
   swim_node_id_t target;
@@ -296,6 +298,7 @@ static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   free(target);
 }
 
+// TODO: comment
 static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
   if (inst->pending_probe.state == PROBE_DIRECT &&
       inst->pending_probe.seq == seq) {
@@ -365,6 +368,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
   }
 }
 
+// TODO: comment
 static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   (void)param;
   swim_instance_t *inst = (swim_instance_t *)ctx;
@@ -496,6 +500,7 @@ static void dispatch_notifications(notify_batch_t *batch) {
   batch->count = 0;
 }
 
+// TODO: comment
 static void update_node_alive(swim_instance_t *inst,
                               const swim_node_id_t *node) {
   if (swim_node_id_compare(node, &inst->self_id) == 0) {
