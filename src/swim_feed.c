@@ -2,7 +2,7 @@
  * swim_feed.c — Fixed-size telemetry ring buffer.
  *
  * Stores multi-string records (e.g. "node up", "127.0.0.1:8000")
- * in a 4 KB byte buffer for consumption by swim_get_event().
+ * in a 4 KB byte buffer for consumption by swim_read_feed().
  * Records are encoded as [int n][str0\0][str1\0]...[strN-1\0].
  *
  * Auto-draining: when a new record does not fit, the oldest

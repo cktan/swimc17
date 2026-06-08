@@ -134,7 +134,7 @@ SWIM_EXTERN int swim_unsubscribe(const char *name, swim_callback_t callback,
  * @return the number of strings copied (>= 1) on success, 0 if the feed is
  *         empty, or -1 on error (sets swim_errno).
  */
-SWIM_EXTERN int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
+SWIM_EXTERN int swim_read_feed(const char *name, int bufsz, char *buf, int nptr,
                                char **ptr);
 
 /**

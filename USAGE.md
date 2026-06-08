@@ -286,10 +286,10 @@ re-suspicion. Releases the lock. Thread-safe.
 
 ---
 
-### `swim_get_event`
+### `swim_read_feed`
 
 ```c
-int swim_get_event(const char *name, int bufsz, char *buf, int nptr, char **ptr);
+int swim_read_feed(const char *name, int bufsz, char *buf, int nptr, char **ptr);
 ```
 
 Drains and retrieves the next event from the instance's
@@ -314,7 +314,7 @@ Example:
 char buf[4096];
 char *ptr[10];
 int n;
-while ((n = swim_get_event("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
+while ((n = swim_read_feed("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
     // Process event strings in ptr[0..n-1]
 }
 ```

@@ -1125,7 +1125,7 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   return 0;
 }
 
-int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
+int swim_read_feed(const char *name, int bufsz, char *buf, int nptr,
                    char **ptr) {
   if (!name || name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");

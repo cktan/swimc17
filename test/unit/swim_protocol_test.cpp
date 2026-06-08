@@ -62,7 +62,7 @@ void poll_feed_events(const char *name) {
   char buf[4096];
   char *ptr[10];
   int n;
-  while ((n = swim_get_event(name, sizeof(buf), buf, 10, ptr)) > 0) {
+  while ((n = swim_read_feed(name, sizeof(buf), buf, 10, ptr)) > 0) {
     std::string s;
     for (int i = 0; i < n; i++) {
       if (i > 0)
@@ -785,10 +785,10 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 }
 
 // L3: registering an observer on a missing instance fails cleanly.
-TEST_CASE("protocol: swim_get_event on unknown instance fails (L3)") {
+TEST_CASE("protocol: swim_read_feed on unknown instance fails (L3)") {
   char buf[4096];
   char *ptr[10];
-  REQUIRE(swim_get_event("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
+  REQUIRE(swim_read_feed("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
   CHECK(swim_errno() == SWIM_ERR_BAD_STATE);
   swim_set_error(SWIM_OK, nullptr);
 }

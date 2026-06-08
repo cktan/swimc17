@@ -352,10 +352,10 @@ library itself — the feed is the only output channel.
 ### Reading the feed
 
 ```c
-int swim_get_event(const char *name, int bufsz, char *buf, int nptr, char **ptr);
+int swim_read_feed(const char *name, int bufsz, char *buf, int nptr, char **ptr);
 ```
 
-The application pulls events by calling `swim_get_event`
+The application pulls events by calling `swim_read_feed`
 repeatedly: it returns the number of strings copied (>= 1)
 on success, `0` when the feed is empty, or `-1` on error.
 A buffer of size 4096 (`bufsz`) and a pointer array of
@@ -367,7 +367,7 @@ Example:
 char buf[4096];
 char *ptr[10];
 int n;
-while ((n = swim_get_event("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
+while ((n = swim_read_feed("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
   // Process event in ptr[0 ... n-1]
 }
 ```
