@@ -55,13 +55,13 @@ int swim_leave(const char *name);
  * Query current cluster membership list for a named instance.
  *
  * @param name         The name of the instance (mandatory).
- * @param out_list     Output buffer for members.
+ * @param out_list     Output buffer for peer node ids.
  * @param max_len      Size of the out_list buffer.
  * @param include_dead Whether to include dead nodes in the list.
- * @return The number of members copied, or -1 on error.
+ * @return The number of peers copied, or -1 on error.
  */
-int swim_members(const char *name, swim_member_t *out_list, int max_len,
-                 bool include_dead);
+int swim_peers(const char *name, swim_node_id_t *out_list, int max_len,
+               bool include_dead);
 
 /**
  * Subscribe a callback to receive membership events from a named instance.

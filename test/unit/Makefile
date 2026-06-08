@@ -25,7 +25,7 @@ swim_codec_test.o: swim_codec_test.cpp ../../ext/include/doctest.h ../../src/swi
 swim_udp_test.o: swim_udp_test.cpp ../../ext/include/doctest.h ../../src/swim_udp.h ../../src/swim_errno.h ../../src/swim_node_id.h
 	$(CXX) $(CXXFLAGS) -c $<
 
-swim_protocol_test.o: swim_protocol_test.cpp ../../ext/include/doctest.h ../../src/swim_protocol.h ../../src/swim_errno.h ../../src/swim_node_id.h
+swim_protocol_test.o: swim_protocol_test.cpp ../../ext/include/doctest.h ../../src/swim_protocol.h ../../src/swim_protocol_internal.h ../../src/swim_errno.h ../../src/swim_node_id.h
 	$(CXX) $(CXXFLAGS) -c $<
 
 swim_timer.o: ../../src/swim_timer.c ../../src/swim_timer.h
@@ -49,7 +49,7 @@ swim_codec.o: ../../src/swim_codec.c ../../src/swim_codec.h
 swim_udp.o: ../../src/swim_udp.c ../../src/swim_udp.h
 	$(CC) $(CFLAGS) -c ../../src/swim_udp.c
 
-swim_protocol.o: ../../src/swim_protocol.c ../../src/swim_protocol.h
+swim_protocol.o: ../../src/swim_protocol.c ../../src/swim_protocol.h ../../src/swim_protocol_internal.h
 	$(CC) $(CFLAGS) -c ../../src/swim_protocol.c
 
 swim_feed_test.o: swim_feed_test.cpp ../../ext/include/doctest.h ../../src/swim_feed.h ../../src/swim_errno.h

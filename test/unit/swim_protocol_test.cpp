@@ -6,6 +6,7 @@ extern "C" {
 #include "swim_gossip_queue.h"
 #include "swim_node_id.h"
 #include "swim_protocol.h"
+#include "swim_protocol_internal.h"
 #include "swim_udp.h"
 }
 
@@ -119,8 +120,8 @@ TEST_CASE("protocol: single node startup and leave") {
   CHECK(rc == 0);
 
   // Query members (should be empty because self is not in the list)
-  swim_member_t members[5];
-  int count = swim_members("single_node", members, 5, true);
+  swim_node_id_t members[5];
+  int count = swim_peers("single_node", members, 5, true);
   CHECK(count == 0);
 
   // Unsubscribe
@@ -188,18 +189,18 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   usleep(1500000);
 
   // Check Node 1 membership
-  swim_member_t members1[5];
-  int count1 = swim_members("n1", members1, 5, false);
+  swim_node_id_t members1[5];
+  int count1 = swim_peers("n1", members1, 5, false);
   CHECK(count1 >= 2); // should have discovered Node 2 and Node 3
 
   // Check Node 2 membership
-  swim_member_t members2[5];
-  int count2 = swim_members("n2", members2, 5, false);
+  swim_node_id_t members2[5];
+  int count2 = swim_peers("n2", members2, 5, false);
   CHECK(count2 >= 2);
 
   // Check Node 3 membership
-  swim_member_t members3[5];
-  int count3 = swim_members("n3", members3, 5, false);
+  swim_node_id_t members3[5];
+  int count3 = swim_peers("n3", members3, 5, false);
   CHECK(count3 >= 2);
 
   // Tear down all
@@ -413,7 +414,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
 // Regression for H3: a subscriber callback must be able to re-enter the public
 // API. Callbacks fire after the instance lock is released, so a callback that
-// calls swim_members() succeeds; before the fix this self-deadlocked the worker
+// calls swim_peers() succeeds; before the fix this self-deadlocked the worker
 // thread (and would hang the whole suite here).
 static std::atomic<bool> g_reentrant_ok{false};
 static void reentrant_members_cb(void *ctx, swim_event_t event,
@@ -421,8 +422,8 @@ static void reentrant_members_cb(void *ctx, swim_event_t event,
   (void)ctx;
   (void)event;
   (void)node;
-  swim_member_t m[8];
-  int n = swim_members("h3_reentrant", m, 8, true);
+  swim_node_id_t m[8];
+  int n = swim_peers("h3_reentrant", m, 8, true);
   (void)n;
   g_reentrant_ok = true;
 }

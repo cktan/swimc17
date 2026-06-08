@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "swim_protocol.h"
+#include "swim_protocol_internal.h"
 #include "swim_codec.h"
 #include "swim_errno.h"
 #include "swim_feed.h"
@@ -975,6 +976,31 @@ int swim_members(const char *name, swim_member_t *out_list, int max_len,
   pthread_mutex_unlock(&inst->mutex);
 
   pthread_mutex_unlock(&g_instances_mutex);
+  return ret;
+}
+
+int swim_peers(const char *name, swim_node_id_t *out_list, int max_len,
+               bool include_dead) {
+  if (!out_list || max_len < 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_peers");
+  }
+  if (max_len == 0) {
+    swim_member_t dummy;
+    return swim_members(name, &dummy, 0, include_dead);
+  }
+
+  swim_member_t *members = malloc(max_len * sizeof(*members));
+  if (!members) {
+    return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate member buffer");
+  }
+
+  int ret = swim_members(name, members, max_len, include_dead);
+  if (ret > 0) {
+    for (int i = 0; i < ret; i++) {
+      out_list[i] = members[i].id;
+    }
+  }
+  free(members);
   return ret;
 }
 

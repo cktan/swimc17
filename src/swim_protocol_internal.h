@@ -1,0 +1,26 @@
+#ifndef SWIM_PROTOCOL_INTERNAL_H
+#define SWIM_PROTOCOL_INTERNAL_H
+
+#include <stdbool.h>
+
+#include "swim_membership.h"
+
+/*
+ * Internal/QA-only interface. Not part of the public API exposed in
+ * swim_protocol.h.
+ */
+
+/**
+ * Query the current cluster membership list (with full member records) for a
+ * named instance. Exposed for QA/testing; the public API is swim_peers().
+ *
+ * @param name         The name of the instance (mandatory).
+ * @param out_list     Output buffer for members.
+ * @param max_len      Size of the out_list buffer.
+ * @param include_dead Whether to include dead nodes in the list.
+ * @return The number of members copied, or -1 on error.
+ */
+int swim_members(const char *name, swim_member_t *out_list, int max_len,
+                 bool include_dead);
+
+#endif // SWIM_PROTOCOL_INTERNAL_H

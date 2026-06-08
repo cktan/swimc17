@@ -182,27 +182,28 @@ releases memory. Thread-safe.
 
 ---
 
-### `swim_members`
+### `swim_peers`
 
 ```c
-int swim_members(const char *name, swim_member_t *out_list, int max_len, bool include_dead);
+int swim_peers(const char *name, swim_node_id_t *out_list, int max_len, bool include_dead);
 ```
 
-Retrieves a snapshot of the current membership registry.
+Retrieves a snapshot of the current membership registry as a
+list of peer node ids.
 
 The `name` argument specifies the instance. It must be
 non-NULL and non-empty. `out_list` is a pre-allocated buffer
-of `swim_member_t` elements, and `max_len` is its capacity.
+of `swim_node_id_t` elements, and `max_len` is its capacity.
 Set `include_dead` to `true` to return dead/quarantined
 entries, or `false` for active nodes only.
 
 Returns the number of elements written to `out_list` on
 success (can be `0` or greater). Returns `-1` on error:
 - `SWIM_ERR_INVALID`: `name` is NULL or empty, or `out_list`
-  is NULL or `max_len <= 0`.
+  is NULL or `max_len < 0`.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
-Acquires the instance mutex, copies matching elements
+Acquires the instance mutex, copies matching node ids
 directly to the provided array, and releases the lock.
 Thread-safe.
 
@@ -374,8 +375,8 @@ swim_start_opts_t opts_b = { .host = "10.0.0.1", .port = 7772, .name = "cluster_
 swim_start(&opts_a);
 swim_start(&opts_b);
 
-swim_member_t members[32];
-swim_members("cluster_a", members, 32, false);
+swim_node_id_t members[32];
+swim_peers("cluster_a", members, 32, false);
 ```
 
 ---

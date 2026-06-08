@@ -237,9 +237,9 @@ named instance; it cannot be `NULL` or empty.
 ### Querying membership
 
 ```
-swim_members(name, opts = {})
+swim_peers(name, opts = {})
 # opts: {include_dead: true}  ← default false
-# returns: [{"host", port, "cookie", status, incarnation}]
+# returns: [{"host", port, "cookie"}]
 ```
 
 ### Event subscription
