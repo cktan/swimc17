@@ -635,8 +635,8 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
   update_node_alive(inst, &msg.sender);
 
   // 1. Process Piggybacked Gossip Events
-  for (int i = 0; i < msg.event_count; i++) {
-    const swim_member_t *ev = &msg.events[i];
+  for (int i = 0; i < msg.gossip_count; i++) {
+    const swim_member_t *ev = &msg.gossip[i];
 
     // Exclude self-events from direct updates (dealt with via refutation below)
     if (swim_node_id_compare(&ev->id, &inst->self_id) != 0) {

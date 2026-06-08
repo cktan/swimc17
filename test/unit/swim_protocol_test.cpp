@@ -598,8 +598,8 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
           // For the last ACK (p == 4), verify the packet sizes and counts.
           if (p == 4) {
             CHECK(n <= SWIM_MAX_PACKET_SIZE);
-            CHECK(in.event_count > 0);
-            CHECK(in.event_count < 30);
+            CHECK(in.gossip_count > 0);
+            CHECK(in.gossip_count < 30);
           }
         }
       } else {
@@ -646,10 +646,10 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   CHECK(msg.seq == 12345);
   CHECK(swim_node_id_compare(&msg.sender, &sender) == 0);
   CHECK(swim_node_id_compare(&msg.peer, &peer) == 0);
-  CHECK(msg.event_count == 1);
-  CHECK(msg.events[0].status == SWIM_STATUS_ALIVE);
-  CHECK(msg.events[0].incarnation == 100);
-  CHECK(swim_node_id_compare(&msg.events[0].id, &gossip_node) == 0);
+  CHECK(msg.gossip_count == 1);
+  CHECK(msg.gossip[0].status == SWIM_STATUS_ALIVE);
+  CHECK(msg.gossip[0].incarnation == 100);
+  CHECK(swim_node_id_compare(&msg.gossip[0].id, &gossip_node) == 0);
 
   // Check error handling with buffer too small
   int err_bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer,
@@ -690,7 +690,7 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   CHECK(msg.type == SWIM_MSG_LEAVE);
   CHECK(msg.seq == 12345);
   CHECK(swim_node_id_compare(&msg.sender, &sender) == 0);
-  CHECK(msg.event_count == 0);
+  CHECK(msg.gossip_count == 0);
 
   swim_membership_destroy(m);
   swim_gossip_queue_destroy(q);

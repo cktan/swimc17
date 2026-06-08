@@ -197,8 +197,11 @@ int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
 
   uint32_t limit = get_transmit_limit(cluster_size);
 
-  // First loop: pack members until the buffer budget is exhausted
+  // First loop: pack members until the buffer budget or event cap is exhausted
+  int packed = 0;
   for (int i = 0; i < queue->count; i++) {
+    if (packed >= SWIM_MAX_EVENTS)
+      break;
     gossip_entry_t *entry = &queue->entries[i];
 
     int n = swim_encode_membership(&entry->event, p, q);
@@ -207,6 +210,7 @@ int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
       break;
     }
     p += n;
+    packed++;
 
     // Increment transmit count and check pruning threshold
     entry->transmit_count++;
