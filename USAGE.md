@@ -351,6 +351,9 @@ Thread-local error states can be inspected using the following
 utility functions:
 
 ```c
+// Retrieve thread-local error code
+int swim_errno(void);
+
 // Retrieve thread-local error details string
 const char *swim_errmsg(void);
 
