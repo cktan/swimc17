@@ -2,6 +2,7 @@
 #include "swim_protocol.h"
 #include "swim_codec.h"
 #include "swim_errno.h"
+#include "swim_feed.h"
 #include "swim_gossip_queue.h"
 #include "swim_timer.h"
 #include "swim_udp.h"

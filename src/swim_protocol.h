@@ -1,9 +1,6 @@
 #ifndef SWIM_PROTOCOL_H
 #define SWIM_PROTOCOL_H
 
-#include "swim_codec.h"
-#include "swim_feed.h"
-#include "swim_gossip_queue.h"
 #include "swim_membership.h"
 #include "swim_node_id.h"
 
