@@ -1056,25 +1056,33 @@ int swim_members(const char *name, swim_member_t *out_list, int max_len,
   return ret;
 }
 
-int swim_peers(const char *name, swim_node_id_t *out_list, int max_len,
+int swim_peers(const char *name, int bufsz, char *buf, int npeers, char **peers,
                bool include_dead) {
-  if (!out_list || max_len < 0) {
+  if (!buf || bufsz < 0 || !peers || npeers < 0) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_peers");
   }
-  if (max_len == 0) {
+  if (npeers == 0) {
     swim_member_t dummy;
     return swim_members(name, &dummy, 0, include_dead);
   }
 
-  swim_member_t *members = malloc(max_len * sizeof(*members));
+  swim_member_t *members = malloc(npeers * sizeof(*members));
   if (!members) {
     return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate member buffer");
   }
 
-  int ret = swim_members(name, members, max_len, include_dead);
+  int ret = swim_members(name, members, npeers, include_dead);
   if (ret > 0) {
+    char *p = buf;
+    char *end = buf + bufsz;
     for (int i = 0; i < ret; i++) {
-      out_list[i] = members[i].id;
+      peers[i] = p;
+      int r = swim_node_id_format(&members[i].id, p, (size_t)(end - p));
+      if (r != 0) {
+        free(members);
+        return swim_set_error(SWIM_ERR_INVALID, "swim_peers: buffer too small");
+      }
+      p += strlen(p) + 1;
     }
   }
   free(members);
