@@ -1061,57 +1061,13 @@ char *swim_peers(const char *name, bool include_dead, int *count) {
     swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_peers");
     return NULL;
   }
-
-  // Grow member buffer until we get all members without truncation
-  int cap = 16;
-  swim_member_t *members = NULL;
-  int n;
-  for (;;) {
-    swim_member_t *tmp = realloc(members, cap * sizeof(*tmp));
-    if (!tmp) {
-      free(members);
-      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate member buffer");
-      return NULL;
-    }
-    members = tmp;
-    n = swim_members(name, members, cap, include_dead);
-    if (n < 0) {
-      free(members);
-      return NULL;
-    }
-    if (n < cap)
-      break;
-    cap *= 2;
+  swim_instance_t *inst = find_and_lock_instance(name);
+  if (!inst) {
+    swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
+    return NULL;
   }
-
-  // Pack formatted peer strings into a realloc-grown buffer
-  char *buf = NULL;
-  size_t used = 0;
-  for (int i = 0; i < n; i++) {
-    char tmp[384];
-    swim_node_id_format(&members[i].id, tmp, sizeof(tmp));
-    size_t len = strlen(tmp) + 1;
-    char *b = realloc(buf, used + len);
-    if (!b) {
-      free(members);
-      free(buf);
-      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
-      return NULL;
-    }
-    buf = b;
-    memcpy(buf + used, tmp, len);
-    used += len;
-  }
-  free(members);
-
-  if (!buf) {
-    buf = malloc(1); // n == 0: return valid pointer so caller can always free()
-    if (!buf) {
-      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
-      return NULL;
-    }
-  }
-  *count = n;
+  char *buf = swim_membership_peers(inst->membership, include_dead, count);
+  pthread_mutex_unlock(&inst->mutex);
   return buf;
 }
 

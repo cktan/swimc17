@@ -21,6 +21,7 @@
 #include "swim_errno.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 struct swim_membership_t {
   swim_member_t *members;
@@ -251,4 +252,49 @@ int swim_membership_list(const swim_membership_t *m, swim_member_t *out_list,
     copied++;
   }
   return copied;
+}
+
+// Build a packed string buffer of formatted peer IDs. Each string is
+// NUL-terminated and consecutive in the returned buffer; *count is set to the
+// number of strings. Caller must free() the result. Returns NULL on error.
+char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
+                            int *count) {
+  if (!m || !count) {
+    swim_set_error(SWIM_ERR_INVALID,
+                   "Invalid arguments to swim_membership_peers");
+    return NULL;
+  }
+
+  char *buf = NULL;
+  size_t used = 0;
+  int n = 0;
+
+  for (int i = 0; i < m->count; i++) {
+    const swim_member_t *member = &m->members[i];
+    if (!include_dead && member->status == SWIM_STATUS_DEAD)
+      continue;
+    char tmp[384];
+    swim_node_id_format(&member->id, tmp, sizeof(tmp));
+    size_t len = strlen(tmp) + 1;
+    char *b = realloc(buf, used + len);
+    if (!b) {
+      free(buf);
+      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
+      return NULL;
+    }
+    buf = b;
+    memcpy(buf + used, tmp, len);
+    used += len;
+    n++;
+  }
+
+  if (!buf) {
+    buf = malloc(1); // zero peers: valid pointer so caller can always free()
+    if (!buf) {
+      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
+      return NULL;
+    }
+  }
+  *count = n;
+  return buf;
 }
