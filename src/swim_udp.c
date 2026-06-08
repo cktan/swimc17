@@ -20,9 +20,9 @@ struct swim_udp_t {
   uint16_t port;
 };
 
-swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
+swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
   if (!host) {
-    swim_set_error(SWIM_ERR_INVALID, "Invalid NULL host in swim_udp_init");
+    swim_set_error(SWIM_ERR_INVALID, "Invalid NULL host in swim_udp_create");
     return NULL;
   }
 
@@ -89,7 +89,7 @@ swim_udp_t *swim_udp_init(const char *host, uint16_t port) {
   return u;
 }
 
-void swim_udp_final(swim_udp_t *u) {
+void swim_udp_destroy(swim_udp_t *u) {
   if (!u)
     return;
   if (u->fd != -1) {

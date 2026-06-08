@@ -9,18 +9,13 @@ struct gossip_entry_t {
   uint32_t multiplier;
 };
 
+// A vector of entries
 struct swim_gossip_queue_t {
   gossip_entry_t *entries;
   int count;
   int capacity;
 };
 
-// Calculate size on the wire for a node ID
-static inline size_t event_wire_size(const swim_node_id_t *id) {
-  // 1 byte type + 8 bytes incarnation + 1 byte host length + host bytes + 2
-  // bytes port + 1 byte cookie length + cookie bytes
-  return 1 + 8 + 1 + strlen(id->host) + 2 + 1 + strlen(id->cookie);
-}
 
 // Convert status to priority value: DEAD (0) > SUSPECT (1) > ALIVE (2)
 static inline int get_priority(swim_status_t status) {

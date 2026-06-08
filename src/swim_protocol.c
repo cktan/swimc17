@@ -18,6 +18,8 @@
 #include <time.h>
 #include <unistd.h>
 
+// TODO: just have an atomic storing the
+// wallclock ms at start, and keep incrementing it.
 // Helper to get monotonic time in milliseconds
 static uint64_t get_monotonic_time_ms(void) {
   struct timespec ts;
@@ -110,20 +112,25 @@ struct swim_instance_t {
   uint64_t seed_retry_interval_ms;
   uint64_t dead_node_expiry_ms;
 
+  // TODO: need comment
   swim_node_id_t *seeds;
   int seed_count;
 
+  // TODO: need comment here - is this all the known peers?
   // Round-robin shuffle list
   swim_member_t *shuffle_list;
   int shuffle_count;
   int shuffle_idx;
   int shuffle_cap; // allocated capacity in elements (a multiple of 8)
 
+  // TODO: need comment here .. what is a probe?
   pending_probe_t pending_probe;
 
+  // TODO: need comment here .. what is relay?
   relay_probe_t relays[32];
   int relay_count;
 
+  // TODO: need comment here .. what if exceeded 16 sub?
   swim_sub_t subscribers[16];
   int subscriber_count;
 
@@ -263,6 +270,8 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
                  probe_timer_cb, inst, NULL);
 }
 
+
+// TODO: need comment
 static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   swim_instance_t *inst = (swim_instance_t *)ctx;
   swim_node_id_t *target = (swim_node_id_t *)param;
@@ -792,7 +801,7 @@ int swim_start(const swim_start_opts_t *opts) {
       opts->dead_node_expiry_ms ? opts->dead_node_expiry_ms : 6000;
 
   // Initialize helper sub-modules
-  inst->udp = swim_udp_init(opts->host, opts->port);
+  inst->udp = swim_udp_create(opts->host, opts->port);
   if (!inst->udp)
     goto error_cleanup;
 
@@ -870,7 +879,7 @@ error_cleanup:
   if (inst->feed)
     swim_feed_destroy(inst->feed);
   if (inst->udp)
-    swim_udp_final(inst->udp);
+    swim_udp_destroy(inst->udp);
   if (inst->timer)
     swim_timer_final(inst->timer);
   if (inst->membership)
@@ -943,7 +952,7 @@ int swim_leave(const char *name) {
   pthread_mutex_unlock(&inst->mutex);
 
   // Destroy structures
-  swim_udp_final(inst->udp);
+  swim_udp_destroy(inst->udp);
   swim_timer_final(inst->timer);
   swim_membership_final(inst->membership);
   swim_gossip_queue_final(inst->gossip_queue);

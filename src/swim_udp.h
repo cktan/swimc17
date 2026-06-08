@@ -13,14 +13,14 @@ typedef struct swim_udp_t swim_udp_t;
  * @param port The local port to bind to.
  * @return a new swim_udp_t instance, or NULL on failure.
  */
-SWIM_EXTERN swim_udp_t *swim_udp_init(const char *host, uint16_t port);
+SWIM_EXTERN swim_udp_t *swim_udp_create(const char *host, uint16_t port);
 
 /**
  * Destroy the UDP transport and close the socket.
  *
  * @param u The UDP transport instance.
  */
-SWIM_EXTERN void swim_udp_final(swim_udp_t *u);
+SWIM_EXTERN void swim_udp_destroy(swim_udp_t *u);
 
 /**
  * Send a packet to a target destination.
