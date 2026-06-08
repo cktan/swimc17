@@ -18,14 +18,18 @@
 #include <time.h>
 #include <unistd.h>
 
-// Helper to get monotonic time in milliseconds
+// Monotonic time for all local duration/elapsed-time tracking: RTT
+// measurement, dead_at timestamps, GC expiry, and the protocol tick loop.
+// Must not use wall time here — clock slews would corrupt elapsed arithmetic.
 static uint64_t get_monotonic_time_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-// Helper to get wall clock time in milliseconds
+// Wall time used only for incarnation numbers. A restarting node must have
+// a higher incarnation than any stale gossip still circulating, so the value
+// needs to be globally ordered across machines, not just locally monotonic.
 static uint64_t get_now_ms(void) {
   struct timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
