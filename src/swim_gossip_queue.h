@@ -9,16 +9,16 @@ typedef struct swim_gossip_queue_t swim_gossip_queue_t;
 /**
  * Initialize a new, empty gossip queue.
  *
- * @return a new gossip queue; free it with swim_gossip_queue_final().
+ * @return a new gossip queue; free it with swim_gossip_queue_destroy().
  */
-SWIM_EXTERN swim_gossip_queue_t *swim_gossip_queue_init(void);
+SWIM_EXTERN swim_gossip_queue_t *swim_gossip_queue_create(void);
 
 /**
  * Destroy the gossip queue and free all associated memory.
  *
  * @param q The gossip queue instance.
  */
-SWIM_EXTERN void swim_gossip_queue_final(swim_gossip_queue_t *q);
+SWIM_EXTERN void swim_gossip_queue_destroy(swim_gossip_queue_t *q);
 
 /**
  * Enqueue a gossip event for dissemination.

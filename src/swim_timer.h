@@ -35,7 +35,7 @@ typedef enum {
  * Invoked exactly once per alarm, terminally:
  *   - SWIM_TIMER_ALARM  when the alarm comes due, or
  *   - SWIM_TIMER_CANCEL when it is cancelled (swim_timer_cancel,
- *     swim_timer_cancel_all, or swim_timer_final).
+ *     swim_timer_cancel_all, or swim_timer_destroy).
  *
  * This single guaranteed call is the owner's one place to release
  * whatever @ctx and @param refer to. The timer treats both as
@@ -53,9 +53,9 @@ typedef void (*swim_timer_cb_t)(void *ctx, swim_timer_event_t ev, void *param);
 /**
  * Create an empty timer.
  *
- * @return a new timer; free it with swim_timer_final().
+ * @return a new timer; free it with swim_timer_destroy().
  */
-SWIM_EXTERN swim_timer_t *swim_timer_init(void);
+SWIM_EXTERN swim_timer_t *swim_timer_create(void);
 
 /**
  * Cancel every pending alarm, firing SWIM_TIMER_CANCEL on each,
@@ -71,7 +71,7 @@ SWIM_EXTERN void swim_timer_cancel_all(swim_timer_t *t);
  *
  * @param t the timer.
  */
-SWIM_EXTERN void swim_timer_final(swim_timer_t *t);
+SWIM_EXTERN void swim_timer_destroy(swim_timer_t *t);
 
 /**
  * Arm an alarm to fire @ticks ticks from now.

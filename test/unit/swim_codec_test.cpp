@@ -53,7 +53,7 @@ TEST_CASE("codec: full message roundtrip with events") {
   swim_node_id_t sender;
   REQUIRE(swim_node_id_parse(&sender, "192.168.0.10:80") == 0);
 
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1, id2, id3;
@@ -95,7 +95,7 @@ TEST_CASE("codec: full message roundtrip with events") {
   CHECK(decoded.events[2].incarnation == 123456789ULL);
   CHECK(swim_node_id_compare(&decoded.events[2].id, &id1) == 0);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("codec: error validation and bounds checking") {

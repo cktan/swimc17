@@ -9,14 +9,14 @@ extern "C" {
 #include <vector>
 
 TEST_CASE("gossip_queue: init and final") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
   CHECK(swim_gossip_queue_size(q) == 0);
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: basic enqueue and supersession") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1;
@@ -69,11 +69,11 @@ TEST_CASE("gossip_queue: basic enqueue and supersession") {
   CHECK(peek[0].status == SWIM_STATUS_ALIVE);
   CHECK(peek[0].incarnation == 11);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: priority sorting order") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t idA, idB, idC;
@@ -97,11 +97,11 @@ TEST_CASE("gossip_queue: priority sorting order") {
   CHECK(swim_node_id_compare(&peek[2].id, &idA) == 0); // ALIVE
   CHECK(peek[2].status == SWIM_STATUS_ALIVE);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: transmit count priority tie-breaker") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t idA, idB;
@@ -135,11 +135,11 @@ TEST_CASE("gossip_queue: transmit count priority tie-breaker") {
   CHECK(swim_node_id_compare(&peek[0].id, &idA) == 0);
   CHECK(swim_node_id_compare(&peek[1].id, &idB) == 0);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: event size limit packing budget") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t idA, idB, idC;
@@ -162,11 +162,11 @@ TEST_CASE("gossip_queue: event size limit packing budget") {
 
   CHECK(swim_gossip_queue_size(q) == 3); // Since transmit count hasn't reached limit, all 3 are still in queue
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: transmit limit pruning") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t idA;
@@ -188,11 +188,11 @@ TEST_CASE("gossip_queue: transmit limit pruning") {
   REQUIRE(packed_bytes == 24);
   CHECK(swim_gossip_queue_size(q) == 0); // Pruned from the queue!
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: transmit limit pruning with multiplier") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t idA;
@@ -214,11 +214,11 @@ TEST_CASE("gossip_queue: transmit limit pruning with multiplier") {
   REQUIRE(packed_bytes == 24);
   CHECK(swim_gossip_queue_size(q) == 0); // Pruned!
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex basic encoding") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   // 1. Pack empty queue
@@ -276,11 +276,11 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex basic encoding") {
   rc = swim_gossip_queue_pack_ex(q, 3, (uint8_t *)buf, (uint8_t *)buf + 1);
   CHECK(rc == 0);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex budget limits") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1, id2;
@@ -297,6 +297,6 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex budget limits") {
   // Remaining queue should have size 2 (since the one packed hasn't reached limit, and the other wasn't packed)
   CHECK(swim_gossip_queue_size(q) == 2);
 
-  swim_gossip_queue_final(q);
+  swim_gossip_queue_destroy(q);
 }
 

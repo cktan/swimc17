@@ -33,7 +33,7 @@ static bool find_node(const swim_membership_t *m, const swim_node_id_t *id,
   return false;
 }
 
-swim_membership_t *swim_membership_init(void) {
+swim_membership_t *swim_membership_create(void) {
   swim_membership_t *m = calloc(1, sizeof(*m));
   if (!m) {
     swim_set_error(SWIM_ERR_NOMEM,
@@ -46,7 +46,7 @@ swim_membership_t *swim_membership_init(void) {
   return m;
 }
 
-void swim_membership_final(swim_membership_t *m) {
+void swim_membership_destroy(swim_membership_t *m) {
   if (!m)
     return;
   free(m->members);

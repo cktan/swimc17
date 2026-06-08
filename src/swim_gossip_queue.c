@@ -62,7 +62,7 @@ static inline uint32_t get_transmit_limit(uint32_t cluster_size) {
   return val * 3;
 }
 
-swim_gossip_queue_t *swim_gossip_queue_init(void) {
+swim_gossip_queue_t *swim_gossip_queue_create(void) {
   swim_gossip_queue_t *q = calloc(1, sizeof(*q));
   if (!q) {
     swim_set_error(SWIM_ERR_NOMEM,
@@ -75,7 +75,7 @@ swim_gossip_queue_t *swim_gossip_queue_init(void) {
   return q;
 }
 
-void swim_gossip_queue_final(swim_gossip_queue_t *q) {
+void swim_gossip_queue_destroy(swim_gossip_queue_t *q) {
   if (!q)
     return;
   free(q->entries);

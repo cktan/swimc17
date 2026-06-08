@@ -22,7 +22,7 @@ struct swim_timer_t {
   entry_t *free_list;
 };
 
-swim_timer_t *swim_timer_init(void) {
+swim_timer_t *swim_timer_create(void) {
   swim_timer_t *t = calloc(1, sizeof(*t));
   if (!t) {
     swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_timer_t container");
@@ -115,7 +115,7 @@ void swim_timer_cancel_all(swim_timer_t *t) {
   }
 }
 
-void swim_timer_final(swim_timer_t *t) {
+void swim_timer_destroy(swim_timer_t *t) {
   if (!t) {
     return;
   }

@@ -586,7 +586,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   // Send 5 PINGs, each containing 6 large gossip events, to populate
   // the node's gossip queue with 30 large events.
   for (uint32_t p = 0; p < 5; p++) {
-    swim_gossip_queue_t *test_q = swim_gossip_queue_init();
+    swim_gossip_queue_t *test_q = swim_gossip_queue_create();
     for (int i = 0; i < 6; i++) {
       int idx = p * 6 + i;
       swim_node_id_t ev_id;
@@ -605,7 +605,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     uint8_t send_buf[1024];
     int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
                                   test_q, 1, send_buf, sizeof(send_buf));
-    swim_gossip_queue_final(test_q);
+    swim_gossip_queue_destroy(test_q);
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
 
@@ -640,9 +640,9 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
 }
 
 TEST_CASE("protocol: pack and unpack message helper roundtrip") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t sender;
@@ -681,14 +681,14 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
                                       q, swim_membership_count(m), buf, 10);
   CHECK(err_bytes == -1);
 
-  swim_membership_final(m);
-  swim_gossip_queue_final(q);
+  swim_membership_destroy(m);
+  swim_gossip_queue_destroy(q);
 }
 
 TEST_CASE("protocol: pack and unpack leave message roundtrip") {
-  swim_gossip_queue_t *q = swim_gossip_queue_init();
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t sender;
@@ -717,8 +717,8 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   CHECK(swim_node_id_compare(&msg.sender, &sender) == 0);
   CHECK(msg.event_count == 0);
 
-  swim_membership_final(m);
-  swim_gossip_queue_final(q);
+  swim_membership_destroy(m);
+  swim_gossip_queue_destroy(q);
 }
 
 // L3: the observer receives membership transitions and the cluster-size gauge

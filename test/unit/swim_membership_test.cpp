@@ -8,15 +8,15 @@ extern "C" {
 #include <vector>
 
 TEST_CASE("membership: initialization and finalization") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
   CHECK(swim_membership_count(m) == 0);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: add and get node") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -39,11 +39,11 @@ TEST_CASE("membership: add and get node") {
   CHECK(res->incarnation == 10);
   CHECK(res->dead_at == 0);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: set_alive forces ALIVE state") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -90,11 +90,11 @@ TEST_CASE("membership: set_alive forces ALIVE state") {
   CHECK(res->incarnation == 6);
   CHECK(res->dead_at == 0);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: event precedence rules for unknown nodes") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -113,11 +113,11 @@ TEST_CASE("membership: event precedence rules for unknown nodes") {
   CHECK(rc == 0); // Added
   CHECK(swim_membership_count(m) == 1);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: event precedence rules for ALIVE nodes") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -176,11 +176,11 @@ TEST_CASE("membership: event precedence rules for ALIVE nodes") {
   CHECK(swim_membership_get(m, &id1)->status == SWIM_STATUS_DEAD);
   CHECK(swim_membership_get(m, &id1)->dead_at == 250);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: event precedence rules for SUSPECT nodes") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -205,11 +205,11 @@ TEST_CASE("membership: event precedence rules for SUSPECT nodes") {
   CHECK(rc == 0);
   CHECK(swim_membership_get(m, &id1)->status == SWIM_STATUS_DEAD);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: event precedence rules for DEAD nodes") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
@@ -248,11 +248,11 @@ TEST_CASE("membership: event precedence rules for DEAD nodes") {
   CHECK(res->incarnation == 11);
   CHECK(res->dead_at == 0);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: garbage collection") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1, id2, id3;
@@ -288,11 +288,11 @@ TEST_CASE("membership: garbage collection") {
   CHECK(swim_membership_get(m, &id2) == nullptr);
   CHECK(swim_membership_get(m, &id3) != nullptr);
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }
 
 TEST_CASE("membership: list and count members") {
-  swim_membership_t *m = swim_membership_init();
+  swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
   // We want to make sure nodes are kept sorted by swim_node_id_compare
@@ -335,5 +335,5 @@ TEST_CASE("membership: list and count members") {
   CHECK(swim_node_id_compare(&list[1].id, &id3) ==
         0); // id3 is included here because it's second in sorted order
 
-  swim_membership_final(m);
+  swim_membership_destroy(m);
 }

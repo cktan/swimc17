@@ -20,16 +20,16 @@ typedef struct swim_membership_t swim_membership_t;
 /**
  * Initialize an empty membership list.
  *
- * @return a new membership list; free it with swim_membership_final().
+ * @return a new membership list; free it with swim_membership_destroy().
  */
-SWIM_EXTERN swim_membership_t *swim_membership_init(void);
+SWIM_EXTERN swim_membership_t *swim_membership_create(void);
 
 /**
  * Destroy the membership list and free all associated memory.
  *
  * @param m The membership list instance.
  */
-SWIM_EXTERN void swim_membership_final(swim_membership_t *m);
+SWIM_EXTERN void swim_membership_destroy(swim_membership_t *m);
 
 /**
  * Add a new node to the membership list as ALIVE.

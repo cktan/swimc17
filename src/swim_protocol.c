@@ -805,15 +805,15 @@ int swim_start(const swim_start_opts_t *opts) {
   if (!inst->udp)
     goto error_cleanup;
 
-  inst->timer = swim_timer_init();
+  inst->timer = swim_timer_create();
   if (!inst->timer)
     goto error_cleanup;
 
-  inst->membership = swim_membership_init();
+  inst->membership = swim_membership_create();
   if (!inst->membership)
     goto error_cleanup;
 
-  inst->gossip_queue = swim_gossip_queue_init();
+  inst->gossip_queue = swim_gossip_queue_create();
   if (!inst->gossip_queue)
     goto error_cleanup;
 
@@ -881,11 +881,11 @@ error_cleanup:
   if (inst->udp)
     swim_udp_destroy(inst->udp);
   if (inst->timer)
-    swim_timer_final(inst->timer);
+    swim_timer_destroy(inst->timer);
   if (inst->membership)
-    swim_membership_final(inst->membership);
+    swim_membership_destroy(inst->membership);
   if (inst->gossip_queue)
-    swim_gossip_queue_final(inst->gossip_queue);
+    swim_gossip_queue_destroy(inst->gossip_queue);
   free(inst->seeds);
   free(inst->pending);
   free(inst);
@@ -953,9 +953,9 @@ int swim_leave(const char *name) {
 
   // Destroy structures
   swim_udp_destroy(inst->udp);
-  swim_timer_final(inst->timer);
-  swim_membership_final(inst->membership);
-  swim_gossip_queue_final(inst->gossip_queue);
+  swim_timer_destroy(inst->timer);
+  swim_membership_destroy(inst->membership);
+  swim_gossip_queue_destroy(inst->gossip_queue);
   swim_feed_destroy(inst->feed);
   free(inst->seeds);
   free(inst->shuffle_list);
