@@ -1,3 +1,21 @@
+/*
+ * swim_gossip_queue.c — Gossip dissemination priority queue.
+ *
+ * Tracks pending membership events to be piggybacked on
+ * outgoing messages. Events are keyed by node ID; a new
+ * event supersedes an existing one when its incarnation is
+ * higher, or when the incarnation is equal but its priority
+ * is higher (DEAD > SUSPECT > ALIVE). Each entry carries a
+ * transmit count; entries are pruned after being packed
+ * ceil(log2(N)) * 3 * multiplier times, where N is the
+ * current cluster size.
+ *
+ * The queue is a dynamically-grown flat array. There is no
+ * heap data structure: qsort is called on the array before
+ * every pack_ex, sorting by (priority, transmit_count,
+ * node_id). This is simple and fast enough for the small
+ * queue sizes typical in SWIM (bounded by MTU / event size).
+ */
 #include "swim_gossip_queue.h"
 #include "swim_codec.h"
 #include <stdlib.h>

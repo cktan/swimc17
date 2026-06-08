@@ -1,3 +1,21 @@
+/*
+ * swim_udp.c — Non-blocking UDP socket abstraction.
+ *
+ * Creates a bound, non-blocking UDP socket (IPv4 or IPv6)
+ * via getaddrinfo + bind + fcntl(O_NONBLOCK). recv returns
+ * 0 instead of blocking when no data is available.
+ *
+ * On send, the destination is resolved with inet_pton
+ * first (fast path for numeric IP literals, which is the
+ * common case since recv normalizes all peer addresses
+ * numerically). getaddrinfo is used only when inet_pton
+ * fails, i.e. for hostname destinations. This avoids
+ * synchronous DNS lookups in the hot protocol loop.
+ *
+ * recv populates the out_src node ID with the sender's
+ * numeric address and port; the cookie field is cleared
+ * because the UDP layer has no knowledge of it.
+ */
 #define _GNU_SOURCE
 #include "swim_udp.h"
 #include "swim_protocol.h"

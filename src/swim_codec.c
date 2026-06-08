@@ -1,3 +1,25 @@
+/*
+ * swim_codec.c — Wire protocol encoder and decoder.
+ *
+ * Serializes and deserializes SWIM messages (PING, ACK,
+ * PING_REQ, FWD_ACK, LEAVE) and their components (node IDs,
+ * membership events) into a compact binary format in network
+ * byte order.
+ *
+ * Message layout: [type (1B)] [seq (4B)] [sender node ID]
+ * [peer node ID, PING_REQ/FWD_ACK only] [gossip payload].
+ * The gossip payload is a variable-length list of encoded
+ * swim_member_t records that fills whatever space remains in
+ * the packet. There is no explicit event count — the decoder
+ * reads membership records until it reaches the buffer
+ * boundary.
+ *
+ * All multi-byte integers are big-endian. Strings are
+ * length-prefixed: [len (2B)] [bytes]. Encoding helpers
+ * return the number of bytes written, or -1 if the buffer
+ * is exhausted; callers chain these p += n checks to build
+ * up the packet incrementally.
+ */
 #define _DEFAULT_SOURCE
 
 #include "swim_codec.h"

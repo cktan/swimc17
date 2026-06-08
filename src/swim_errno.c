@@ -1,3 +1,15 @@
+/*
+ * swim_errno.c — Thread-local error state.
+ *
+ * Stores the most recent error code and message in
+ * _Thread_local variables so each thread has its own slot
+ * and concurrent API calls do not clobber each other's
+ * diagnostics.
+ *
+ * swim_set_error() always returns -1, so call sites can
+ * write `return swim_set_error(...)` as a one-liner without
+ * a separate return statement.
+ */
 #include "swim_protocol.h"
 
 #include <stdarg.h>

@@ -1,3 +1,28 @@
+/*
+ * swim_timer.c — Delta-list tick timer.
+ *
+ * Implements a logical (non-wall-clock) timer driven by
+ * explicit swim_timer_tick() calls from the protocol loop.
+ * One tick equals one protocol period (100 ms by default).
+ *
+ * Alarms are stored in a singly-linked list where each
+ * node's tick field is the delay *relative to its
+ * predecessor* (delta encoding). This means advancing time
+ * by one tick costs O(1): decrement the head's tick by 1
+ * and fire all entries whose tick reaches zero. Insertion
+ * is O(n) but the list stays short in practice.
+ *
+ * Cancelled and fired entries are not freed immediately;
+ * they are pushed onto a free_list slab and reused on the
+ * next swim_timer_add(). Memory is only returned to the
+ * heap in swim_timer_destroy().
+ *
+ * Callbacks receive SWIM_TIMER_ALARM on normal fire and
+ * SWIM_TIMER_CANCEL when cancelled. The entry is unlinked
+ * from the list before the callback is invoked, so the
+ * callback may safely call swim_timer_add() or
+ * swim_timer_cancel() without corrupting the list.
+ */
 #include "swim_timer.h"
 #include "swim_protocol.h"
 

@@ -1,3 +1,30 @@
+/*
+ * swim_protocol.c — SWIM gossip protocol engine.
+ *
+ * Implements the full SWIM+Suspicion protocol: probe
+ * selection, direct ping, indirect ping-req via helpers,
+ * suspicion timers, dead-node GC, and membership event
+ * dissemination via the gossip queue.
+ *
+ * Up to 16 named instances are registered in a global
+ * array (g_instances) protected by g_instances_mutex.
+ * Each instance runs a background thread that calls
+ * swim_timer_tick() every protocol_period_ms and processes
+ * incoming UDP packets.
+ *
+ * Locking: g_instances_mutex is used only to look up (or
+ * register/remove) an instance. find_and_lock_instance()
+ * acquires inst->mutex while holding g_instances_mutex —
+ * preventing a concurrent swim_stop() from removing the
+ * instance between lookup and lock — then immediately
+ * releases g_instances_mutex so the global lock is not
+ * held during the actual work.
+ *
+ * Callbacks are extracted into a notify_batch_t under
+ * inst->mutex, then dispatched after the lock is released.
+ * This allows subscriber callbacks to re-enter the API
+ * without deadlocking.
+ */
 #define _GNU_SOURCE
 #include "swim_protocol.h"
 #include "swim_codec.h"

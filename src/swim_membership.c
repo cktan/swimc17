@@ -1,3 +1,22 @@
+/*
+ * swim_membership.c — Sorted node membership list.
+ *
+ * Maintains the set of known peers and their SWIM states
+ * (ALIVE, SUSPECT, DEAD). Nodes are kept in a dynamically-
+ * grown array sorted by node ID, giving O(log n) lookup via
+ * binary search and O(n) insertion via memmove.
+ *
+ * State transitions follow SWIM+Suspicion precedence rules:
+ * higher incarnation always wins; at equal incarnation,
+ * DEAD > SUSPECT > ALIVE. DEAD is terminal for a given
+ * incarnation — a dead node can only be revived by an ALIVE
+ * event with a strictly higher incarnation number. Unknown
+ * nodes are accepted only as ALIVE (not SUSPECT or DEAD).
+ *
+ * swim_membership_gc() reclaims dead entries older than a
+ * configurable expiry window by compacting the array in a
+ * single pass.
+ */
 #include "swim_membership.h"
 #include "swim_protocol.h"
 

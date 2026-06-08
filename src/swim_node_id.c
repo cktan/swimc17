@@ -1,3 +1,17 @@
+/*
+ * swim_node_id.c — Node ID string format and parser.
+ *
+ * A node ID is a (host, port, cookie) triple. The string
+ * representation is "host:port" or "host:port/cookie".
+ * IPv6 hosts are bracketed on output: "[host]:port".
+ *
+ * The '/' separator between port and cookie was chosen
+ * deliberately: '/' never appears in an IP address or
+ * hostname, so the parser can split on '/' first to
+ * extract the cookie, then parse the remainder as
+ * "host:port" or "[host]:port" unambiguously — without
+ * any colon-counting that would break on bare IPv6.
+ */
 #include "swim_protocol.h"
 
 #include <stdbool.h>
