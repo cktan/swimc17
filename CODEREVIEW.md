@@ -1,209 +1,127 @@
-# swimc17 Code Review Report
+# Code Review: swimc17
 
-This report presents a thorough code review of the `swimc17`
-library, a C17 implementation of the SWIM gossip protocol.
-
----
-
-## 1. Executive Summary
-
-Overall, the codebase is exceptionally clean, well-structured,
-and follows robust systems programming practices. Particularly,
-the separation of concerns between codec, membership, timer,
-and UDP transport is excellent. The logical ticking timer allows
-deterministic testing without raw clock dependencies.
-
-However, we identified two high-priority issues: a parsing bug
-when nodes use numeric cookies, and a potential buffer overflow
-in the timer when assertions are disabled in production.
+This document contains a comprehensive code review of the
+`swimc17` library, a C17 implementation of the SWIM gossip
+membership protocol.
 
 ---
 
-## 2. Critical Bugs & Security Vulnerabilities
+## 1. Architecture & Design
 
-### 2.1. Numeric Cookie Parsing Bug in `swim_node_id_parse`
+The library is structured as a collection of decoupled,
+cohesive modules:
+- **`swim_main`**: Orchestrates the main protocol loop,
+  manages instances, and coordinates timing.
+- **`swim_membership`**: Maintains the registry of cluster
+  members, sorted by node ID to allow $O(\log N)$ lookup.
+- **`swim_gossip_queue`**: Tracks membership updates to be
+  piggybacked onto outgoing UDP packets.
+- **`swim_timer`**: Implements a passive, delta-list timer
+  driven by logical ticks rather than wall-clock time.
+- **`swim_feed`**: An auto-draining ring buffer for lossy,
+  non-blocking telemetry events.
+- **`swim_udp`**: Handles binding, sending, and receiving
+  non-blocking IPv4 and IPv6 packets.
+- **`swim_codec`**: Handles network-byte-order binary
+  serialization and deserialization.
 
-**Location:** [swim_node_id.c](file:///home/sprite/p/swimc17/src/swim_node_id.c#L49-L87)
-
-**Description:**
-The parser determines if a string is formatted as `host:port`
-or `host:port:cookie` by checking if the segment after the last
-colon parses as a valid port number (1-65535).
-
-If a node is configured with a numeric cookie (e.g., `"123"`),
-the parser incorrectly treats the cookie as the port and the
-actual port as part of the host string.
-
-**Example:**
-For the input string `"127.0.0.1:8000:123"`:
-1. `last_colon` points to the colon before `"123"`.
-2. `strtol("123", &endptr, 10)` parses successfully, yielding
-   `port_val = 123` and `*endptr = '\0'`.
-3. The parser executes the `if` block, setting the host end
-   delimiter to the colon before `"123"`.
-4. The parsed result becomes:
-   - **Host:** `"127.0.0.1:8000"`
-   - **Port:** `123`
-   - **Cookie:** `""`
-
-**Impact:**
-Nodes with numeric cookies will fail to bootstrap or join
-correctly because their host and port fields will be corrupted.
-
-**Recommendation:**
-For non-bracketed hosts, count the number of colons. If there
-are two colons, it is always `host:port:cookie`. If there is
-only one colon, it is `host:port`. Do not rely on guessing
-whether the final segment is a port.
-
-**CLAUDE:** Valid. The example traces correctly through the
-code. For `"127.0.0.1:8000:123"`, `strrchr` finds the last
-colon before `"123"`, and `strtol("123")` succeeds with a
-value in the valid port range, so the code takes the fast
-path and misidentifies `"127.0.0.1:8000"` as the host and
-`123` as the port. **Fixed** by changing the cookie
-separator from `:` to `/`, making the format
-`host:port/cookie`. Since `/` never appears in an IP
-address or hostname, the parser can split on `/` first to
-extract the cookie, then parse the remainder as `host:port`
-without ambiguity. This also eliminates the IPv6
-colon-counting problem entirely: a bare IPv6 like
-`2001:db8::1:8080/cookie` parses unambiguously with no
-bracket requirement. The old colon-counting recommendation
-is superseded by this simpler approach.
+### Design Highlights
+1. **Logical Timer**: Decoupling the timer from actual
+   system threads and clocks via `swim_timer_tick` makes the
+   protocol engine highly testable and deterministic.
+2. **Decoupled Telemetry**: The lock-free/non-blocking
+   telemetry feed ensures that instrumenting events never
+   blocks the protocol loop.
 
 ---
 
-### 2.2. Buffer Overflow Risk in `swim_timer_add`
+## 2. Concurrency & Synchronization
 
-**Location:** [swim_timer.c](file:///home/sprite/p/swimc17/src/swim_timer.c#L34-L57)
+The library runs a background thread per instance. Thread
+synchronization and safety are well-thought-out:
+- The global registry is guarded by `g_instances_mutex`.
+- Individual instances are guarded by `inst->mutex`.
+- Telemetry feeds have an internal `feed->mutex` lock.
 
-**Description:**
-The function uses a fixed-size buffer of 384 bytes to store the
-timer's name. It checks the length using `assert()`:
-```c
-assert(name && strlen(name) < sizeof(((entry_t *)0)->name));
-```
-In release builds where `NDEBUG` is defined, this assertion is
-completely compiled out. The subsequent `strcpy` call:
+### Deadlock Analysis
+Lock ordering is strictly hierarchical and acyclic:
+1. `g_instances_mutex` -> `inst->mutex`
+2. `g_instances_mutex` -> `feed->mutex` (in `swim_read_feed`)
+3. `inst->mutex` -> `feed->mutex` (in protocol thread)
+
+Because `feed->mutex` is always a leaf lock, and the global
+mutex is never acquired while holding an instance lock, the
+locking model is deadlock-free.
+
+### Teardown Safety
+In `swim_leave`, the instance is first removed from
+`g_instances` under the global lock. The background thread
+is joined (`pthread_join`) before resources are freed.
+Because any concurrent API calls must lookup the instance via
+`g_instances` first, racing threads are serialized safely.
+
+---
+
+## 3. Code Quality & Memory Safety
+
+The code follows strict C17 standards and incorporates
+excellent safety patterns:
+- **Safe Allocation**: Resizing functions use temporary
+  pointers for `realloc` results before overwriting existing
+  pointers, preventing memory leaks on failure.
+- **Sanitizers**: AddressSanitizer and
+  UndefinedBehaviorSanitizer are enabled in unit tests,
+  ensuring no memory corruption goes unnoticed.
+- **Thread-Local Errors**: Errors are stored in thread-local
+  diagnostics (`_Thread_local`), ensuring concurrent API
+  calls do not clobber each other's status.
+
+---
+
+## 4. Key Findings & Recommendations
+
+### Finding 1: Unchecked `strcpy` in `swim_timer.c`
+In `swim_timer_add`, the alarm key name is copied using
+`strcpy`:
 ```c
 strcpy(nw->name, name);
 ```
-will result in a heap buffer overflow if the `name` argument
-exceeds 383 characters.
+- **Risk**: Although an `assert` checks the name length,
+  asserts are compiled out in production (`-DNDEBUG`). A
+  malicious or bugged caller passing a long name could
+  trigger a buffer overflow.
+- **Recommendation**: Use `strncpy` to guarantee bounds
+  safety regardless of compile-time definitions.
 
-**Impact:**
-Memory corruption or denial of service if dynamic alarm names
-exceed the buffer size in a release build.
+### Finding 2: Background Socket Errors are Muted
+In `swim_udp_send` and `swim_udp_recv`, errors set a
+thread-local errno. However:
+- **Risk**: The background thread operates on its own
+  `_Thread_local` variables. Setting `swim_set_error` in the
+  protocol thread has no effect on the user thread's error
+  state, leaving background socket errors completely invisible.
+- **Recommendation**: Capture UDP send/recv failures and
+  write them to the `swim_feed` warning channel so the user
+  application can observe connectivity problems.
 
-**Recommendation:**
-Perform a runtime length check and return `SWIM_ERR_INVALID`
-on overflow, or use `snprintf` / `strncpy` to prevent bounds
-violations.
-
-**CLAUDE:** Invalid as a practical vulnerability. Every call
-site constructs timer names from either short fixed literals
-(`"probe"`, `"probe_timeout"`, `"seed_retry"`) or from
-`suspect_key`, which uses `snprintf(buf, 384, "suspect:%s:%u:%s",
-...)`. The maximum possible output of `suspect_key` is ≈333
-bytes (host 255 + port 5 + cookie 63 + prefix and colons 10),
-well under the 384-byte cap. The `strcpy` is safe in practice
-because all names are internally generated and pre-bounded.
-The observation that `assert` is not a runtime guard is
-correct in principle, but no externally-supplied name can
-reach this function.
-
----
-
-## 3. Design Concerns & Limitations
-
-### 3.1. Hardcoded Instance Registry Limit
-
-**Location:** [swim_protocol.c](file:///home/sprite/p/swimc17/src/swim_protocol.c#L157)
-
-**Description:**
-The global instance registry `g_instances` has a hardcoded
-limit of 16 active instances.
-
-**Impact:**
-Any attempt to start a 17th instance in a single process
-will fail with `SWIM_ERR_FULL`. This limit is undocumented
-in the public headers and could surprise users running large
-multi-tenant test environments.
-
-**CLAUDE:** Invalid. The 16-instance limit is documented in
-USAGE.md under `swim_start` error codes: "`SWIM_ERR_FULL`:
-Maximum active instances (16) exceeded." The claim that it
-is undocumented is incorrect.
-
----
-
-### 3.2. Silently Dropped Relay Probes
-
-**Location:** [swim_protocol.c](file:///home/sprite/p/swimc17/src/swim_protocol.c#L663)
-
-**Description:**
-The helper relay table is limited to 32 concurrent requests:
+### Finding 3: Hard-coded Instance Limit
+The library maintains active instances in a static array:
 ```c
-if (inst->relay_count < 32) { ... }
+static swim_instance_t *g_instances[16] = {0};
 ```
-When this limit is exceeded, new incoming `PING-REQ` messages
-are silently ignored.
+- **Risk**: Applications requiring more than 16 instances in
+  a single process will fail with `SWIM_ERR_FULL`.
+- **Recommendation**: Document this limit clearly in the
+  public API header, or migrate to a dynamically allocated
+  registry.
 
-**Impact:**
-In large or highly partitioned networks, relay capacity may
-be exhausted, causing false-positive failure detections due
-to dropped relay opportunities.
-
-**CLAUDE:** Partially valid. The silent drop is real code.
-However, the practical risk is minimal: with the default
-`ping_req_fanout` of 3 and short-lived relay entries
-(removed on ack or timeout), reaching 32 concurrent relays
-would require tens of simultaneous failed probes. Emitting
-a feed warning on overflow would be a reasonable improvement.
-
----
-
-### 3.3. Weak PRNG Seeding Entropy
-
-**Location:** [swim_protocol.c](file:///home/sprite/p/swimc17/src/swim_protocol.c#L861)
-
-**Description:**
-The seed for `rand_r()` is generated as:
+### Finding 4: Integer Overflow in logical timer
+In `swim_timer.c`:
 ```c
-inst->rand_state = (unsigned int)time(NULL) ^ 
-                   (unsigned int)pthread_self() ^
-                   (unsigned int)(uintptr_t)inst;
+while (*pp && s + (*pp)->tick <= ticks) {
 ```
-If multiple instances are started in the same thread in the
-same second, their random state sequences may be highly
-correlated, as only the heap addresses of the instances
-differentiate them.
-
-**Recommendation:**
-Use a high-resolution clock (e.g. `clock_gettime`) or read
-a few bytes from `/dev/urandom` to initialize the PRNG seed.
-
-**CLAUDE:** Partially valid. The potential correlation is
-real when multiple instances start on the same thread within
-the same second. However, `rand_r` is used only for
-probe-target selection and peer sampling — not for any
-security purpose — so correlated sequences do not break
-protocol correctness. Switching to `clock_gettime` for
-the seed would be a cheap improvement; `/dev/urandom` is
-unnecessary here.
-
----
-
-## 4. Strengths & Good Practices
-
-1. **Lock-Free Notification Dispatch:**
-   The library correctly extracts pending membership events into
-   a temporary structure (`notify_batch_t`) under lock, then
-   releases the lock before invoking user callbacks. This
-   prevents callbacks from causing deadlocks if they call
-   back into the API.
-2. **Deterministic Ticking Clock:**
-   The passive delta-list timer makes unit and integration tests
-   reliable, fast, and completely deterministic, avoiding
-   sleep/wait dependencies.
+- **Risk**: If a caller passes extremely large ticks, `s`
+  could overflow.
+- **Recommendation**: For safety, cast the addition or
+  perform subtraction bounds-checks. However, this is minor
+  since timing ticks are typically small.

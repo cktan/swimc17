@@ -29,46 +29,6 @@
 #include <endian.h>
 #include <string.h>
 
-// Helpers for endianness-safe network-byte-order packing/unpacking
-static inline void write_uint16(uint8_t *p, uint16_t val) {
-  p[0] = (val >> 8) & 0xFF;
-  p[1] = val & 0xFF;
-}
-
-static inline uint16_t read_uint16(const uint8_t *p) {
-  return ((uint16_t)p[0] << 8) | (uint16_t)p[1];
-}
-
-static inline void write_uint32(uint8_t *p, uint32_t val) {
-  p[0] = (val >> 24) & 0xFF;
-  p[1] = (val >> 16) & 0xFF;
-  p[2] = (val >> 8) & 0xFF;
-  p[3] = val & 0xFF;
-}
-
-static inline uint32_t read_uint32(const uint8_t *p) {
-  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-         ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
-
-static inline void write_uint64(uint8_t *p, uint64_t val) {
-  p[0] = (val >> 56) & 0xFF;
-  p[1] = (val >> 48) & 0xFF;
-  p[2] = (val >> 40) & 0xFF;
-  p[3] = (val >> 32) & 0xFF;
-  p[4] = (val >> 24) & 0xFF;
-  p[5] = (val >> 16) & 0xFF;
-  p[6] = (val >> 8) & 0xFF;
-  p[7] = val & 0xFF;
-}
-
-static inline uint64_t read_uint64(const uint8_t *p) {
-  return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
-         ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
-         ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
-         ((uint64_t)p[6] << 8) | (uint64_t)p[7];
-}
-
 // Compactly encode a Node ID: [host_len (2B)] [host (NB)] [port (2B)]
 // [cookie_len (2B)] [cookie (MB)]
 int swim_encode_node_id(const swim_node_id_t *id, uint8_t *p, uint8_t *q) {
@@ -172,7 +132,8 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender,
                         struct swim_gossip_queue_t *q, uint32_t active_members,
                         uint8_t *buf, int bufsz) {
   if (!sender || !buf || bufsz <= 0) {
-    return -1;
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid arguments to swim_encode_message");
   }
 
   uint8_t *p = buf;
@@ -203,7 +164,8 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender,
   // 4. Peer Node ID (target for ping_req, source for fwd_ack)
   if (type == SWIM_MSG_PING_REQ || type == SWIM_MSG_FWD_ACK) {
     if (!peer) {
-      return -1;
+      return swim_set_error(SWIM_ERR_INVALID,
+                            "Peer node ID required for PING_REQ/FWD_ACK");
     }
     n = swim_encode_node_id(peer, p, end);
     if (n < 0) {

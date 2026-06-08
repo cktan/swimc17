@@ -963,8 +963,10 @@ int swim_start(const swim_start_opts_t *opts) {
     while (opts->seeds[n]) n++;
     if (n > 0) {
       inst->seeds = malloc(n * sizeof(swim_node_id_t));
-      if (!inst->seeds)
+      if (!inst->seeds) {
+        swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate seeds array");
         goto error_cleanup;
+      }
       for (int i = 0; i < n; i++) {
         if (swim_node_id_parse(&inst->seeds[i], opts->seeds[i]) != 0) {
           free(inst->seeds);
@@ -1007,6 +1009,7 @@ int swim_start(const swim_start_opts_t *opts) {
   // Start background event loop thread
   if (pthread_create(&inst->thread, NULL, swim_protocol_thread_entry, inst) !=
       0) {
+    swim_set_error(SWIM_ERR_BAD_STATE, "Failed to create protocol thread");
     atomic_store_explicit(&inst->running, false, memory_order_relaxed);
     pthread_mutex_destroy(&inst->mutex);
     goto error_cleanup;
