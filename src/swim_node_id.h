@@ -4,7 +4,16 @@
 #include "swim_protocol.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <string.h>
+
+typedef struct swim_node_id_t swim_node_id_t;
+struct swim_node_id_t {
+  char host[256]; // RFC 1035 hostnames can be up to 253 characters, plus space
+                  // for IPv6 addresses
+  uint16_t port;
+  char cookie[64];
+};
 
 static inline int swim_node_id_compare(const swim_node_id_t *a,
                                        const swim_node_id_t *b) {

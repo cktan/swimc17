@@ -49,14 +49,6 @@ SWIM_EXTERN const char *swim_strerror(int err);
  */
 SWIM_EXTERN int swim_set_error(int e, const char *fmt, ...);
 
-typedef struct swim_node_id_t swim_node_id_t;
-struct swim_node_id_t {
-  char host[256]; // RFC 1035 hostnames can be up to 253 characters, plus space
-                  // for IPv6 addresses
-  uint16_t port;
-  char cookie[64];
-};
-
 // Subscriber callback notification event
 typedef enum {
   SWIM_NODE_UP,      // Node joined or became active
