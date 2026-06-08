@@ -167,7 +167,17 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
     freeaddrinfo(res);
   }
 
-  ssize_t n = sendto(u->fd, buf, size, 0, (struct sockaddr *)&ss, ss_len);
+  // Retry on EINTR (always — not a real failure) and EAGAIN/EWOULDBLOCK
+  // (once — send buffer momentarily full on a non-blocking socket).
+  ssize_t n;
+  int eagain_retries = 0;
+  for (;;) {
+    n = sendto(u->fd, buf, size, 0, (struct sockaddr *)&ss, ss_len);
+    if (n >= 0) break;
+    if (errno == EINTR) continue;
+    if ((errno == EAGAIN || errno == EWOULDBLOCK) && eagain_retries++ < 1) continue;
+    break;
+  }
   if (n < 0) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "sendto failed");
   }

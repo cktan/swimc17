@@ -262,8 +262,10 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   int active_count = swim_membership_count(inst->membership);
   if (active_count == 0) {
     // Re-arm probe timer
-    swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                   probe_timer_cb, inst, NULL);
+    if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
+                       probe_timer_cb, inst, NULL) != 0) {
+      swim_feed_put(inst->feed, 2, "warning", "probe timer failed to re-arm: probing stopped");
+    }
     return;
   }
 
@@ -319,8 +321,10 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   }
 
   // Re-arm probe timer
-  swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                 probe_timer_cb, inst, NULL);
+  if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
+                     probe_timer_cb, inst, NULL) != 0) {
+    swim_feed_put(inst->feed, 2, "warning", "probe timer failed to re-arm: probing stopped");
+  }
 }
 
 
@@ -357,7 +361,9 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
     int active_count = swim_membership_count(inst->membership);
     if (active_count > 0) {
       swim_member_t *helpers = malloc(active_count * sizeof(swim_member_t));
-      if (helpers) {
+      if (!helpers) {
+        swim_feed_put(inst->feed, 2, "warning", "indirect probe skipped: out of memory");
+      } else {
         int count = swim_membership_list(inst->membership, helpers,
                                          active_count, false);
         // Exclude target and self from helpers list
@@ -405,12 +411,18 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
 
       // Start suspicion timer
       swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
-      if (suspect_param) {
+      if (!suspect_param) {
+        swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: out of memory");
+      } else {
         *suspect_param = target;
         char alarm_name[384];
         suspect_key(alarm_name, sizeof(alarm_name), &target);
-        swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
-                       alarm_name, suspicion_timer_cb, inst, suspect_param);
+        if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
+                           alarm_name, suspicion_timer_cb, inst,
+                           suspect_param) != 0) {
+          free(suspect_param);
+          swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: timer add failed");
+        }
       }
     }
   }
@@ -440,8 +452,10 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   }
 
   // Re-arm seed retry timer
-  swim_timer_add(inst->timer, inst->seed_retry_interval_ms / 100, "seed_retry",
-                 seed_retry_timer_cb, inst, NULL);
+  if (swim_timer_add(inst->timer, inst->seed_retry_interval_ms / 100,
+                     "seed_retry", seed_retry_timer_cb, inst, NULL) != 0) {
+    swim_feed_put(inst->feed, 2, "warning", "seed retry timer failed to re-arm: seed discovery stopped");
+  }
 }
 
 // Helper functions moved above
@@ -644,12 +658,18 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 
           // Start suspicion timer
           swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
-          if (suspect_param) {
+          if (!suspect_param) {
+            swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: out of memory");
+          } else {
             *suspect_param = ev->id;
             char alarm_name[384];
             suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
-            swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
-                           alarm_name, suspicion_timer_cb, inst, suspect_param);
+            if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
+                               alarm_name, suspicion_timer_cb, inst,
+                               suspect_param) != 0) {
+              free(suspect_param);
+              swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: timer add failed");
+            }
           }
         } else if (ev->status == SWIM_STATUS_ALIVE) {
           queue_notification(inst, SWIM_NODE_UP, &ev->id);
