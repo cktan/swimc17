@@ -107,7 +107,7 @@ typedef enum {
 } swim_event_t;
 
 typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
-                                const swim_node_id_t *node);
+                                const char *node);
 
 typedef struct {
   const char *host;

@@ -539,9 +539,10 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
 // is being torn down concurrently. Consumes (frees) the batch.
 static void dispatch_notifications(notify_batch_t *batch) {
   for (int i = 0; i < batch->count; i++) {
+    char node_str[350];
+    swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
     for (int s = 0; s < batch->sub_count; s++) {
-      batch->subs[s].cb(batch->subs[s].ctx, batch->items[i].event,
-                        &batch->items[i].node);
+      batch->subs[s].cb(batch->subs[s].ctx, batch->items[i].event, node_str);
     }
   }
   free(batch->items);

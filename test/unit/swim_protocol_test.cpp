@@ -20,16 +20,16 @@ namespace {
 
 struct EventLog {
   swim_event_t event;
-  swim_node_id_t node;
+  std::string node;
 };
 
 std::vector<EventLog> g_events;
 pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void test_callback(void *ctx, swim_event_t event, const swim_node_id_t *node) {
+void test_callback(void *ctx, swim_event_t event, const char *node) {
   (void)ctx;
   pthread_mutex_lock(&g_log_mutex);
-  g_events.push_back({event, *node});
+  g_events.push_back({event, node});
   pthread_mutex_unlock(&g_log_mutex);
 }
 
@@ -253,7 +253,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   {
     EventLog ev = get_log_event(0);
     CHECK(ev.event == SWIM_NODE_UP);
-    CHECK(swim_node_id_compare(&ev.node, &mock_id) == 0);
+    CHECK(ev.node == "127.0.0.1:20202/mock");
   }
 
   // Now silently crash the mock node by closing its UDP socket
@@ -278,7 +278,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
     EventLog ev = get_log_event(i);
     if (ev.event == SWIM_NODE_SUSPECT) {
       suspect_found = true;
-      CHECK(swim_node_id_compare(&ev.node, &mock_id) == 0);
+      CHECK(ev.node == "127.0.0.1:20202/mock");
     }
   }
   CHECK(suspect_found);
@@ -314,7 +314,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
     EventLog ev = get_log_event(i);
     if (ev.event == SWIM_NODE_DOWN) {
       down_found = true;
-      CHECK(swim_node_id_compare(&ev.node, &mock_id) == 0);
+      CHECK(ev.node == "127.0.0.1:20202/mock");
     }
   }
   CHECK(down_found);
@@ -410,7 +410,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 // thread (and would hang the whole suite here).
 static std::atomic<bool> g_reentrant_ok{false};
 static void reentrant_members_cb(void *ctx, swim_event_t event,
-                                 const swim_node_id_t *node) {
+                                 const char *node) {
   (void)ctx;
   (void)event;
   (void)node;
@@ -472,7 +472,7 @@ static void *hint_spammer(void *a) {
   }
   return nullptr;
 }
-static void noop_cb(void *ctx, swim_event_t e, const swim_node_id_t *n) {
+static void noop_cb(void *ctx, swim_event_t e, const char *n) {
   (void)ctx;
   (void)e;
   (void)n;
