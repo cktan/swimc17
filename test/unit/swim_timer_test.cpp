@@ -312,7 +312,7 @@ TEST_CASE("swim_node_id manual initialization, formatting, and copying") {
   char buf[256];
   // Format check
   REQUIRE(swim_node_id_format(&id1, buf, sizeof(buf)) == 0);
-  CHECK(strcmp(buf, "127.0.0.1:8080:cookie1") == 0);
+  CHECK(strcmp(buf, "127.0.0.1:8080/cookie1") == 0);
 
   swim_node_id_t id2 = {};
   strcpy(id2.host, "example.com");
@@ -368,7 +368,7 @@ TEST_CASE("swim_node_id parsing functionality") {
   char buf[256];
 
   // Parse IPv4 with cookie
-  REQUIRE(swim_node_id_parse(&id, "192.168.1.1:8888:mycookie") == 0);
+  REQUIRE(swim_node_id_parse(&id, "192.168.1.1:8888/mycookie") == 0);
   CHECK(strcmp(id.host, "192.168.1.1") == 0);
   CHECK(id.port == 8888);
   CHECK(strcmp(id.cookie, "mycookie") == 0);
@@ -380,12 +380,12 @@ TEST_CASE("swim_node_id parsing functionality") {
   CHECK(strcmp(id.cookie, "") == 0);
 
   // Parse bracketed IPv6 with cookie
-  REQUIRE(swim_node_id_parse(&id, "[2001:db8::1]:8080:ipv6cook") == 0);
+  REQUIRE(swim_node_id_parse(&id, "[2001:db8::1]:8080/ipv6cook") == 0);
   CHECK(strcmp(id.host, "2001:db8::1") == 0);
   CHECK(id.port == 8080);
   CHECK(strcmp(id.cookie, "ipv6cook") == 0);
   REQUIRE(swim_node_id_format(&id, buf, sizeof(buf)) == 0);
-  CHECK(strcmp(buf, "[2001:db8::1]:8080:ipv6cook") == 0);
+  CHECK(strcmp(buf, "[2001:db8::1]:8080/ipv6cook") == 0);
 
   // Parse bracketed IPv6 without cookie
   REQUIRE(swim_node_id_parse(&id, "[::1]:22") == 0);

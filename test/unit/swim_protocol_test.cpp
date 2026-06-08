@@ -136,9 +136,9 @@ TEST_CASE("protocol: multi-node auto-discovery") {
 
   // Define 3 nodes
   swim_node_id_t id1, id2, id3;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:20101:c1") == 0);
-  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:20102:c2") == 0);
-  REQUIRE(swim_node_id_parse(&id3, "127.0.0.1:20103:c3") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:20101/c1") == 0);
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:20102/c2") == 0);
+  REQUIRE(swim_node_id_parse(&id3, "127.0.0.1:20103/c3") == 0);
 
   // Node 1 setup (seed: Node 2)
   swim_start_opts_t opts1;
@@ -212,10 +212,10 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   clear_log();
 
   swim_node_id_t self_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20201:c1") == 0);
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20201/c1") == 0);
 
   swim_node_id_t mock_id;
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20202:mock") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20202/mock") == 0);
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -337,9 +337,9 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   clear_log();
 
   swim_node_id_t node_id, requester_id, target_id;
-  REQUIRE(swim_node_id_parse(&node_id, "127.0.0.1:20301:c1") == 0);
-  REQUIRE(swim_node_id_parse(&requester_id, "127.0.0.1:20302:r") == 0);
-  REQUIRE(swim_node_id_parse(&target_id, "127.0.0.1:20303:t") == 0);
+  REQUIRE(swim_node_id_parse(&node_id, "127.0.0.1:20301/c1") == 0);
+  REQUIRE(swim_node_id_parse(&requester_id, "127.0.0.1:20302/r") == 0);
+  REQUIRE(swim_node_id_parse(&target_id, "127.0.0.1:20303/t") == 0);
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -370,7 +370,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   for (uint32_t i = 0; i < 32; i++) {
     swim_node_id_t dead;
     char s[64];
-    snprintf(s, sizeof(s), "127.0.0.1:%u:d", 21000 + i);
+    snprintf(s, sizeof(s), "127.0.0.1:%u/d", 21000 + i);
     REQUIRE(swim_node_id_parse(&dead, s) == 0);
     send_ping_req(dead, 100 + i);
     usleep(5000);
@@ -428,8 +428,8 @@ static void reentrant_members_cb(void *ctx, swim_event_t event,
 
 TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
   swim_node_id_t self_id, mock_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20401:c1") == 0);
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20402:mock") == 0);
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20401/c1") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20402/mock") == 0);
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -500,7 +500,7 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
 
   RaceArg arg;
   arg.name = "h3_race";
-  REQUIRE(swim_node_id_parse(&arg.peer, "127.0.0.1:20404:p") == 0);
+  REQUIRE(swim_node_id_parse(&arg.peer, "127.0.0.1:20404/p") == 0);
 
   g_race_stop = false;
   pthread_t th[4];
@@ -566,8 +566,8 @@ TEST_CASE("protocol: concurrent swim_leave is memory-safe (M2)") {
 
 TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   swim_node_id_t self_id, mock_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501:c1") == 0);
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502:mock") == 0);
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501/c1") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502/mock") == 0);
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -646,13 +646,13 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   REQUIRE(m != nullptr);
 
   swim_node_id_t sender;
-  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001:sender_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/sender_cookie") == 0);
   swim_node_id_t peer;
-  REQUIRE(swim_node_id_parse(&peer, "127.0.0.1:8002:peer_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&peer, "127.0.0.1:8002/peer_cookie") == 0);
 
   // Enqueue a gossip event
   swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") ==
+  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001/gossip_cookie") ==
           0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
                                     1) == 0);
@@ -692,11 +692,11 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   REQUIRE(m != nullptr);
 
   swim_node_id_t sender;
-  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001:sender_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/sender_cookie") == 0);
 
   // Enqueue a gossip event (should be ignored for LEAVE)
   swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") ==
+  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001/gossip_cookie") ==
           0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
                                     1) == 0);
@@ -728,7 +728,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   clear_obs();
 
   swim_node_id_t self_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501:c1") == 0);
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501/c1") == 0);
 
   // Mock peer with a cookie containing non-alphanumeric bytes (space, '!').
   swim_node_id_t mock_id;
@@ -758,7 +758,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
 
   // node up transition, with the cookie unescaped
   poll_feed_events("obs_node");
-  CHECK(obs_contains("node up 127.0.0.1:20502:a b!"));
+  CHECK(obs_contains("node up 127.0.0.1:20502/a b!"));
   // cluster-size gauge moved from 0 to 1.
   CHECK(obs_contains("cluster size 1"));
 
@@ -777,8 +777,8 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   clear_obs();
 
   swim_node_id_t idA, idB;
-  REQUIRE(swim_node_id_parse(&idA, "127.0.0.1:20511:a1") == 0);
-  REQUIRE(swim_node_id_parse(&idB, "127.0.0.1:20512:b1") == 0);
+  REQUIRE(swim_node_id_parse(&idA, "127.0.0.1:20511/a1") == 0);
+  REQUIRE(swim_node_id_parse(&idB, "127.0.0.1:20512/b1") == 0);
 
   swim_start_opts_t a;
   memset(&a, 0, sizeof(a));

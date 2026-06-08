@@ -78,7 +78,7 @@ static inline int swim_node_id_compare(const swim_node_id_t *a,
 /**
  * Format a node ID into a string buffer.
  * If cookie is empty, formats as "host:port".
- * If cookie is present, formats as "host:port:cookie".
+ * If cookie is present, formats as "host:port/cookie".
  * Wrapped in brackets if the host is an IPv6 address.
  *
  * @param id   The node ID to format.
@@ -90,8 +90,8 @@ SWIM_EXTERN int swim_node_id_format(const swim_node_id_t *id, char *buf,
                                     size_t size);
 
 /**
- * Parse a node ID from a string formatted as "host:port" or "host:port:cookie".
- * Bracketed IPv6 hosts (e.g., "[::1]:8080:cookie") are supported.
+ * Parse a node ID from a string formatted as "host:port" or "host:port/cookie".
+ * Bracketed IPv6 hosts (e.g., "[::1]:8080/cookie") are supported.
  *
  * @param id  Pointer to the swim_node_id_t to populate.
  * @param str The string to parse.

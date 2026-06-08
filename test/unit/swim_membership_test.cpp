@@ -20,7 +20,7 @@ TEST_CASE("membership: add and get node") {
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001:cookie1") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") == 0);
 
   // Get unknown node
   const swim_member_t *res = swim_membership_get(m, &id1);
@@ -47,7 +47,7 @@ TEST_CASE("membership: set_alive forces ALIVE state") {
   REQUIRE(m != nullptr);
 
   swim_node_id_t id1;
-  REQUIRE(swim_node_id_parse(&id1, "[::1]:8001:cookie1") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "[::1]:8001/cookie1") == 0);
 
   // Force set on empty membership
   int rc = swim_membership_set_alive(m, &id1, 5);

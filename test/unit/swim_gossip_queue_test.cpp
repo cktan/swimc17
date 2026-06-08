@@ -20,7 +20,7 @@ TEST_CASE("gossip_queue: basic enqueue and supersession") {
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001:cookie1") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") == 0);
 
   // 1. Enqueue brand new event (ALIVE, inc 10)
   int rc = swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 10, 1);
@@ -228,7 +228,7 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex basic encoding") {
 
   // 2. Add a member
   swim_node_id_t id1;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001:cookie1") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") == 0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 42, 1) == 0);
 
   memset(buf, 0, sizeof(buf));
@@ -284,8 +284,8 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack_ex budget limits") {
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1, id2;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001:cookie1") == 0); // length of event: 15 + 9 + 7 = 31 bytes
-  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002:cookie2") == 0); // length of event: 31 bytes
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") == 0); // length of event: 15 + 9 + 7 = 31 bytes
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002/cookie2") == 0); // length of event: 31 bytes
 
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 10, 1) == 0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id2, 10, 1) == 0);

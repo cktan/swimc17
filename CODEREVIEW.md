@@ -56,6 +56,22 @@ are two colons, it is always `host:port:cookie`. If there is
 only one colon, it is `host:port`. Do not rely on guessing
 whether the final segment is a port.
 
+**CLAUDE:** Valid. The example traces correctly through the
+code. For `"127.0.0.1:8000:123"`, `strrchr` finds the last
+colon before `"123"`, and `strtol("123")` succeeds with a
+value in the valid port range, so the code takes the fast
+path and misidentifies `"127.0.0.1:8000"` as the host and
+`123` as the port. **Fixed** by changing the cookie
+separator from `:` to `/`, making the format
+`host:port/cookie`. Since `/` never appears in an IP
+address or hostname, the parser can split on `/` first to
+extract the cookie, then parse the remainder as `host:port`
+without ambiguity. This also eliminates the IPv6
+colon-counting problem entirely: a bare IPv6 like
+`2001:db8::1:8080/cookie` parses unambiguously with no
+bracket requirement. The old colon-counting recommendation
+is superseded by this simpler approach.
+
 ---
 
 ### 2.2. Buffer Overflow Risk in `swim_timer_add`
@@ -85,6 +101,18 @@ Perform a runtime length check and return `SWIM_ERR_INVALID`
 on overflow, or use `snprintf` / `strncpy` to prevent bounds
 violations.
 
+**CLAUDE:** Invalid as a practical vulnerability. Every call
+site constructs timer names from either short fixed literals
+(`"probe"`, `"probe_timeout"`, `"seed_retry"`) or from
+`suspect_key`, which uses `snprintf(buf, 384, "suspect:%s:%u:%s",
+...)`. The maximum possible output of `suspect_key` is ≈333
+bytes (host 255 + port 5 + cookie 63 + prefix and colons 10),
+well under the 384-byte cap. The `strcpy` is safe in practice
+because all names are internally generated and pre-bounded.
+The observation that `assert` is not a runtime guard is
+correct in principle, but no externally-supplied name can
+reach this function.
+
 ---
 
 ## 3. Design Concerns & Limitations
@@ -102,6 +130,11 @@ Any attempt to start a 17th instance in a single process
 will fail with `SWIM_ERR_FULL`. This limit is undocumented
 in the public headers and could surprise users running large
 multi-tenant test environments.
+
+**CLAUDE:** Invalid. The 16-instance limit is documented in
+USAGE.md under `swim_start` error codes: "`SWIM_ERR_FULL`:
+Maximum active instances (16) exceeded." The claim that it
+is undocumented is incorrect.
 
 ---
 
@@ -121,6 +154,13 @@ are silently ignored.
 In large or highly partitioned networks, relay capacity may
 be exhausted, causing false-positive failure detections due
 to dropped relay opportunities.
+
+**CLAUDE:** Partially valid. The silent drop is real code.
+However, the practical risk is minimal: with the default
+`ping_req_fanout` of 3 and short-lived relay entries
+(removed on ack or timeout), reaching 32 concurrent relays
+would require tens of simultaneous failed probes. Emitting
+a feed warning on overflow would be a reasonable improvement.
 
 ---
 
@@ -143,6 +183,15 @@ differentiate them.
 **Recommendation:**
 Use a high-resolution clock (e.g. `clock_gettime`) or read
 a few bytes from `/dev/urandom` to initialize the PRNG seed.
+
+**CLAUDE:** Partially valid. The potential correlation is
+real when multiple instances start on the same thread within
+the same second. However, `rand_r` is used only for
+probe-target selection and peer sampling — not for any
+security purpose — so correlated sequences do not break
+protocol correctness. Switching to `clock_gettime` for
+the seed would be a cheap improvement; `/dev/urandom` is
+unnecessary here.
 
 ---
 

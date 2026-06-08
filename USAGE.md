@@ -333,7 +333,7 @@ while ((n = swim_get_event("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
 ### Node ID Helpers
 
 ```c
-// Parse string format "host:port" or "host:port:cookie"
+// Parse string format "host:port" or "host:port/cookie"
 int swim_node_id_parse(swim_node_id_t *id, const char *str);
 
 // Format node ID back to string

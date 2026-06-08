@@ -11,7 +11,7 @@ extern "C" {
 
 TEST_CASE("codec: ping/ack roundtrip without events") {
   swim_node_id_t sender;
-  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001:my_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/my_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   int enc_len = swim_encode_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
@@ -30,8 +30,8 @@ TEST_CASE("codec: ping/ack roundtrip without events") {
 
 TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
   swim_node_id_t sender, peer;
-  REQUIRE(swim_node_id_parse(&sender, "[::1]:9001:sender_cookie") == 0);
-  REQUIRE(swim_node_id_parse(&peer, "[::1]:9002:target_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&sender, "[::1]:9001/sender_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&peer, "[::1]:9002/target_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   int enc_len = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
@@ -57,9 +57,9 @@ TEST_CASE("codec: full message roundtrip with events") {
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1, id2, id3;
-  REQUIRE(swim_node_id_parse(&id1, "192.168.0.11:81:c1") == 0);
-  REQUIRE(swim_node_id_parse(&id2, "192.168.0.12:82:c2") == 0);
-  REQUIRE(swim_node_id_parse(&id3, "192.168.0.13:83:c3") == 0);
+  REQUIRE(swim_node_id_parse(&id1, "192.168.0.11:81/c1") == 0);
+  REQUIRE(swim_node_id_parse(&id2, "192.168.0.12:82/c2") == 0);
+  REQUIRE(swim_node_id_parse(&id3, "192.168.0.13:83/c3") == 0);
 
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 123456789ULL, 1) == 0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, &id2, 55ULL, 1) == 0);
@@ -193,7 +193,7 @@ TEST_CASE("codec: integer encoding helpers") {
 
 TEST_CASE("codec: swim_encode_membership") {
   swim_member_t member;
-  REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001:my_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001/my_cookie") == 0);
   member.status = SWIM_STATUS_ALIVE;
   member.incarnation = 42;
   member.dead_at = 12345; // Should be ignored
@@ -312,7 +312,7 @@ TEST_CASE("codec: decode helpers") {
 
   // 7. Test swim_decode_membership
   swim_member_t member;
-  REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001:my_cookie") == 0);
+  REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001/my_cookie") == 0);
   member.status = SWIM_STATUS_ALIVE;
   member.incarnation = 42;
   member.dead_at = 0;
