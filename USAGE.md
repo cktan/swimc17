@@ -53,19 +53,13 @@ seeds.
 #include <stdio.h>
 
 int main() {
-    swim_node_id_t seed;
-    if (swim_node_id_parse(&seed, "10.0.0.1:7771:c1") != 0) {
-        fprintf(stderr, "Failed to parse seed node ID\n");
-        return 1;
-    }
-
     swim_start_opts_t opts = {0};
     opts.host = "10.0.0.7";
     opts.port = 7771;
     opts.cookie = "c1";
     opts.name = "my_cluster";
-    opts.seed_list = &seed;
-    opts.seed_count = 1;
+    const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
+    opts.seeds = seeds;
 
     if (swim_start(&opts) != 0) {
         fprintf(stderr, "Failed to start SWIM: %s\n", swim_errmsg());
@@ -373,8 +367,7 @@ Options are configured in the `swim_start_opts_t` struct:
 | `port` | `uint16_t` | **required** | UDP port to bind |
 | `name` | `const char*` | **required** | Unique instance name |
 | `cookie` | `const char*` | `""` | User-defined node cookie |
-| `seed_list` | `const swim_node_id_t*` | `NULL` | Seed nodes for join |
-| `seed_count` | `int` | `0` | Count of seed nodes |
+| `seeds` | `const char**` | `NULL` | NULL-terminated seed list (`"host:port/cookie"`) |
 | `protocol_period_ms` | `uint64_t` | `1000` | How often to probe one peer |
 | `ping_timeout_ms` | `uint64_t` | `200` | Direct ACK wait time |
 | `ping_req_fanout` | `uint32_t` | `3` | Indirect ping relay count |

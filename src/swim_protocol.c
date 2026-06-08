@@ -148,7 +148,7 @@ struct swim_instance_t {
   uint64_t seed_retry_interval_ms;
   uint64_t dead_node_expiry_ms;
 
-  // Bootstrap addresses from opts->seed_list; pinged periodically until
+  // Bootstrap addresses from opts->seeds; pinged periodically until
   // at least one responds and the node joins the cluster.
   swim_node_id_t *seeds;
   int seed_count;
@@ -710,6 +710,9 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
   case SWIM_MSG_PING_REQ:
     // We act as a helper relay: ping msg.peer on behalf of msg.sender
     relay_gc(inst);
+    /* 32-slot cap. Practical risk is low: with ping_req_fanout=3 and
+     * short-lived entries (removed on ack or timeout), hitting 32
+     * concurrent relays requires tens of simultaneous failed probes. */
     if (inst->relay_count < 32) {
       relay_probe_t *r = &inst->relays[inst->relay_count++];
       r->requester = msg.sender;
@@ -892,14 +895,23 @@ int swim_start(const swim_start_opts_t *opts) {
   inst->incarnation = get_now_ms();
   inst->seq = 1;
 
-  // Copy seeds list
-  if (opts->seed_count > 0 && opts->seed_list) {
-    inst->seeds = malloc(opts->seed_count * sizeof(swim_node_id_t));
-    if (!inst->seeds)
-      goto error_cleanup;
-    memcpy(inst->seeds, opts->seed_list,
-           opts->seed_count * sizeof(swim_node_id_t));
-    inst->seed_count = opts->seed_count;
+  // Parse seeds list
+  if (opts->seeds) {
+    int n = 0;
+    while (opts->seeds[n]) n++;
+    if (n > 0) {
+      inst->seeds = malloc(n * sizeof(swim_node_id_t));
+      if (!inst->seeds)
+        goto error_cleanup;
+      for (int i = 0; i < n; i++) {
+        if (swim_node_id_parse(&inst->seeds[i], opts->seeds[i]) != 0) {
+          free(inst->seeds);
+          inst->seeds = NULL;
+          goto error_cleanup;
+        }
+      }
+      inst->seed_count = n;
+    }
   }
 
   // Initialize thread synchronization

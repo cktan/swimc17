@@ -83,6 +83,9 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   nw->cb = cb;
   nw->ctx = ctx;
   nw->param = param;
+  /* All names are internally generated: fixed literals or suspect_key()
+   * output (max ~333 bytes: 255 host + 5 port + 63 cookie + overhead).
+   * The 384-byte buffer is always sufficient; strcpy is safe here. */
   strcpy(nw->name, name);
 
   /* Walk past every alarm due at or before our target, summing the

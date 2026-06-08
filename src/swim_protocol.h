@@ -114,8 +114,7 @@ typedef struct {
   uint16_t port;
   const char *name;                // Unique instance name (mandatory)
   const char *cookie;              // Optional cookie, defaults to ""
-  const swim_node_id_t *seed_list; // List of seed nodes
-  int seed_count;                  // Number of seeds
+  const char **seeds;              // NULL-terminated list of seed strings ("host:port/cookie")
 
   uint64_t protocol_period_ms;     // default 1000
   uint64_t ping_timeout_ms;        // default 200

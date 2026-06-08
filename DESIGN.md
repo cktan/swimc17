@@ -220,13 +220,13 @@ Join and seed handling are specified in `ALGORITHM.md`
 
 ```c
 // Initialize / start the library with startup options:
+const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
 swim_start_opts_t opts = {
   .host = "10.0.0.1",                  // required
   .port = 7771,                        // required
   .name = "my_cluster",                // required
   .cookie = "c1",                      // optional
-  .seed_list = seeds,                  // optional
-  .seed_count = 1,
+  .seeds = seeds,                      // optional, NULL-terminated
   .protocol_period_ms = 1000,
   .ping_timeout_ms = 200,
   .ping_req_fanout = 3,

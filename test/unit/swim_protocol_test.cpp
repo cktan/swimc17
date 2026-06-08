@@ -134,47 +134,41 @@ TEST_CASE("protocol: single node startup and leave") {
 TEST_CASE("protocol: multi-node auto-discovery") {
   clear_log();
 
-  // Define 3 nodes
-  swim_node_id_t id1, id2, id3;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:20101/c1") == 0);
-  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:20102/c2") == 0);
-  REQUIRE(swim_node_id_parse(&id3, "127.0.0.1:20103/c3") == 0);
-
   // Node 1 setup (seed: Node 2)
+  const char *seeds1[] = { "127.0.0.1:20102/c2", nullptr };
   swim_start_opts_t opts1;
   memset(&opts1, 0, sizeof(opts1));
   opts1.host = "127.0.0.1";
   opts1.port = 20101;
   opts1.cookie = "c1";
   opts1.name = "n1";
-  opts1.seed_list = &id2;
-  opts1.seed_count = 1;
+  opts1.seeds = seeds1;
   opts1.protocol_period_ms = 400;
   opts1.ping_timeout_ms = 100;
   opts1.seed_retry_interval_ms = 400;
 
   // Node 2 setup (seed: Node 3)
+  const char *seeds2[] = { "127.0.0.1:20103/c3", nullptr };
   swim_start_opts_t opts2;
   memset(&opts2, 0, sizeof(opts2));
   opts2.host = "127.0.0.1";
   opts2.port = 20102;
   opts2.cookie = "c2";
   opts2.name = "n2";
-  opts2.seed_list = &id3;
-  opts2.seed_count = 1;
+  opts2.seeds = seeds2;
   opts2.protocol_period_ms = 400;
   opts2.ping_timeout_ms = 100;
   opts2.seed_retry_interval_ms = 400;
 
   // Node 3 setup (seed: Node 1)
+  const char *seeds3[] = { "127.0.0.1:20101/c1", nullptr };
   swim_start_opts_t opts3;
   memset(&opts3, 0, sizeof(opts3));
   opts3.host = "127.0.0.1";
   opts3.port = 20103;
   opts3.cookie = "c3";
   opts3.name = "n3";
-  opts3.seed_list = &id1;
-  opts3.seed_count = 1;
+  opts3.seeds = seeds3;
   opts3.protocol_period_ms = 400;
   opts3.ping_timeout_ms = 100;
   opts3.seed_retry_interval_ms = 400;
@@ -776,30 +770,26 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
 TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   clear_obs();
 
-  swim_node_id_t idA, idB;
-  REQUIRE(swim_node_id_parse(&idA, "127.0.0.1:20511/a1") == 0);
-  REQUIRE(swim_node_id_parse(&idB, "127.0.0.1:20512/b1") == 0);
-
+  const char *seedsA[] = { "127.0.0.1:20512/b1", nullptr };
   swim_start_opts_t a;
   memset(&a, 0, sizeof(a));
   a.host = "127.0.0.1";
   a.port = 20511;
   a.cookie = "a1";
   a.name = "rtt_a";
-  a.seed_list = &idB;
-  a.seed_count = 1;
+  a.seeds = seedsA;
   a.protocol_period_ms = 200;
   a.ping_timeout_ms = 100;
   a.seed_retry_interval_ms = 200;
 
+  const char *seedsB[] = { "127.0.0.1:20511/a1", nullptr };
   swim_start_opts_t b;
   memset(&b, 0, sizeof(b));
   b.host = "127.0.0.1";
   b.port = 20512;
   b.cookie = "b1";
   b.name = "rtt_b";
-  b.seed_list = &idA;
-  b.seed_count = 1;
+  b.seeds = seedsB;
   b.protocol_period_ms = 200;
   b.ping_timeout_ms = 100;
   b.seed_retry_interval_ms = 200;
