@@ -195,6 +195,15 @@ records the design decisions behind them.
   rejoining node with the same identity is treated as
   a fresh member.
 
+- **Membership list capacity:** unbounded. The array
+  starts at 16 slots and doubles on each realloc.
+  There is no hard cap. This is reasonable for the
+  intended scale (tens to hundreds of nodes); at
+  1000 members the list is ~340 KB. The risk is
+  runaway growth if a bug or misconfiguration causes
+  the node to accept membership for many fake peers —
+  there is no defence against that today.
+
 ---
 
 ## 10. Bootstrap / Join
@@ -245,8 +254,10 @@ a specific instance. The name cannot be `NULL` or empty.
 ### Querying membership
 
 ```c
-swim_node_id_t peers[32];
-int count = swim_peers("my_cluster", peers, 32, false);
+int count;
+char *p = swim_peers("my_cluster", false, &count);
+// iterate: char *s = p; for (int i = 0; i < count; i++) { ...; s += strlen(s)+1; }
+free(p);
 ```
 
 ### Event subscription

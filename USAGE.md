@@ -177,26 +177,25 @@ releases memory. Thread-safe.
 ### `swim_peers`
 
 ```c
-int swim_peers(const char *name, swim_node_id_t *out_list, int max_len, bool include_dead);
+char *swim_peers(const char *name, bool include_dead, int *count);
 ```
 
-Retrieves a snapshot of the current membership registry as a
-list of peer node ids.
+Returns a snapshot of current peers as a packed string
+buffer. Each peer is formatted as `"host:port"` or
+`"host:port/cookie"`; the `*count` strings are packed
+consecutively, each NUL-terminated. The caller must
+`free()` the returned pointer.
 
-The `name` argument specifies the instance. It must be
-non-NULL and non-empty. `out_list` is a pre-allocated buffer
-of `swim_node_id_t` elements, and `max_len` is its capacity.
-Set `include_dead` to `true` to return dead/quarantined
+Set `include_dead` to `true` to include dead/quarantined
 entries, or `false` for active nodes only.
 
-Returns the number of elements written to `out_list` on
-success (can be `0` or greater). Returns `-1` on error:
-- `SWIM_ERR_INVALID`: `name` is NULL or empty, or `out_list`
-  is NULL or `max_len < 0`.
+Returns a valid pointer (with `*count` set) on success,
+or `NULL` on error:
+- `SWIM_ERR_INVALID`: `name` or `count` is NULL, or
+  `name` is empty.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+- `SWIM_ERR_NOMEM`: Memory allocation failed.
 
-Acquires the instance mutex, copies matching node ids
-directly to the provided array, and releases the lock.
 Thread-safe.
 
 ---

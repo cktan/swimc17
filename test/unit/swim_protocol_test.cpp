@@ -118,10 +118,10 @@ TEST_CASE("protocol: single node startup and leave") {
   CHECK(rc == 0);
 
   // Query members (should be empty because self is not in the list)
-  char peers_buf[350 * 5];
-  char *peers[5];
-  int count = swim_peers("single_node", sizeof(peers_buf), peers_buf, 5, peers, true);
+  int count;
+  char *p = swim_peers("single_node", true, &count);
   CHECK(count == 0);
+  free(p);
 
   // Unsubscribe
   rc = swim_unsubscribe("single_node", test_callback, nullptr);
@@ -176,17 +176,15 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   usleep(1500000);
 
   // Check Node 1 membership
-  char pbuf[350 * 5];
-  char *pl[5];
-  int count1 = swim_peers("n1", sizeof(pbuf), pbuf, 5, pl, false);
+  int count1; char *p1 = swim_peers("n1", false, &count1); free(p1);
   CHECK(count1 >= 2); // should have discovered Node 2 and Node 3
 
   // Check Node 2 membership
-  int count2 = swim_peers("n2", sizeof(pbuf), pbuf, 5, pl, false);
+  int count2; char *p2 = swim_peers("n2", false, &count2); free(p2);
   CHECK(count2 >= 2);
 
   // Check Node 3 membership
-  int count3 = swim_peers("n3", sizeof(pbuf), pbuf, 5, pl, false);
+  int count3; char *p3 = swim_peers("n3", false, &count3); free(p3);
   CHECK(count3 >= 2);
 
   // Tear down all
@@ -404,9 +402,9 @@ static void reentrant_members_cb(void *ctx, swim_event_t event,
   (void)ctx;
   (void)event;
   (void)node;
-  char pbuf[350 * 8];
-  char *pl[8];
-  int n = swim_peers("h3_reentrant", sizeof(pbuf), pbuf, 8, pl, true);
+  int n;
+  char *p = swim_peers("h3_reentrant", true, &n);
+  free(p);
   (void)n;
   g_reentrant_ok = true;
 }

@@ -84,22 +84,17 @@ SWIM_EXTERN int swim_start(const swim_start_opts_t *opts);
 SWIM_EXTERN int swim_leave(const char *name);
 
 /**
- * Query current cluster membership list for a named instance.
- *
- * Peer strings are packed into @buf and @peers[0..n-1] point into it.
- * Each string is formatted as "host:port" or "host:port/cookie".
- * @bufsz should be at least 350 * @npeers bytes.
+ * Return the current peer list as a packed string buffer.
+ * Each peer is formatted as "host:port" or "host:port/cookie";
+ * the *count strings are packed consecutively, each NUL-terminated.
+ * Caller must free() the returned pointer.
  *
  * @param name         The name of the instance (mandatory).
- * @param bufsz        Size of @buf in bytes.
- * @param buf          Destination buffer for peer strings.
- * @param npeers       Capacity of @peers array.
- * @param peers        Filled with pointers into @buf, one per peer.
- * @param include_dead Whether to include dead nodes in the list.
- * @return The number of peers written, or -1 on error.
+ * @param include_dead Whether to include dead/quarantined peers.
+ * @param count        Set to the number of peers on success.
+ * @return Packed string buffer, or NULL on error.
  */
-SWIM_EXTERN int swim_peers(const char *name, int bufsz, char *buf, int npeers,
-                           char **peers, bool include_dead);
+SWIM_EXTERN char *swim_peers(const char *name, bool include_dead, int *count);
 
 /**
  * Subscribe a callback to receive membership events from a named instance.
