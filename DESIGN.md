@@ -131,8 +131,35 @@ opts. Defaults are tuned for an 8-node cluster.
 | `ping_timeout` | 200 ms | `T / 5` |
 | `ping_req_fanout` | 3 | paper default; `k` |
 | `suspicion_timeout` | 3000 ms | `log2(N) × T` at N=8 |
-| `seed_retry_interval` | 5000 ms | fixed, not exponential |
+| `seed_retry_interval` | 5000 ms | `5 × T` |
 | `dead_node_expiry` | 6000 ms | `2 × suspicion_timeout` |
+
+### Deriving T from detection latency
+
+The worst-case failure-detection path is:
+
+1. Node dies right after being probed — waits up to
+   one full period `T` before the next probe fires.
+2. Direct ping times out after `T/5`.
+3. Indirect ping-req times out after another `T/5`.
+4. Suspicion timer runs for `ceil(log2(N)) × T`.
+
+Total worst-case latency:
+
+```
+detect = T + 2×(T/5) + ceil(log2(N))×T
+       = T × (1.4 + ceil(log2(N)))
+```
+
+Solving for `T` given a target detection latency and
+cluster size `N`:
+
+```
+T = detect_ms / (1.4 + ceil(log2(N)))
+```
+
+`swim_opts_for(n, detect_ms)` performs this inversion
+automatically (see §11).
 
 ---
 
@@ -227,21 +254,33 @@ Join and seed handling are specified in `ALGORITHM.md`
 
 ### Initialization
 
+Use `swim_opts_for(n, detect_ms)` to compute timing
+parameters from cluster size and a desired worst-case
+failure-detection latency, then fill in the identity
+fields and call `swim_start()`:
+
 ```c
-// Initialize / start the library with startup options:
 const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
+swim_start_opts_t opts = swim_opts_for(50, 10000);
+opts.self  = "10.0.0.2:7771/c1";
+opts.name  = "my_cluster";
+opts.seeds = seeds;
+swim_start(&opts);
+```
+
+Or zero-initialize and set all fields manually:
+
+```c
 swim_start_opts_t opts = {
-  .host = "10.0.0.1",                  // required
-  .port = 7771,                        // required
-  .name = "my_cluster",                // required
-  .cookie = "c1",                      // optional
-  .seeds = seeds,                      // optional, NULL-terminated
-  .protocol_period_ms = 1000,
-  .ping_timeout_ms = 200,
-  .ping_req_fanout = 3,
-  .suspicion_timeout_ms = 3000,
+  .self  = "10.0.0.1:7771/c1",
+  .name  = "my_cluster",
+  .seeds = seeds,
+  .protocol_period_ms    = 1000,
+  .ping_timeout_ms       = 200,
+  .ping_req_fanout       = 3,
+  .suspicion_timeout_ms  = 3000,
   .seed_retry_interval_ms = 5000,
-  .dead_node_expiry_ms = 6000
+  .dead_node_expiry_ms   = 6000
 };
 swim_start(&opts);
 ```

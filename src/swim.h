@@ -64,6 +64,64 @@ typedef struct {
 } swim_start_opts_t;
 
 /**
+ * Compute a swim_start_opts_t with all timing fields derived from
+ * two operator-friendly inputs: expected cluster size and
+ * worst-case failure-detection latency.
+ *
+ * Background — why not expose T directly:
+ *   The SWIM paper's fundamental knob is the protocol period T
+ *   (probe interval). T is not intuitive; operators know how
+ *   many machines they have provisioned, not what value of T
+ *   to pick. swim_opts_for() inverts the detection-latency
+ *   formula so you can reason in terms you already know.
+ *
+ * Worst-case detection latency model:
+ *   A node can fail at any point in a probe cycle. In the
+ *   worst case it fails immediately after being probed, so the
+ *   detector waits up to one full period T before the next
+ *   probe fires. That probe times out twice — once for the
+ *   direct ping (T/5) and once for the indirect ping-req
+ *   (T/5) — and the resulting suspicion timer runs for
+ *   ceil(log2(N)) x T before the node is declared dead:
+ *
+ *     detect_ms = T + 2x(T/5) + ceil(log2(N))xT
+ *               = T x (1.4 + ceil(log2(N)))
+ *
+ *   Solving for T:
+ *
+ *     T = detect_ms / (1.4 + ceil(log2(N)))
+ *
+ * Derived fields:
+ *   protocol_period_ms     = T
+ *   ping_timeout_ms        = T / 5
+ *   ping_req_fanout        = 3   (SWIM paper default)
+ *   suspicion_timeout_ms   = ceil(log2(N)) x T
+ *   dead_node_expiry_ms    = 2 x suspicion_timeout_ms
+ *   seed_retry_interval_ms = 5 x T  (5 probe periods)
+ *
+ * The pointer fields (self, name, seeds) are set to NULL;
+ * the caller must fill them before passing to swim_start().
+ *
+ * Fallback to defaults:
+ *   If n <= 1, detect_ms == 0, or the derived T rounds to 0,
+ *   the function returns the same defaults swim_start() applies
+ *   for zero-initialized fields (T = 1000 ms, tuned for an
+ *   8-node cluster). No error is reported.
+ *
+ * Example — 50-node cluster, detect failures within 15 s:
+ *
+ *   swim_start_opts_t opts = swim_opts_for(50, 15000);
+ *   opts.self = "10.0.0.1:7771";
+ *   opts.name = "my_cluster";
+ *   swim_start(&opts);
+ *
+ * @param n          Expected cluster size (number of nodes).
+ * @param detect_ms  Worst-case failure-detection latency (ms).
+ * @return           swim_start_opts_t with timing fields set.
+ */
+SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
+
+/**
  * Initialize and start a named SWIM protocol instance. Spawns a
  * background thread that monitors the UDP port and runs the SWIM
  * loop; the thread exits when swim_leave() is called. Returns once

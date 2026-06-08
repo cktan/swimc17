@@ -120,6 +120,54 @@ trigger a `SWIM_ERR_INVALID` error.
 
 ---
 
+### `swim_opts_for`
+
+```c
+swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
+```
+
+Computes a `swim_start_opts_t` with all timing fields
+derived from cluster size `n` and a desired worst-case
+failure-detection latency `detect_ms` (milliseconds).
+
+The SWIM paper's fundamental knob is the protocol period
+`T`. This function inverts the detection-latency formula
+so you can configure the library in terms you already
+know rather than in raw protocol timings:
+
+```
+T = detect_ms / (1.4 + ceil(log2(n)))
+```
+
+All timing fields are computed from `T`:
+
+| Field | Value |
+|-------|-------|
+| `protocol_period_ms` | `T` |
+| `ping_timeout_ms` | `T / 5` |
+| `ping_req_fanout` | `3` (SWIM paper default) |
+| `suspicion_timeout_ms` | `ceil(log2(n)) × T` |
+| `dead_node_expiry_ms` | `2 × suspicion_timeout_ms` |
+| `seed_retry_interval_ms` | `5 × T` |
+
+The pointer fields (`self`, `name`, `seeds`) are set to
+`NULL`; the caller must fill them before passing the
+struct to `swim_start()`.
+
+If `n <= 1`, `detect_ms == 0`, or the derived `T` rounds
+to zero, the function returns the built-in defaults
+(equivalent to an 8-node cluster with T = 1000 ms).
+No error is reported.
+
+```c
+swim_start_opts_t opts = swim_opts_for(50, 10000);
+opts.self  = "10.0.0.1:7771";
+opts.name  = "my_cluster";
+swim_start(&opts);
+```
+
+---
+
 ### `swim_start`
 
 ```c
@@ -372,19 +420,20 @@ Options are configured in the `swim_start_opts_t` struct:
 
 ### Tuning for cluster size
 
-The defaults target an 8-node cluster. For larger clusters,
-scale the timeouts with the `log2` of the cluster size `N`:
+Use `swim_opts_for(n, detect_ms)` to compute all timing
+parameters from two inputs you already know: the expected
+cluster size and the worst-case failure-detection latency
+you want. Then set the identity fields and start:
 
 ```c
-#include <math.h>
-
-int n = 50;
-swim_start_opts_t opts = {0};
-opts.self = "10.0.0.1:7771";
-opts.protocol_period_ms = 1000;
-opts.suspicion_timeout_ms = (uint64_t)ceil(log2(n + 1)) * 1000;
-opts.dead_node_expiry_ms = (uint64_t)ceil(log2(n + 1)) * 2000;
+swim_start_opts_t opts = swim_opts_for(50, 10000);
+opts.self  = "10.0.0.1:7771";
+opts.name  = "my_cluster";
+swim_start(&opts);
 ```
+
+The defaults (zero-initialized fields) target an 8-node
+cluster with ~5-second worst-case detection latency.
 
 ---
 

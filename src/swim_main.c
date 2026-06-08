@@ -818,6 +818,47 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
 
 // --- Public API Implementations ---
 
+swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms) {
+  swim_start_opts_t opts = {0};
+
+  if (n > 1 && detect_ms > 0) {
+    // ceil(log2(n)) is the suspicion multiplier from the SWIM+Susp paper.
+    // It represents the number of protocol periods a suspect node is given
+    // to refute the accusation before being declared dead. Scaling by log2(N)
+    // ensures the suspicion has propagated to every node with high probability
+    // before the declaration is made.
+    double logn = ceil(log2((double)n));
+
+    // Invert the worst-case detection latency formula to solve for T:
+    //   detect_ms = T x (1.4 + logn)
+    //   T = detect_ms / (1.4 + logn)
+    // The 1.4 factor accounts for one full probe period (1.0) plus two
+    // ping timeouts at T/5 each (0.4), covering both the direct and
+    // indirect probe phases before the suspicion timer starts.
+    uint64_t T = (uint64_t)((double)detect_ms / (1.4 + logn));
+
+    if (T > 0) {
+      opts.protocol_period_ms     = T;
+      opts.ping_timeout_ms        = T / 5;
+      opts.ping_req_fanout        = 3;  // SWIM paper default; independent of N and T
+      opts.suspicion_timeout_ms   = (uint64_t)(logn * (double)T);
+      opts.dead_node_expiry_ms    = 2 * opts.suspicion_timeout_ms;
+      opts.seed_retry_interval_ms = 5 * T;  // retry unreachable seeds every 5 periods
+      return opts;
+    }
+  }
+
+  // Inputs are degenerate (n <= 1, detect_ms == 0, or T rounded to 0).
+  // Return the same defaults swim_start() applies for zero-initialized fields.
+  opts.protocol_period_ms     = 1000;
+  opts.ping_timeout_ms        = 200;
+  opts.ping_req_fanout        = 3;
+  opts.suspicion_timeout_ms   = 3000;
+  opts.seed_retry_interval_ms = 5000;
+  opts.dead_node_expiry_ms    = 6000;
+  return opts;
+}
+
 int swim_start(const swim_start_opts_t *opts) {
   if (!opts || !opts->self || !opts->name || opts->name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID,
