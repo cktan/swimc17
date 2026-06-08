@@ -175,11 +175,11 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 
 // Pack events into [p, q) in wire format. Writes as many events as fit.
 // Returns bytes written, or -1 on error.
-int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
+int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
                               uint8_t *p, uint8_t *q) {
   if (!queue || !p || q < p) {
     return swim_set_error(SWIM_ERR_INVALID,
-                          "Invalid arguments to swim_gossip_queue_pack_ex");
+                          "Invalid arguments to swim_gossip_queue_pack");
   }
 
   if (queue->count == 0) {

@@ -49,7 +49,7 @@ SWIM_EXTERN int swim_gossip_queue_enqueue(swim_gossip_queue_t *q,
  * @param q            Pointer to the end of the buffer (one past the end).
  * @return The number of bytes written on success, or -1 on error.
  */
-SWIM_EXTERN int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue,
+SWIM_EXTERN int swim_gossip_queue_pack(swim_gossip_queue_t *queue,
                                           uint32_t cluster_size, uint8_t *p,
                                           uint8_t *q);
 

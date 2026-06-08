@@ -247,7 +247,7 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender,
   // decoder treats a missing gossip section as zero events.
   int gossip_bytes = 0;
   if (q) {
-    gossip_bytes = swim_gossip_queue_pack_ex(q, active_members, p, end);
+    gossip_bytes = swim_gossip_queue_pack(q, active_members, p, end);
     if (gossip_bytes < 0) {
       return -1;
     }
