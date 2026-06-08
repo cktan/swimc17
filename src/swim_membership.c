@@ -254,6 +254,8 @@ int swim_membership_list(const swim_membership_t *m, swim_member_t *out_list,
   return copied;
 }
 
+static inline size_t align1024(size_t n) { return (n + 1023) & ~(size_t)1023; }
+
 // Build a packed string buffer of formatted peer IDs. Each string is
 // NUL-terminated and consecutive in the returned buffer; *count is set to the
 // number of strings. Caller must free() the result. Returns NULL on error.
@@ -276,7 +278,7 @@ char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
     char tmp[384];
     swim_node_id_format(&member->id, tmp, sizeof(tmp));
     size_t len = strlen(tmp) + 1;
-    char *b = realloc(buf, used + len);
+    char *b = realloc(buf, align1024(used + len));
     if (!b) {
       free(buf);
       swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
