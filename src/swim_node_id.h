@@ -1,7 +1,7 @@
 #ifndef SWIM_NODE_ID_H
 #define SWIM_NODE_ID_H
 
-#include "swim_protocol.h"
+#include "swim.h"
 
 #include <assert.h>
 #include <stdint.h>

@@ -3,7 +3,7 @@
 extern "C" {
 #include "swim_codec.h"
 #include "swim_gossip_queue.h"
-#include "swim_protocol.h"
+#include "swim.h"
 #include "swim_protocol_internal.h"
 #include "swim_udp.h"
 }
@@ -106,8 +106,7 @@ TEST_CASE("protocol: single node startup and leave") {
   clear_log();
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20001;
+  opts.self = "127.0.0.1:20001";
   opts.name = "single_node";
 
   int rc = swim_start(&opts);
@@ -139,9 +138,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   const char *seeds1[] = { "127.0.0.1:20102/c2", nullptr };
   swim_start_opts_t opts1;
   memset(&opts1, 0, sizeof(opts1));
-  opts1.host = "127.0.0.1";
-  opts1.port = 20101;
-  opts1.cookie = "c1";
+  opts1.self = "127.0.0.1:20101/c1";
   opts1.name = "n1";
   opts1.seeds = seeds1;
   opts1.protocol_period_ms = 400;
@@ -152,9 +149,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   const char *seeds2[] = { "127.0.0.1:20103/c3", nullptr };
   swim_start_opts_t opts2;
   memset(&opts2, 0, sizeof(opts2));
-  opts2.host = "127.0.0.1";
-  opts2.port = 20102;
-  opts2.cookie = "c2";
+  opts2.self = "127.0.0.1:20102/c2";
   opts2.name = "n2";
   opts2.seeds = seeds2;
   opts2.protocol_period_ms = 400;
@@ -165,9 +160,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   const char *seeds3[] = { "127.0.0.1:20101/c1", nullptr };
   swim_start_opts_t opts3;
   memset(&opts3, 0, sizeof(opts3));
-  opts3.host = "127.0.0.1";
-  opts3.port = 20103;
-  opts3.cookie = "c3";
+  opts3.self = "127.0.0.1:20103/c3";
   opts3.name = "n3";
   opts3.seeds = seeds3;
   opts3.protocol_period_ms = 400;
@@ -213,9 +206,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20201;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20201/c1";
   opts.name = "failure_node";
   opts.protocol_period_ms = 400;
   opts.ping_timeout_ms = 100;
@@ -337,9 +328,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20301;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20301/c1";
   opts.name = "relay_node";
   opts.protocol_period_ms = 1000; // keep the node's own probing out of the way
   opts.ping_timeout_ms = 100;     // relay entries expire after ~1 tick
@@ -428,9 +417,7 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20401;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20401/c1";
   opts.name = "h3_reentrant";
   opts.protocol_period_ms = 400;
   opts.ping_timeout_ms = 100;
@@ -483,9 +470,7 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
           "(H3)") {
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20403;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20403/c1";
   opts.name = "h3_race";
   opts.protocol_period_ms = 100;
   opts.ping_timeout_ms = 50;
@@ -532,9 +517,7 @@ static void *leave_racer(void *a) {
 TEST_CASE("protocol: concurrent swim_leave is memory-safe (M2)") {
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20402;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20402/c1";
   opts.name = "m2_race";
 
   REQUIRE(swim_start(&opts) == 0);
@@ -566,9 +549,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20501;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20501/c1";
   opts.name = "m1_budget";
   opts.protocol_period_ms = 10000; // slow
   opts.ping_timeout_ms = 1000;
@@ -732,9 +713,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
-  opts.host = "127.0.0.1";
-  opts.port = 20501;
-  opts.cookie = "c1";
+  opts.self = "127.0.0.1:20501/c1";
   opts.name = "obs_node";
   opts.protocol_period_ms = 200;
 
@@ -774,9 +753,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   const char *seedsA[] = { "127.0.0.1:20512/b1", nullptr };
   swim_start_opts_t a;
   memset(&a, 0, sizeof(a));
-  a.host = "127.0.0.1";
-  a.port = 20511;
-  a.cookie = "a1";
+  a.self = "127.0.0.1:20511/a1";
   a.name = "rtt_a";
   a.seeds = seedsA;
   a.protocol_period_ms = 200;
@@ -786,9 +763,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   const char *seedsB[] = { "127.0.0.1:20511/a1", nullptr };
   swim_start_opts_t b;
   memset(&b, 0, sizeof(b));
-  b.host = "127.0.0.1";
-  b.port = 20512;
-  b.cookie = "b1";
+  b.self = "127.0.0.1:20512/b1";
   b.name = "rtt_b";
   b.seeds = seedsB;
   b.protocol_period_ms = 200;

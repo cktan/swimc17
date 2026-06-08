@@ -1,7 +1,7 @@
 #ifndef SWIM_FEED_H
 #define SWIM_FEED_H
 
-#include "swim_protocol.h"
+#include "swim.h"
 #include <pthread.h>
 
 typedef struct swim_feed swim_feed_t;

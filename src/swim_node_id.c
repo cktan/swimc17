@@ -14,10 +14,19 @@
  */
 #include "swim_node_id.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static bool is_valid_host_char(unsigned char c) {
+  return isalnum(c) || c == '-' || c == '.' || c == ':';
+}
+
+static bool is_valid_cookie_char(unsigned char c) {
+  return c >= 0x21 && c <= 0x7e;
+}
 
 int swim_node_id_format(const swim_node_id_t *id, char *buf, size_t size) {
   if (!id || !buf || size == 0) {
@@ -55,6 +64,12 @@ int swim_node_id_parse(swim_node_id_t *id, const char *str) {
       return swim_set_error(SWIM_ERR_INVALID, "Cookie too long in '%s'", str);
     }
     strcpy(id->cookie, slash + 1);
+    for (const char *p = id->cookie; *p; p++) {
+      if (!is_valid_cookie_char((unsigned char)*p)) {
+        return swim_set_error(SWIM_ERR_INVALID,
+                              "Invalid character in cookie in '%s'", str);
+      }
+    }
   } else {
     id->cookie[0] = '\0';
   }
@@ -94,6 +109,12 @@ int swim_node_id_parse(swim_node_id_t *id, const char *str) {
   }
   memcpy(id->host, host_start, host_len);
   id->host[host_len] = '\0';
+  for (size_t i = 0; i < host_len; i++) {
+    if (!is_valid_host_char((unsigned char)id->host[i])) {
+      return swim_set_error(SWIM_ERR_INVALID,
+                            "Invalid character in host in '%s'", str);
+    }
+  }
 
   char *endptr;
   long port_val = strtol(port_start, &endptr, 10);

@@ -1,7 +1,7 @@
 #ifndef SWIM_MEMBERSHIP_H
 #define SWIM_MEMBERSHIP_H
 
-#include "swim_protocol.h"
+#include "swim.h"
 #include "swim_node_id.h"
 
 typedef char swim_status_t;

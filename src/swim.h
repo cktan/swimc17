@@ -1,5 +1,5 @@
-#ifndef SWIM_PROTOCOL_H
-#define SWIM_PROTOCOL_H
+#ifndef SWIM_H
+#define SWIM_H
 
 #ifdef __cplusplus
 #define SWIM_EXTERN extern "C"
@@ -60,10 +60,8 @@ typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
                                 const char *node);
 
 typedef struct {
-  const char *host;
-  uint16_t port;
+  const char *self;                // "host:port" or "host:port/cookie" (mandatory)
   const char *name;                // Unique instance name (mandatory)
-  const char *cookie;              // Optional cookie, defaults to ""
   const char **seeds;              // NULL-terminated list of seed strings ("host:port/cookie")
 
   uint64_t protocol_period_ms;     // default 1000
@@ -75,7 +73,10 @@ typedef struct {
 } swim_start_opts_t;
 
 /**
- * Initialize and start a named SWIM protocol instance in the background.
+ * Initialize and start a named SWIM protocol instance. Spawns a
+ * background thread that monitors the UDP port and runs the SWIM
+ * loop; the thread exits when swim_leave() is called. Returns once
+ * the thread is running.
  *
  * @param opts Startup options (opts->name is mandatory).
  * @return 0 on success, -1 on failure.
@@ -159,4 +160,4 @@ SWIM_EXTERN int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
  */
 SWIM_EXTERN int swim_hint_alive(const char *name, const char *peer);
 
-#endif // SWIM_PROTOCOL_H
+#endif // SWIM_H

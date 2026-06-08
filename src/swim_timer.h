@@ -1,7 +1,7 @@
 #ifndef SWIM_TIMER_H
 #define SWIM_TIMER_H
 
-#include "swim_protocol.h"
+#include "swim.h"
 #include "swim_node_id.h"
 
 /**

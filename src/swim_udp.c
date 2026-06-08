@@ -18,7 +18,7 @@
  */
 #define _GNU_SOURCE
 #include "swim_udp.h"
-#include "swim_protocol.h"
+#include "swim.h"
 
 #include <arpa/inet.h>
 #include <errno.h>

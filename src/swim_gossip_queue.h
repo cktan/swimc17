@@ -2,7 +2,7 @@
 #define SWIM_GOSSIP_QUEUE_H
 
 #include "swim_membership.h"
-#include "swim_protocol.h"
+#include "swim.h"
 
 typedef struct swim_gossip_queue_t swim_gossip_queue_t;
 

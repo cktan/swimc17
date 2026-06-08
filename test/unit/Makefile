@@ -7,8 +7,9 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -
 
 OBJ := swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o \
        swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_feed_test.o \
+       swim_node_id_test.o \
        swim_timer.o swim_errno.o swim_node_id.o swim_membership.o \
-       swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o swim_feed.o
+       swim_gossip_queue.o swim_codec.o swim_udp.o swim_main.o swim_feed.o
 
 all: unit_test
 
@@ -36,6 +37,9 @@ swim_protocol_test.o: swim_protocol_test.cpp
 swim_feed_test.o: swim_feed_test.cpp
 	$(CXX) $(CXXFLAGS) -c $<
 
+swim_node_id_test.o: swim_node_id_test.cpp
+	$(CXX) $(CXXFLAGS) -c $<
+
 swim_timer.o: ../../src/swim_timer.c
 	$(CC) $(CFLAGS) -c $<
 
@@ -57,7 +61,7 @@ swim_codec.o: ../../src/swim_codec.c
 swim_udp.o: ../../src/swim_udp.c
 	$(CC) $(CFLAGS) -c $<
 
-swim_protocol.o: ../../src/swim_protocol.c
+swim_main.o: ../../src/swim_main.c
 	$(CC) $(CFLAGS) -c $<
 
 swim_feed.o: ../../src/swim_feed.c

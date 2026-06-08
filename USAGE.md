@@ -22,7 +22,7 @@ over UDP sockets.
 Include the main header file:
 
 ```c
-#include "swim_protocol.h"
+#include "swim.h"
 ```
 
 Link the compiled library with your application along with
@@ -43,20 +43,18 @@ cc my_app.c $(pkg-config --cflags --libs libswimc17)
 ## Quick Start
 
 Initialize your configuration options and start the cluster
-membership protocol thread. All configuration options (host,
-port, and name) are mandatory. The first node starts alone,
+membership protocol thread. The `self` and `name` options
+are mandatory. The first node starts alone,
 and subsequent nodes join by pointing to one or more known
 seeds.
 
 ```c
-#include "swim_protocol.h"
+#include "swim.h"
 #include <stdio.h>
 
 int main() {
     swim_start_opts_t opts = {0};
-    opts.host = "10.0.0.7";
-    opts.port = 7771;
-    opts.cookie = "c1";
+    opts.self = "10.0.0.7:7771/c1";
     opts.name = "my_cluster";
     const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
     opts.seeds = seeds;
@@ -132,13 +130,13 @@ Starts the background protocol worker thread and registers
 a new named cluster membership instance.
 
 The `opts` argument is a pointer to a `swim_start_opts_t`
-structure. It must be non-NULL, and `opts->host`,
-`opts->port`, and `opts->name` must be configured.
+structure. It must be non-NULL, and `opts->self` and
+`opts->name` must be configured.
 
 Returns `0` on success. On failure, returns `-1` and sets
 the thread-local `swim_errno` state to:
-- `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->host` /
-  `opts->port` / `opts->name` are empty or invalid.
+- `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->self` /
+  `opts->name` are empty or invalid.
 - `SWIM_ERR_BAD_STATE`: An instance with the same name
   is already running.
 - `SWIM_ERR_FULL`: Maximum active instances (16) exceeded.
@@ -363,10 +361,8 @@ Options are configured in the `swim_start_opts_t` struct:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `host` | `const char*` | **required** | Hostname or IP to bind |
-| `port` | `uint16_t` | **required** | UDP port to bind |
+| `self` | `const char*` | **required** | `"host:port"` or `"host:port/cookie"` |
 | `name` | `const char*` | **required** | Unique instance name |
-| `cookie` | `const char*` | `""` | User-defined node cookie |
 | `seeds` | `const char**` | `NULL` | NULL-terminated seed list (`"host:port/cookie"`) |
 | `protocol_period_ms` | `uint64_t` | `1000` | How often to probe one peer |
 | `ping_timeout_ms` | `uint64_t` | `200` | Direct ACK wait time |
@@ -385,8 +381,7 @@ scale the timeouts with the `log2` of the cluster size `N`:
 
 int n = 50;
 swim_start_opts_t opts = {0};
-opts.host = "10.0.0.1";
-opts.port = 7771;
+opts.self = "10.0.0.1:7771";
 opts.protocol_period_ms = 1000;
 opts.suspicion_timeout_ms = (uint64_t)ceil(log2(n + 1)) * 1000;
 opts.dead_node_expiry_ms = (uint64_t)ceil(log2(n + 1)) * 2000;
@@ -400,8 +395,8 @@ Run multiple independent SWIM clusters in the same process
 by giving each a unique name in the startup options:
 
 ```c
-swim_start_opts_t opts_a = { .host = "10.0.0.1", .port = 7771, .name = "cluster_a" };
-swim_start_opts_t opts_b = { .host = "10.0.0.1", .port = 7772, .name = "cluster_b" };
+swim_start_opts_t opts_a = { .self = "10.0.0.1:7771", .name = "cluster_a" };
+swim_start_opts_t opts_b = { .self = "10.0.0.1:7772", .name = "cluster_b" };
 
 swim_start(&opts_a);
 swim_start(&opts_b);

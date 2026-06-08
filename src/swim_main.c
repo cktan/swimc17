@@ -1,5 +1,5 @@
 /*
- * swim_protocol.c — SWIM gossip protocol engine.
+ * swim_main.c — SWIM gossip protocol engine.
  *
  * Implements the full SWIM+Suspicion protocol: probe
  * selection, direct ping, indirect ping-req via helpers,
@@ -26,7 +26,7 @@
  * without deadlocking.
  */
 #define _GNU_SOURCE
-#include "swim_protocol.h"
+#include "swim.h"
 #include "swim_codec.h"
 #include "swim_feed.h"
 #include "swim_gossip_queue.h"
@@ -818,12 +818,14 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
 // --- Public API Implementations ---
 
 int swim_start(const swim_start_opts_t *opts) {
-  if (!opts || !opts->host || opts->port == 0 || !opts->name ||
-      opts->name[0] == '\0') {
-    return swim_set_error(
-        SWIM_ERR_INVALID,
-        "Invalid start options: host, port, and name are mandatory");
+  if (!opts || !opts->self || !opts->name || opts->name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Invalid start options: self and name are mandatory");
   }
+
+  swim_node_id_t self_id;
+  if (swim_node_id_parse(&self_id, opts->self) != 0)
+    return -1;
 
   pthread_mutex_lock(&g_instances_mutex);
 
@@ -866,7 +868,7 @@ int swim_start(const swim_start_opts_t *opts) {
       opts->dead_node_expiry_ms ? opts->dead_node_expiry_ms : 6000;
 
   // Initialize helper sub-modules
-  inst->udp = swim_udp_create(opts->host, opts->port);
+  inst->udp = swim_udp_create(self_id.host, self_id.port);
   if (!inst->udp)
     goto error_cleanup;
 
@@ -887,10 +889,7 @@ int swim_start(const swim_start_opts_t *opts) {
     goto error_cleanup;
 
   // Initialize self Node ID
-  strncpy(inst->self_id.host, opts->host, sizeof(inst->self_id.host) - 1);
-  inst->self_id.port = opts->port;
-  strncpy(inst->self_id.cookie, opts->cookie ? opts->cookie : "",
-          sizeof(inst->self_id.cookie) - 1);
+  inst->self_id = self_id;
 
   // Seed incarnation with current time (wall-clock time in milliseconds)
   inst->incarnation = get_now_ms();

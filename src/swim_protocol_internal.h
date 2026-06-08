@@ -2,11 +2,11 @@
 #define SWIM_PROTOCOL_INTERNAL_H
 
 #include "swim_membership.h"
-#include "swim_protocol.h"
+#include "swim.h"
 
 /*
  * Internal/QA-only interface. Not part of the public API exposed in
- * swim_protocol.h.
+ * swim.h.
  */
 
 /**

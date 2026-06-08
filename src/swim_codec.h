@@ -2,7 +2,7 @@
 #define SWIM_CODEC_H
 
 #include "swim_membership.h"
-#include "swim_protocol.h"
+#include "swim.h"
 
 #define SWIM_MSG_PING 1
 #define SWIM_MSG_ACK 2

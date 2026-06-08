@@ -18,7 +18,7 @@
  * single pass.
  */
 #include "swim_membership.h"
-#include "swim_protocol.h"
+#include "swim.h"
 
 #include <stdlib.h>
 

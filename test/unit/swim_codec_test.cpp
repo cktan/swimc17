@@ -3,7 +3,7 @@
 extern "C" {
 #include "swim_codec.h"
 #include "swim_gossip_queue.h"
-#include "swim_protocol.h"
+#include "swim.h"
 }
 
 #include <cstring>
