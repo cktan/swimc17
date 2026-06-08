@@ -24,7 +24,7 @@
  * swim_timer_cancel() without corrupting the list.
  */
 #include "swim_timer.h"
-#include "swim.h"
+#include "swim_errno.h"
 
 #include <assert.h>
 #include <stdlib.h>

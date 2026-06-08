@@ -27,6 +27,7 @@
  */
 #define _GNU_SOURCE
 #include "swim.h"
+#include "swim_errno.h"
 #include "swim_codec.h"
 #include "swim_feed.h"
 #include "swim_gossip_queue.h"

@@ -11,6 +11,7 @@
  * a separate return statement.
  */
 #include "swim.h"
+#include "swim_errno.h"
 
 #include <stdarg.h>
 #include <stdio.h>

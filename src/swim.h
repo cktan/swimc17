@@ -40,15 +40,6 @@ SWIM_EXTERN const char *swim_errmsg(void);
  */
 SWIM_EXTERN const char *swim_strerror(int err);
 
-/**
- * Set the thread-local error state.
- *
- * @param e   the error code to set.
- * @param fmt printf-like format string for the error message detail.
- * @return always returns -1.
- */
-SWIM_EXTERN int swim_set_error(int e, const char *fmt, ...);
-
 // Subscriber callback notification event
 typedef enum {
   SWIM_NODE_UP,      // Node joined or became active

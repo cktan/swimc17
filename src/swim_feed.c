@@ -19,6 +19,7 @@
  * larger buffer.
  */
 #include "swim_feed.h"
+#include "swim_errno.h"
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>

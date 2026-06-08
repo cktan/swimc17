@@ -3,6 +3,7 @@
 
 extern "C" {
 #include "swim_timer.h"
+#include "swim_errno.h"
 }
 
 #include <cstdint>

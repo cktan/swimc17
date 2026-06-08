@@ -17,6 +17,7 @@
  * queue sizes typical in SWIM (bounded by MTU / event size).
  */
 #include "swim_gossip_queue.h"
+#include "swim_errno.h"
 #include "swim_codec.h"
 #include <stdlib.h>
 

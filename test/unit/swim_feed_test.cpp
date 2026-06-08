@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "swim_feed.h"
+#include "swim_errno.h"
 }
 
 #include <atomic>

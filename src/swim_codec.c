@@ -23,6 +23,7 @@
 #define _DEFAULT_SOURCE
 
 #include "swim_codec.h"
+#include "swim_errno.h"
 #include "swim_gossip_queue.h"
 #include <arpa/inet.h>
 #include <endian.h>

@@ -13,6 +13,7 @@
  * any colon-counting that would break on bare IPv6.
  */
 #include "swim_node_id.h"
+#include "swim_errno.h"
 
 #include <ctype.h>
 #include <stdbool.h>

@@ -4,6 +4,7 @@ extern "C" {
 #include "swim_codec.h"
 #include "swim_gossip_queue.h"
 #include "swim.h"
+#include "swim_errno.h"
 #include "swim_protocol_internal.h"
 #include "swim_udp.h"
 }
