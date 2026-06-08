@@ -55,8 +55,4 @@ SWIM_EXTERN int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
  */
 SWIM_EXTERN int swim_udp_fd(const swim_udp_t *u);
 
-#ifdef __cplusplus
-}
-#endif
-
 #endif // SWIM_UDP_H

@@ -2,9 +2,7 @@
 
 extern "C" {
 #include "swim_codec.h"
-#include "swim_errno.h"
 #include "swim_gossip_queue.h"
-#include "swim_node_id.h"
 #include "swim_protocol.h"
 #include "swim_protocol_internal.h"
 #include "swim_udp.h"
@@ -233,7 +231,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   REQUIRE(swim_subscribe("failure_node", test_callback, nullptr) == 0);
 
   // Simulate a join from a mock node by sending a raw PING packet to opts.port
-  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20202);
+  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20202);
   REQUIRE(mock_udp != nullptr);
 
   // Construct PING packet from mock
@@ -265,7 +263,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   }
 
   // Now silently crash the mock node by closing its UDP socket
-  swim_udp_final(mock_udp);
+  swim_udp_destroy(mock_udp);
 
   // Wait for failure detector to execute:
   // - Direct probe will fail (ping_timeout = 100ms)
@@ -354,9 +352,9 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   REQUIRE(swim_start(&opts) == 0);
 
-  swim_udp_t *requester = swim_udp_init("127.0.0.1", 20302);
+  swim_udp_t *requester = swim_udp_create("127.0.0.1", 20302);
   REQUIRE(requester != nullptr);
-  swim_udp_t *target = swim_udp_init("127.0.0.1", 20303);
+  swim_udp_t *target = swim_udp_create("127.0.0.1", 20303);
   REQUIRE(target != nullptr);
 
   auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
@@ -406,8 +404,8 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   }
   CHECK(relay_ping_seen);
 
-  swim_udp_final(requester);
-  swim_udp_final(target);
+  swim_udp_destroy(requester);
+  swim_udp_destroy(target);
   swim_leave("relay_node");
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -447,7 +445,7 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
   REQUIRE(swim_subscribe("h3_reentrant", reentrant_members_cb, nullptr) == 0);
 
   // A raw PING from a mock makes the node discover it -> NODE_UP -> callback.
-  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20402);
+  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20402);
   REQUIRE(mock_udp != nullptr);
   uint8_t buf[256];
   int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
@@ -459,7 +457,7 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
 
   CHECK(g_reentrant_ok == true);
 
-  swim_udp_final(mock_udp);
+  swim_udp_destroy(mock_udp);
   swim_leave("h3_reentrant");
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -582,7 +580,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
 
   REQUIRE(swim_start(&opts) == 0);
 
-  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20502);
+  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
 
   // Send 5 PINGs, each containing 6 large gossip events, to populate
@@ -636,7 +634,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     REQUIRE(ack_seen == true);
   }
 
-  swim_udp_final(mock_udp);
+  swim_udp_destroy(mock_udp);
   swim_leave("m1_budget");
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -747,7 +745,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
 
   REQUIRE(swim_start(&opts) == 0);
 
-  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20502);
+  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
 
   uint8_t buf[256];
@@ -765,7 +763,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   CHECK(obs_contains("cluster size 1"));
 
   clear_obs();
-  swim_udp_final(mock_udp);
+  swim_udp_destroy(mock_udp);
   usleep(300000);
   poll_feed_events("obs_node");
   CHECK(obs_size() == 0);
@@ -826,6 +824,6 @@ TEST_CASE("protocol: swim_get_event on unknown instance fails (L3)") {
   char buf[4096];
   char *ptr[10];
   REQUIRE(swim_get_event("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_BAD_STATE);
+  CHECK(swim_errno() == SWIM_ERR_BAD_STATE);
   swim_set_error(SWIM_OK, nullptr);
 }

@@ -1,9 +1,7 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_errno.h"
 #include "swim_gossip_queue.h"
-#include "swim_node_id.h"
 }
 
 #include <cstring>

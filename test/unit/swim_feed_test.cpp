@@ -1,7 +1,6 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_errno.h"
 #include "swim_feed.h"
 }
 
@@ -75,42 +74,42 @@ TEST_CASE("swim_feed: error handling and input validation") {
   char *ptr[10];
 
   // Invalid parameters to swim_feed_put
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_put(nullptr, 1, "test") == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_put(feed, 0) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_put(feed, -1) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_put(feed, 2, "one", nullptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   // Invalid parameters to swim_feed_get
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(nullptr, sizeof(buf), buf, 10, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, sizeof(buf), nullptr, 10, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, 0, buf, 10, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, sizeof(buf), buf, 10, nullptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, sizeof(buf), buf, 0, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   swim_feed_destroy(feed);
 }
@@ -125,14 +124,14 @@ TEST_CASE("swim_feed: record that does not fit is left in the feed") {
   char *ptr[10];
 
   // Too few pointers: 3 strings cannot fit in nptr=2. Record is not consumed.
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, sizeof(buf), buf, 2, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   // Too small a buffer: "a\0b\0c\0" is 6 bytes, does not fit in bufsz=3.
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(feed, 3, buf, 10, ptr) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   // The record survived both failures and can still be read with room.
   CHECK(read_and_check(feed, {"a", "b", "c"}) == 3);
@@ -177,9 +176,9 @@ TEST_CASE("swim_feed: oversized record failure") {
   std::string massive_str(4100, 'B');
 
   // Insert record with massive string - should fail with SWIM_ERR_INVALID
-  swim_errno = SWIM_OK;
+  swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_put(feed, 1, massive_str.c_str()) == -1);
-  CHECK(swim_errno == SWIM_ERR_INVALID);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   swim_feed_destroy(feed);
 }
