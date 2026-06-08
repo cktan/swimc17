@@ -109,13 +109,14 @@ Each packet is decoded, its piggybacked gossip is applied
 - C1. **`ping`** → mark the sender alive (procedure E) and
   reply with an `ack` (which itself carries gossip).
 - C2. **`ack`** → cancel the matching pending probe
-  (procedure B1/B3) and mark the sender alive — unless the
-  ack announces the sender's own death (graceful leave).
+  (procedure B1/B3).
 - C3. **`ping_req`** (we are a relay) → ping the requested
   `target`; if it answers, send a `fwd_ack` back to the
   original requester.
 - C4. **`fwd_ack`** → the relay tells us `target` answered;
   cancel our pending indirect probe.
+- C5. **`leave`** → transition the sender node to dead and
+  cancel its suspicion timer.
 
 ---
 
@@ -206,9 +207,9 @@ reply pulls the node into the gossip mesh.
 H1. Bump own incarnation to the current wall-clock time in
     milliseconds (so it outranks any rumor about the node).
 
-H2. Send `dead(self)` **directly** (not via the gossip
-    queue) to a fanout of `max(ceil(N × 0.25), 8)` random
-    peers, then stop the instance.
+H2. Send a `leave` message **directly** (not via the
+    gossip queue) to a fanout of `max(ceil(N × 0.25), 8)`
+    random peers, then stop the instance.
 
 For a silent stop, just shut down the library instead.
 

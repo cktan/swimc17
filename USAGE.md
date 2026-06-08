@@ -295,6 +295,41 @@ re-suspicion. Releases the lock. Thread-safe.
 
 ---
 
+### `swim_get_event`
+
+```c
+int swim_get_event(const char *name, int bufsz, char *buf, int nptr, char **ptr);
+```
+
+Drains and retrieves the next event from the instance's
+telemetry feed.
+
+The `name` argument specifies the instance (must be
+non-NULL and non-empty). `bufsz` specifies the size of
+`buf` (recommended 4096). `nptr` specifies the maximum
+number of string pointers `ptr` can hold (recommended 10).
+
+On success, it copies the NUL-terminated event strings
+contiguously into `buf` and populates `ptr[0..n-1]` with
+pointers to each string inside `buf`.
+
+Returns the number of strings copied (>= 1) on success,
+`0` when the feed is empty, or `-1` on error:
+- `SWIM_ERR_INVALID`: `name` is NULL or empty.
+- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
+
+Example:
+```c
+char buf[4096];
+char *ptr[10];
+int n;
+while ((n = swim_get_event("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
+    // Process event strings in ptr[0..n-1]
+}
+```
+
+---
+
 ### Node ID Helpers
 
 ```c

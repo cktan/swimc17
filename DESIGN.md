@@ -96,6 +96,9 @@ The cookie is optionally specified by the user during node startup or when defin
 # forwarded ack (C tells A that B responded)
 {fwd_ack, sender :: {host, port, cookie}, seq :: non_neg_integer,
           source :: {host, port, cookie}, events :: [event]}
+
+# leave
+{leave, sender :: {host, port, cookie}, seq :: non_neg_integer}
 ```
 
 - **Event shape:**
@@ -215,31 +218,35 @@ Join and seed handling are specified in `ALGORITHM.md`
 
 ### Initialization
 
-```
-# Initialize / start the library with these options:
-swim_start({
-  host: "10.0.0.1",          # required
-  port: 7771,                 # required
-  name: "my_cluster",         # required
-  seeds: [{"10.0.0.2", 7771}],
-  protocol_period: 1000,
-  ping_timeout: 200,
-  ping_req_fanout: 3,
-  suspicion_timeout: 3000,
-  seed_retry_interval: 5000,
-  dead_node_expiry: 6000
-})
+```c
+// Initialize / start the library with startup options:
+swim_start_opts_t opts = {
+  .host = "10.0.0.1",                  // required
+  .port = 7771,                        // required
+  .name = "my_cluster",                // required
+  .cookie = "c1",                      // optional
+  .seed_list = seeds,                  // optional
+  .seed_count = 1,
+  .protocol_period_ms = 1000,
+  .ping_timeout_ms = 200,
+  .ping_req_fanout = 3,
+  .suspicion_timeout_ms = 3000,
+  .seed_retry_interval_ms = 5000,
+  .dead_node_expiry_ms = 6000
+};
+swim_start(&opts);
 ```
 
-All functions take a mandatory `name` argument to target a
-named instance; it cannot be `NULL` or empty.
+Except for `swim_start`, which takes a `swim_start_opts_t`
+struct pointer containing the unique instance name, all
+public functions take a mandatory `name` argument to target
+a specific instance. The name cannot be `NULL` or empty.
 
 ### Querying membership
 
-```
-swim_peers(name, opts = {})
-# opts: {include_dead: true}  ← default false
-# returns: [{"host", port, "cookie"}]
+```c
+swim_node_id_t peers[32];
+int count = swim_peers("my_cluster", peers, 32, false);
 ```
 
 ### Event subscription
@@ -247,18 +254,16 @@ swim_peers(name, opts = {})
 Membership changes are delivered through a registered
 callback:
 
-```
-swim_subscribe(name, callback, ctx)   # register
-swim_unsubscribe(name, callback, ctx) # deregister
+```c
+swim_subscribe("my_cluster", callback, ctx);   // register
+swim_unsubscribe("my_cluster", callback, ctx); // deregister
 ```
 
-The callback has the shape:
+The callback has the signature:
 
-```
+```c
 void callback(void *ctx, swim_event_t event,
-              swim_node_t node)
-# event ∈ { SWIM_NODE_UP, SWIM_NODE_DOWN, SWIM_NODE_SUSPECT }
-# node carries {"host", port, "cookie"}
+              const swim_node_id_t *node);
 ```
 
 The opaque `ctx` pointer is passed back unchanged on every
@@ -269,8 +274,8 @@ non-blocking; offload any heavy work to another thread.
 
 ### Liveness hint
 
-```
-swim_hint_alive(name, peer)
+```c
+swim_hint_alive("my_cluster", &peer);
 ```
 
 Feeds out-of-band evidence that `peer` is alive into the
@@ -308,12 +313,12 @@ caller.
 
 ### Graceful leave
 
-```
-swim_leave(name)
+```c
+swim_leave("my_cluster");
 ```
 
 1. Increments own incarnation number.
-2. Broadcasts `dead(self, new_inc)` directly to
+2. Broadcasts a leave message directly to
    `max(⌈N×0.25⌉, 8)` random peers (not via gossip
    queue), where `N` is the number of alive + suspect
    peers.
@@ -335,24 +340,26 @@ library itself — the feed is the only output channel.
 
 ### Reading the feed
 
-```
-int swim_get_event(name, ctx, cb);
+```c
+int swim_get_event(const char *name, int bufsz, char *buf, int nptr, char **ptr);
 ```
 
 The application pulls events by calling `swim_get_event`
-repeatedly: it returns `1` and invokes `cb` with the next record,
-`0` when the feed is empty, or `-1` on error. The callback
-signature is:
+repeatedly: it returns the number of strings copied (>= 1)
+on success, `0` when the feed is empty, or `-1` on error.
+A buffer of size 4096 (`bufsz`) and a pointer array of
+size 10 (`nptr`) are recommended.
 
-```
-typedef void (*swim_feed_cb)(void *ctx, int n, const char **strs);
-```
+Example:
 
-Each record is `n` borrowed, NUL-terminated strings, valid only
-for the duration of the call (copy them to retain). `cb` runs
-with the global instance lock held, so it must be cheap,
-non-blocking, and must not re-enter the swim API for any
-instance.
+```c
+char buf[4096];
+char *ptr[10];
+int n;
+while ((n = swim_get_event("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
+  // Process event in ptr[0 ... n-1]
+}
+```
 
 ### Events
 
