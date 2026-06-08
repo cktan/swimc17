@@ -12,6 +12,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
+#include <string>
 #include <unistd.h>
 #include <vector>
 
@@ -50,6 +51,43 @@ EventLog get_log_event(size_t idx) {
   EventLog ev = g_events[idx];
   pthread_mutex_unlock(&g_log_mutex);
   return ev;
+}
+
+// --- Observer (L3) capture helpers ---
+std::vector<std::string> g_obs;
+pthread_mutex_t g_obs_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void test_observer(void *ctx, const char *sexp) {
+  (void)ctx;
+  pthread_mutex_lock(&g_obs_mutex);
+  g_obs.push_back(sexp);
+  pthread_mutex_unlock(&g_obs_mutex);
+}
+
+void clear_obs() {
+  pthread_mutex_lock(&g_obs_mutex);
+  g_obs.clear();
+  pthread_mutex_unlock(&g_obs_mutex);
+}
+
+bool obs_contains(const char *needle) {
+  pthread_mutex_lock(&g_obs_mutex);
+  bool found = false;
+  for (const auto &s : g_obs) {
+    if (s.find(needle) != std::string::npos) {
+      found = true;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&g_obs_mutex);
+  return found;
+}
+
+size_t obs_size() {
+  pthread_mutex_lock(&g_obs_mutex);
+  size_t sz = g_obs.size();
+  pthread_mutex_unlock(&g_obs_mutex);
+  return sz;
 }
 
 } // namespace
@@ -659,4 +697,111 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
 
   swim_membership_final(m);
   swim_gossip_queue_final(q);
+}
+
+// L3: the observer receives membership transitions and the cluster-size gauge
+// as s-expressions, and a cookie's non-alphanumeric bytes are escaped as \xNN.
+TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping "
+          "(L3)") {
+  clear_obs();
+
+  swim_node_id_t self_id;
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501:c1") == 0);
+
+  // Mock peer with a cookie containing non-alphanumeric bytes (space, '!').
+  swim_node_id_t mock_id;
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502") == 0);
+  strcpy(mock_id.cookie, "a b!");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.host = "127.0.0.1";
+  opts.port = 20501;
+  opts.cookie = "c1";
+  opts.name = "obs_node";
+  opts.protocol_period_ms = 200;
+
+  REQUIRE(swim_start(&opts) == 0);
+  REQUIRE(swim_observe("obs_node", test_observer, nullptr) == 0);
+
+  swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20502);
+  REQUIRE(mock_udp != nullptr);
+
+  uint8_t buf[256];
+  int len =
+      swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0, buf,
+                          sizeof(buf));
+  REQUIRE(len > 0);
+  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
+
+  usleep(400000); // packet processing + a few ticks for the cluster-size emit
+
+  // node up transition, with the cookie escaped: 'a', 'b' pass; ' ' -> \x20,
+  // '!' -> \x21.
+  CHECK(obs_contains("(node up \"127.0.0.1:20502:a\\x20b\\x21\")"));
+  // cluster-size gauge moved from 0 to 1.
+  CHECK(obs_contains("(cluster size 1)"));
+
+  // Disabling the observer stops delivery.
+  REQUIRE(swim_observe("obs_node", nullptr, nullptr) == 0);
+  clear_obs();
+  swim_udp_final(mock_udp);
+  usleep(300000);
+  CHECK(obs_size() == 0);
+
+  swim_leave("obs_node");
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// L3: a clean direct probe round-trip produces a (ping rtt ...) observation.
+TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
+  clear_obs();
+
+  swim_node_id_t idA, idB;
+  REQUIRE(swim_node_id_parse(&idA, "127.0.0.1:20511:a1") == 0);
+  REQUIRE(swim_node_id_parse(&idB, "127.0.0.1:20512:b1") == 0);
+
+  swim_start_opts_t a;
+  memset(&a, 0, sizeof(a));
+  a.host = "127.0.0.1";
+  a.port = 20511;
+  a.cookie = "a1";
+  a.name = "rtt_a";
+  a.seed_list = &idB;
+  a.seed_count = 1;
+  a.protocol_period_ms = 200;
+  a.ping_timeout_ms = 100;
+  a.seed_retry_interval_ms = 200;
+
+  swim_start_opts_t b;
+  memset(&b, 0, sizeof(b));
+  b.host = "127.0.0.1";
+  b.port = 20512;
+  b.cookie = "b1";
+  b.name = "rtt_b";
+  b.seed_list = &idA;
+  b.seed_count = 1;
+  b.protocol_period_ms = 200;
+  b.ping_timeout_ms = 100;
+  b.seed_retry_interval_ms = 200;
+
+  REQUIRE(swim_start(&a) == 0);
+  REQUIRE(swim_start(&b) == 0);
+  REQUIRE(swim_observe("rtt_a", test_observer, nullptr) == 0);
+
+  // Let the nodes discover each other and run several probe cycles, so A sends
+  // a direct ping to B and B acks it.
+  usleep(1200000);
+
+  CHECK(obs_contains("(ping rtt \"127.0.0.1:20512"));
+
+  CHECK(swim_leave("rtt_a") == 0);
+  CHECK(swim_leave("rtt_b") == 0);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// L3: registering an observer on a missing instance fails cleanly.
+TEST_CASE("protocol: swim_observe on unknown instance fails (L3)") {
+  REQUIRE(swim_observe("no_such_instance", test_observer, nullptr) != 0);
+  swim_set_error(SWIM_OK, nullptr);
 }

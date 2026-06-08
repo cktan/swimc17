@@ -20,6 +20,14 @@ typedef enum {
 typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
                                 const swim_node_id_t *node);
 
+// Telemetry observer. `sexp` is borrowed (valid only for this call; copy it to
+// retain), and is always a NUL-terminated, single-line, printable-ASCII
+// s-expression, e.g. (node down "10.0.0.1:7771:c7"), (ping rtt "10.0.0.2:7771"
+// 42), (cluster size 8), (message dropped "10.0.0.3:7771"). Called from the
+// protocol thread: it must be cheap and non-blocking, and must not re-enter the
+// swim API for this instance.
+typedef void (*swim_observer_t)(void *ctx, const char *sexp);
+
 typedef struct {
   const char *host;
   uint16_t port;
@@ -84,6 +92,17 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
  * @return 0 on success, -1 on failure.
  */
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
+
+/**
+ * Register (or replace) the telemetry observer for a named instance. One
+ * observer per instance; pass observer = NULL to disable.
+ *
+ * @param name     The name of the instance (mandatory).
+ * @param observer The observer callback, or NULL to disable.
+ * @param ctx      Opaque context passed back to the observer.
+ * @return 0 on success, -1 on failure.
+ */
+int swim_observe(const char *name, swim_observer_t observer, void *ctx);
 
 /**
  * Feed out-of-band reachability signal to cancel suspicion and revive a node.

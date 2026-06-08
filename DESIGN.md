@@ -328,33 +328,46 @@ library directly without calling `swim_leave`.
 
 ## 12. Observability
 
-### Instrumentation events
+The library emits telemetry through a single per-instance
+**observer** callback that the application registers with
+`swim_observe(name, observer, ctx)` (pass `NULL` to disable).
+There is no logging in the library itself — the observer is the
+only output channel.
 
-**Membership transitions:**
-
-```
-(swim, node, up)      # {node: self_id, peer: affected_node_id}
-(swim, node, down)    # {node: self_id, peer: affected_node_id}
-(swim, node, suspect) # {node: self_id, peer: affected_node_id}
-```
-
-**Metrics:**
+### Observer callback
 
 ```
-(swim, ping, rtt)         # measurements: {duration: ms}
-(swim, cluster, size)     # measurements: {count: n}
-(swim, message, dropped)  # measurements: {count: 1}
+typedef void (*swim_observer_t)(void *ctx, const char *sexp);
 ```
 
-### Log metadata
+The observer is called once for every transition and every
+measurement. `sexp` is a borrowed, NUL-terminated, single-line,
+printable-ASCII s-expression, valid only for the duration of the
+call (copy it to retain). The observer runs on the protocol
+thread, so it must be cheap, non-blocking, and must not re-enter
+the swim API for that instance.
 
-Set on all protocol log lines:
+### Events
 
 ```
-swim_node:  {"host", port, "cookie"}   # this node
-swim_event: suspect                    # event being processed
-swim_peer:  {"host", port, "cookie"}   # peer involved, when relevant
+(node up "host:port[:cookie]")          # a peer became alive
+(node suspect "host:port[:cookie]")     # a peer became suspect
+(node down "host:port[:cookie]")        # a peer was declared dead
+(ping rtt "host:port[:cookie]" <ms>)    # direct probe round-trip
+(cluster size <n>)                      # alive+suspect count, on change
+(message dropped "host:port[:cookie]")  # an outbound message was dropped
 ```
+
+- A node renders as `host:port[:cookie]`, with IPv6 hosts
+  bracketed. Every non-alphanumeric byte of the cookie is
+  escaped as lowercase `\xNN`, so the token is always safe
+  inside an s-expression string.
+- `ping rtt` is reported only for a clean **direct** probe
+  round-trip (a direct ack to our ping); indirect/relayed
+  resolutions produce no rtt event.
+- `cluster size` is emitted only when the count changes.
+- Telemetry is lossy: observations may be dropped under memory
+  pressure rather than block the protocol.
 
 ---
 

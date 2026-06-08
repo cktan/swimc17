@@ -9,6 +9,7 @@
 #include <math.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,42 @@ static void suspect_key(char *buf, size_t n, const swim_node_id_t *id) {
   snprintf(buf, n, "suspect:%s:%u:%s", id->host, id->port, id->cookie);
 }
 
+static inline bool obs_is_alnum(unsigned char c) {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+         (c >= 'A' && c <= 'Z');
+}
+
+// Format a node for observability as host:port[:cookie], bracketing IPv6 hosts.
+// Every non-alphanumeric byte of the cookie is escaped as lowercase \xNN, so the
+// result is always safe to embed inside an s-expression string literal.
+static void obs_format_node(const swim_node_id_t *id, char *buf, size_t size) {
+  bool is_ipv6 = (strchr(id->host, ':') != NULL);
+  int n = snprintf(buf, size, is_ipv6 ? "[%s]:%u" : "%s:%u", id->host, id->port);
+  if (n < 0 || (size_t)n >= size) {
+    if (size > 0)
+      buf[size - 1] = '\0';
+    return;
+  }
+  size_t pos = (size_t)n;
+  if (id->cookie[0] == '\0') {
+    return;
+  }
+  if (pos + 1 < size)
+    buf[pos++] = ':';
+  for (const unsigned char *c = (const unsigned char *)id->cookie; *c; c++) {
+    if (obs_is_alnum(*c)) {
+      if (pos + 1 < size)
+        buf[pos++] = (char)*c;
+    } else {
+      if (pos + 4 < size)
+        pos += (size_t)snprintf(buf + pos, size - pos, "\\x%02x", *c);
+      else
+        break;
+    }
+  }
+  buf[pos] = '\0';
+}
+
 // Structures for internal protocol use
 typedef struct {
   swim_callback_t cb;
@@ -65,7 +102,17 @@ typedef struct {
   int count;
   swim_sub_t subs[16];
   int sub_count;
+  // Observer snapshot: the single sink and the rendered sexp strings taken out
+  // of the instance under the lock, delivered after it is released.
+  swim_observer_t observer;
+  void *observer_ctx;
+  char **obs;
+  int obs_count;
 } notify_batch_t;
+
+// Max length of a rendered observation s-expression (worst case is a transition
+// carrying a max-length host plus a fully \xNN-escaped cookie).
+#define SWIM_OBS_MAX 1024
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
 
@@ -73,6 +120,7 @@ typedef struct {
   probe_state_t state;
   swim_node_id_t target;
   uint32_t seq;
+  uint64_t sent_ms; // monotonic send time of the direct ping, for RTT
 } pending_probe_t;
 
 typedef struct {
@@ -129,6 +177,14 @@ struct swim_instance_t {
   int pending_count;
   int pending_capacity;
 
+  // Telemetry observer (single sink) and the sexp strings queued for it.
+  swim_observer_t observer;
+  void *observer_ctx;
+  char **pending_obs;
+  int pending_obs_count;
+  int pending_obs_capacity;
+  uint64_t last_cluster_size; // last emitted cluster size, for on-change gating
+
   uint64_t current_tick;
 };
 
@@ -162,6 +218,7 @@ static void send_ping_req(swim_instance_t *inst, const swim_node_id_t *helper,
 static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest,
                          const swim_node_id_t *source, uint32_t seq);
 static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq);
+static void observe(swim_instance_t *inst, const char *fmt, ...);
 
 // Global alarm callback router to intercept timeout triggers
 static void global_alarm_cb(void *ctx, swim_timer_event_t ev, void *param) {
@@ -243,6 +300,7 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
     inst->pending_probe.state = PROBE_DIRECT;
     inst->pending_probe.target = target;
     inst->pending_probe.seq = seq;
+    inst->pending_probe.sent_ms = get_monotonic_time_ms();
 
     send_ping(inst, &target, seq);
 
@@ -379,13 +437,10 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
                                 swim_membership_count(inst->membership), buf, sizeof(buf));
   if (len > 0) {
     swim_udp_send(inst->udp, dest, buf, len);
-  } else {
-    // Log dropped packet per DESIGN §12
-    fprintf(stderr,
-            "(swim, message, dropped) # measurements: {count: 1} swim_node: "
-            "{\"%s\", %u, \"%s\"} swim_peer: {\"%s\", %u, \"%s\"}\n",
-            inst->self_id.host, inst->self_id.port, inst->self_id.cookie,
-            dest->host, dest->port, dest->cookie);
+  } else if (inst->observer) {
+    char node_str[576];
+    obs_format_node(dest, node_str, sizeof(node_str));
+    observe(inst, "(message dropped \"%s\")", node_str);
   }
 }
 
@@ -409,6 +464,34 @@ static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest,
   send_message(inst, dest, SWIM_MSG_FWD_ACK, &inst->self_id, seq, source);
 }
 
+// Render a telemetry observation and queue it for the registered observer.
+// Caller must hold inst->mutex. A no-op when no observer is registered. The
+// rendered string is dropped on allocation failure (telemetry is lossy).
+static void observe(swim_instance_t *inst, const char *fmt, ...) {
+  if (!inst->observer)
+    return;
+
+  char buf[SWIM_OBS_MAX];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+
+  if (inst->pending_obs_count == inst->pending_obs_capacity) {
+    int new_cap =
+        inst->pending_obs_capacity == 0 ? 16 : inst->pending_obs_capacity * 2;
+    char **p = realloc(inst->pending_obs, new_cap * sizeof(char *));
+    if (!p)
+      return;
+    inst->pending_obs = p;
+    inst->pending_obs_capacity = new_cap;
+  }
+  char *s = strdup(buf);
+  if (!s)
+    return;
+  inst->pending_obs[inst->pending_obs_count++] = s;
+}
+
 // Queue a membership change for later delivery. Caller must hold inst->mutex.
 // Does not invoke any callback. On allocation failure the notification is
 // dropped (membership state is still correct; only the observer signal is
@@ -427,6 +510,15 @@ static void queue_notification(swim_instance_t *inst, swim_event_t event,
   inst->pending[inst->pending_count].event = event;
   inst->pending[inst->pending_count].node = *node;
   inst->pending_count++;
+
+  if (inst->observer) {
+    const char *verb = event == SWIM_NODE_UP        ? "up"
+                       : event == SWIM_NODE_SUSPECT ? "suspect"
+                                                    : "down";
+    char node_str[576];
+    obs_format_node(node, node_str, sizeof(node_str));
+    observe(inst, "(node %s \"%s\")", verb, node_str);
+  }
 }
 
 // Move the queued notifications and a snapshot of the subscriber list out of
@@ -445,6 +537,14 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
     memcpy(batch->subs, inst->subscribers,
            batch->sub_count * sizeof(swim_sub_t));
   }
+
+  batch->observer = inst->observer;
+  batch->observer_ctx = inst->observer_ctx;
+  batch->obs = inst->pending_obs;
+  batch->obs_count = inst->pending_obs_count;
+  inst->pending_obs = NULL;
+  inst->pending_obs_count = 0;
+  inst->pending_obs_capacity = 0;
 }
 
 // Deliver a batch to its subscribers. MUST be called with no locks held: the
@@ -461,6 +561,15 @@ static void dispatch_notifications(notify_batch_t *batch) {
   free(batch->items);
   batch->items = NULL;
   batch->count = 0;
+
+  for (int i = 0; i < batch->obs_count; i++) {
+    if (batch->observer)
+      batch->observer(batch->observer_ctx, batch->obs[i]);
+    free(batch->obs[i]);
+  }
+  free(batch->obs);
+  batch->obs = NULL;
+  batch->obs_count = 0;
 }
 
 static void update_node_alive(swim_instance_t *inst,
@@ -590,6 +699,14 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
     if (inst->pending_probe.state != PROBE_NONE &&
         swim_node_id_compare(&msg.sender, &inst->pending_probe.target) == 0 &&
         msg.seq == inst->pending_probe.seq) {
+      // Report RTT only for a clean direct round-trip.
+      if (inst->pending_probe.state == PROBE_DIRECT && inst->observer) {
+        uint64_t rtt = get_monotonic_time_ms() - inst->pending_probe.sent_ms;
+        char node_str[576];
+        obs_format_node(&msg.sender, node_str, sizeof(node_str));
+        observe(inst, "(ping rtt \"%s\" %llu)", node_str,
+                (unsigned long long)rtt);
+      }
       inst->pending_probe.state = PROBE_NONE;
       swim_timer_cancel(inst->timer, "probe_timeout");
     }
@@ -674,6 +791,14 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       pthread_mutex_lock(&instance->mutex);
       instance->current_tick++;
       swim_timer_tick(instance->timer);
+      // Emit cluster size once per tick, only when it has changed.
+      if (instance->observer) {
+        uint64_t sz = (uint64_t)swim_membership_count(instance->membership);
+        if (sz != instance->last_cluster_size) {
+          instance->last_cluster_size = sz;
+          observe(instance, "(cluster size %llu)", (unsigned long long)sz);
+        }
+      }
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
       dispatch_notifications(&batch);
@@ -905,6 +1030,10 @@ int swim_leave(const char *name) {
   free(inst->seeds);
   free(inst->shuffle_list);
   free(inst->pending);
+  for (int i = 0; i < inst->pending_obs_count; i++) {
+    free(inst->pending_obs[i]);
+  }
+  free(inst->pending_obs);
   pthread_mutex_destroy(&inst->mutex);
   free(inst);
 
@@ -991,6 +1120,26 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   }
 
   pthread_mutex_unlock(&inst->mutex);
+  pthread_mutex_unlock(&g_instances_mutex);
+  return 0;
+}
+
+int swim_observe(const char *name, swim_observer_t observer, void *ctx) {
+  if (!name || name[0] == '\0') {
+    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+  }
+  pthread_mutex_lock(&g_instances_mutex);
+  swim_instance_t *inst = find_instance(name);
+  if (!inst) {
+    pthread_mutex_unlock(&g_instances_mutex);
+    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
+  }
+
+  pthread_mutex_lock(&inst->mutex);
+  inst->observer = observer;
+  inst->observer_ctx = ctx;
+  pthread_mutex_unlock(&inst->mutex);
+
   pthread_mutex_unlock(&g_instances_mutex);
   return 0;
 }
