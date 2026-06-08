@@ -12,6 +12,7 @@ struct swim_feed {
   size_t write_off; // End of the last written record (first free byte)
 };
 
+// Create a new feed instance. Returns NULL on error.
 swim_feed_t *swim_feed_create(void) {
   swim_feed_t *feed = malloc(sizeof(*feed));
   if (!feed) {
@@ -31,6 +32,7 @@ swim_feed_t *swim_feed_create(void) {
   return feed;
 }
 
+// Destroy and free the feed.
 void swim_feed_destroy(swim_feed_t *feed) {
   if (!feed) {
     return;
@@ -51,6 +53,8 @@ static void swim_feed_compact_locked(swim_feed_t *feed) {
   feed->read_off = 0;
 }
 
+// Insert a record of n NUL-terminated strings (n >= 1). Oldest records are
+// silently dropped if the buffer is full. Returns 0 on success, -1 on error.
 int swim_feed_put(swim_feed_t *feed, int n, ...) {
   if (!feed) {
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
@@ -156,6 +160,9 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   return 0;
 }
 
+// Read the next record. Copies strings into buf and sets ptr[0..n-1] to point
+// at each. Returns string count (>= 1), 0 if empty, -1 on error. If the
+// record doesn't fit in bufsz or nptr, returns -1 and leaves it in the feed.
 int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
                   char **ptr) {
   if (!feed) {

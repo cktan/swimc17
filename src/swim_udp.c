@@ -20,6 +20,8 @@ struct swim_udp_t {
   uint16_t port;
 };
 
+// Create and bind a non-blocking UDP socket (IPv4 or IPv6). Returns NULL on
+// failure.
 swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
   if (!host) {
     swim_set_error(SWIM_ERR_INVALID, "Invalid NULL host in swim_udp_create");
@@ -89,6 +91,7 @@ swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
   return u;
 }
 
+// Destroy the UDP transport and close the socket.
 void swim_udp_destroy(swim_udp_t *u) {
   if (!u)
     return;
@@ -98,6 +101,7 @@ void swim_udp_destroy(swim_udp_t *u) {
   free(u);
 }
 
+// Send a packet to dest. Returns 0 on success, -1 on failure.
 int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
                   size_t size) {
   if (!u || !dest || !buf || size == 0) {
@@ -153,6 +157,8 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
   return 0;
 }
 
+// Receive a packet (non-blocking). Returns bytes received, 0 if no data
+// (EWOULDBLOCK), -1 on error. Fills out_src with sender's host/port.
 int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
                   size_t size) {
   if (!u || !out_src || !buf || size == 0) {
@@ -196,4 +202,5 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
   return (int)n;
 }
 
+// Return the underlying socket fd, or -1.
 int swim_udp_fd(const swim_udp_t *u) { return u ? u->fd : -1; }

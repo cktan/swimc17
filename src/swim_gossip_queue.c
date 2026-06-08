@@ -62,6 +62,7 @@ static inline uint32_t get_transmit_limit(uint32_t cluster_size) {
   return val * 3;
 }
 
+// Create a new, empty gossip queue. Free it with swim_gossip_queue_destroy().
 swim_gossip_queue_t *swim_gossip_queue_create(void) {
   swim_gossip_queue_t *q = calloc(1, sizeof(*q));
   if (!q) {
@@ -75,6 +76,7 @@ swim_gossip_queue_t *swim_gossip_queue_create(void) {
   return q;
 }
 
+// Destroy the gossip queue and free all associated memory.
 void swim_gossip_queue_destroy(swim_gossip_queue_t *q) {
   if (!q)
     return;
@@ -91,6 +93,8 @@ static int find_entry(const swim_gossip_queue_t *q, const swim_node_id_t *id) {
   return -1;
 }
 
+// Enqueue a gossip event. Supersession rules: higher incarnation wins; on
+// equal incarnations, higher priority (DEAD > SUSPECT > ALIVE) wins.
 int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
                               const swim_node_id_t *id, uint64_t incarnation,
                               uint32_t multiplier) {
@@ -150,6 +154,8 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
   return 0;
 }
 
+// Pack events into [p, q) in wire format. Writes as many events as fit.
+// Returns bytes written, or -1 on error.
 int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
                               uint8_t *p, uint8_t *q) {
   if (!queue || !p || q < p) {
@@ -204,10 +210,13 @@ int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
   return (int)(p - start);
 }
 
+// Return the number of events currently in the gossip queue.
 int swim_gossip_queue_size(const swim_gossip_queue_t *q) {
   return q ? q->count : 0;
 }
 
+// Copy up to max_len queued events (in priority order) into out_events.
+// For testing and debugging. Returns count copied, or -1 on error.
 int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
                            swim_member_t *out_events, int max_len) {
   if (!q || !out_events || max_len < 0) {

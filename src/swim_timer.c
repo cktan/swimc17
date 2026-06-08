@@ -22,6 +22,7 @@ struct swim_timer_t {
   entry_t *free_list;
 };
 
+// Create an empty timer. Free it with swim_timer_destroy().
 swim_timer_t *swim_timer_create(void) {
   swim_timer_t *t = calloc(1, sizeof(*t));
   if (!t) {
@@ -31,6 +32,9 @@ swim_timer_t *swim_timer_create(void) {
   return t;
 }
 
+// Arm an alarm to fire @ticks ticks from now. Several alarms due on the same
+// tick fire in the order added. @name is the cancel key (copied); @cb is
+// called as cb(ctx, SWIM_TIMER_ALARM, param) when due.
 int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
                    swim_timer_cb_t cb, void *ctx, void *param) {
   assert(t);
@@ -78,6 +82,8 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   return 0;
 }
 
+// Cancel the first pending alarm whose name equals @name, firing
+// SWIM_TIMER_CANCEL on it. No-op if no match.
 void swim_timer_cancel(swim_timer_t *t, const char *name) {
   assert(t);
   assert(name);
@@ -103,6 +109,8 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
   t->free_list = victim;
 }
 
+// Cancel every pending alarm, firing SWIM_TIMER_CANCEL on each. Timer remains
+// valid and reusable.
 void swim_timer_cancel_all(swim_timer_t *t) {
   assert(t);
 
@@ -115,6 +123,8 @@ void swim_timer_cancel_all(swim_timer_t *t) {
   }
 }
 
+// Cancel all alarms (swim_timer_cancel_all) then destroy the timer. Handle is
+// invalid afterwards.
 void swim_timer_destroy(swim_timer_t *t) {
   if (!t) {
     return;
@@ -128,6 +138,8 @@ void swim_timer_destroy(swim_timer_t *t) {
   free(t);
 }
 
+// Advance the timer by one tick (100 ms) and fire every alarm now due as
+// cb(ctx, SWIM_TIMER_ALARM, param). No-op when no alarms are pending.
 void swim_timer_tick(swim_timer_t *t) {
   assert(t);
 

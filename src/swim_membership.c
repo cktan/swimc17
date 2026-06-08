@@ -33,6 +33,7 @@ static bool find_node(const swim_membership_t *m, const swim_node_id_t *id,
   return false;
 }
 
+// Create an empty membership list. Free it with swim_membership_destroy().
 swim_membership_t *swim_membership_create(void) {
   swim_membership_t *m = calloc(1, sizeof(*m));
   if (!m) {
@@ -46,6 +47,7 @@ swim_membership_t *swim_membership_create(void) {
   return m;
 }
 
+// Destroy the membership list and free all associated memory.
 void swim_membership_destroy(swim_membership_t *m) {
   if (!m)
     return;
@@ -53,11 +55,13 @@ void swim_membership_destroy(swim_membership_t *m) {
   free(m);
 }
 
+// Add a new node as ALIVE. Delegates to swim_membership_apply_event.
 int swim_membership_add(swim_membership_t *m, const swim_node_id_t *id,
                         uint64_t incarnation) {
   return swim_membership_apply_event(m, SWIM_STATUS_ALIVE, id, incarnation, 0);
 }
 
+// Force a node to ALIVE, bypassing normal incarnation precedence rules.
 int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
                               uint64_t incarnation) {
   if (!m || !id) {
@@ -75,6 +79,7 @@ int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
   return swim_membership_apply_event(m, SWIM_STATUS_ALIVE, id, incarnation, 0);
 }
 
+// Look up a node by ID. Returns pointer to member entry, or NULL if not found.
 const swim_member_t *swim_membership_get(const swim_membership_t *m,
                                          const swim_node_id_t *id) {
   if (!m || !id)
@@ -86,6 +91,9 @@ const swim_member_t *swim_membership_get(const swim_membership_t *m,
   return NULL;
 }
 
+// Apply a gossip event (ALIVE/SUSPECT/DEAD) following SWIM+Suspension
+// precedence and incarnation rules. Returns 0 if state changed, 1 if ignored
+// (stale), -1 on error.
 int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
                                 const swim_node_id_t *id, uint64_t incarnation,
                                 uint64_t now_ms) {
@@ -170,6 +178,7 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
   }
 }
 
+// Remove nodes that have been dead for longer than expiry_ms.
 void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms,
                         uint64_t now_ms) {
   if (!m)
@@ -191,6 +200,7 @@ void swim_membership_gc(swim_membership_t *m, uint64_t expiry_ms,
   m->count = write_idx;
 }
 
+// Return the count of active (non-dead: ALIVE or SUSPECT) members.
 int swim_membership_count(const swim_membership_t *m) {
   if (!m)
     return 0;
@@ -203,6 +213,8 @@ int swim_membership_count(const swim_membership_t *m) {
   return active;
 }
 
+// Copy up to max_len members into out_list. include_dead controls whether dead
+// nodes are included. Returns count copied, or -1 on error.
 int swim_membership_list(const swim_membership_t *m, swim_member_t *out_list,
                          int max_len, bool include_dead) {
   if (!m || !out_list || max_len < 0) {

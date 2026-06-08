@@ -75,7 +75,10 @@ typedef struct {
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
 
-// TODO: comment
+// State of the single outstanding liveness probe for the current protocol
+// round. Starts DIRECT (we ping the target); escalates to INDIRECT (we send
+// PING-REQs to helpers) on timeout. Reset to PROBE_NONE on ACK or final
+// timeout.
 typedef struct {
   probe_state_t state;
   swim_node_id_t target;
@@ -83,7 +86,9 @@ typedef struct {
   uint64_t sent_ms; // monotonic send time of the direct ping, for RTT
 } pending_probe_t;
 
-// TODO: comment
+// An in-flight indirect probe we are relaying on behalf of another node's
+// failure detector. We forward the PING-REQ to the target and forward any
+// ACK back to the requester. Expires after expiry_tick.
 typedef struct {
   swim_node_id_t requester;
   swim_node_id_t target;
@@ -298,7 +303,9 @@ static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   free(target);
 }
 
-// TODO: comment
+// Fires when a direct ping times out. Escalates to indirect probing by sending
+// PING-REQs to a random subset of helpers. If no helpers are available, or a
+// second timeout fires with state still INDIRECT, the target is declared dead.
 static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
   if (inst->pending_probe.state == PROBE_DIRECT &&
       inst->pending_probe.seq == seq) {
@@ -368,7 +375,9 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
   }
 }
 
-// TODO: comment
+// Periodic timer that pings seed nodes until the cluster is joined. While
+// alone, pings all seeds; once peers are known, pings a random seed to keep
+// the path open. Re-arms itself unconditionally.
 static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   (void)param;
   swim_instance_t *inst = (swim_instance_t *)ctx;
@@ -500,7 +509,8 @@ static void dispatch_notifications(notify_batch_t *batch) {
   batch->count = 0;
 }
 
-// TODO: comment
+// Mark a node as alive on receipt of any message from it. Adds it if unknown,
+// clears SUSPECT status if it was suspected. Self-messages are ignored.
 static void update_node_alive(swim_instance_t *inst,
                               const swim_node_id_t *node) {
   if (swim_node_id_compare(node, &inst->self_id) == 0) {
