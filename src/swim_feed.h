@@ -1,12 +1,8 @@
 #ifndef SWIM_FEED_H
 #define SWIM_FEED_H
 
-#include "swim_errno.h"
+#include "swim_protocol.h"
 #include <pthread.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 typedef struct swim_feed swim_feed_t;
 
@@ -15,14 +11,14 @@ typedef struct swim_feed swim_feed_t;
  *
  * @return A pointer to the newly allocated swim_feed_t, or NULL on error.
  */
-swim_feed_t *swim_feed_create(void);
+SWIM_EXTERN swim_feed_t *swim_feed_create(void);
 
 /**
  * Destroy and free a swim_feed_t instance.
  *
  * @param feed The feed to destroy.
  */
-void swim_feed_destroy(swim_feed_t *feed);
+SWIM_EXTERN void swim_feed_destroy(swim_feed_t *feed);
 
 /**
  * Insert a record of n NUL-terminated strings into the feed.
@@ -32,7 +28,7 @@ void swim_feed_destroy(swim_feed_t *feed);
  * @param ...  n NUL-terminated strings (const char *).
  * @return 0 on success, or -1 on error (sets swim_errno).
  */
-int swim_feed_put(swim_feed_t *feed, int n, ...);
+SWIM_EXTERN int swim_feed_put(swim_feed_t *feed, int n, ...);
 
 /**
  * Read the next record from the feed, copying its strings out to the caller.
@@ -53,11 +49,7 @@ int swim_feed_put(swim_feed_t *feed, int n, ...);
  *         within `bufsz` or has more strings than `nptr`, returns -1 and the
  *         record is left in the feed.
  */
-int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
-                  char **ptr);
-
-#ifdef __cplusplus
-}
-#endif
+SWIM_EXTERN int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
+                              char **ptr);
 
 #endif /* SWIM_FEED_H */

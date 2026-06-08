@@ -1,12 +1,14 @@
-#include "swim_errno.h"
+#include "swim_protocol.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 
-_Thread_local int swim_errno = SWIM_OK;
-static _Thread_local char swim_errbuf[200] = {0};
+static _Thread_local int errnum = SWIM_OK;
+static _Thread_local char errbuf[200] = {0};
 
-const char *swim_errmsg(void) { return swim_errbuf; }
+int swim_errno(void) { return errnum; }
+
+const char *swim_errmsg(void) { return errbuf; }
 
 const char *swim_strerror(int err) {
   switch (err) {
@@ -28,14 +30,14 @@ const char *swim_strerror(int err) {
 }
 
 int swim_set_error(int e, const char *fmt, ...) {
-  swim_errno = e;
+  errnum = e;
   if (fmt) {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(swim_errbuf, sizeof(swim_errbuf), fmt, ap);
+    vsnprintf(errbuf, sizeof(errbuf), fmt, ap);
     va_end(ap);
   } else {
-    swim_errbuf[0] = '\0';
+    errbuf[0] = '\0';
   }
   return -1;
 }

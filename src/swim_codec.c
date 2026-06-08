@@ -1,6 +1,6 @@
 #define _DEFAULT_SOURCE
+
 #include "swim_codec.h"
-#include "swim_errno.h"
 #include "swim_gossip_queue.h"
 #include <arpa/inet.h>
 #include <endian.h>
@@ -55,13 +55,19 @@ int swim_encode_node_id(const swim_node_id_t *id, uint8_t *p, uint8_t *q) {
   int n;
 
   n = swim_encode_string(id->host, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
   n = swim_encode_int16(port, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
   n = swim_encode_string(cookie, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   return (int)(p - start);
@@ -72,15 +78,21 @@ int swim_encode_membership(const swim_member_t *m, uint8_t *p, uint8_t *q) {
   int n;
 
   n = swim_encode_node_id(&m->id, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   n = swim_encode_int8((uint8_t)m->status, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   n = swim_encode_int64(m->incarnation, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   return (int)(p - start);
@@ -132,13 +144,10 @@ int swim_encode_string(const char *str, uint8_t *p, uint8_t *q) {
   return (int)(2 + len);
 }
 
-
-
-
-
-int swim_encode_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
-                        const swim_node_id_t *peer, struct swim_gossip_queue_t *q,
-                        uint32_t active_members, uint8_t *buf, int bufsz) {
+int swim_encode_message(uint8_t type, const swim_node_id_t *sender,
+                        uint32_t seq, const swim_node_id_t *peer,
+                        struct swim_gossip_queue_t *q, uint32_t active_members,
+                        uint8_t *buf, int bufsz) {
   if (!sender || !buf || bufsz <= 0) {
     return -1;
   }
@@ -149,17 +158,23 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq
 
   // 1. Message Type (1 byte)
   n = swim_encode_int8(type, p, end);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   // 2. Sequence number (4 bytes)
   n = swim_encode_int32(seq, p, end);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   // 3. Sender Node ID
   n = swim_encode_node_id(sender, p, end);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   // 4. Peer Node ID (target for ping_req, source for fwd_ack)
@@ -168,7 +183,9 @@ int swim_encode_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq
       return -1;
     }
     n = swim_encode_node_id(peer, p, end);
-    if (n < 0) { return -1; }
+    if (n < 0) {
+      return -1;
+    }
     p += n;
   }
 
@@ -225,7 +242,8 @@ int swim_decode_int64(uint64_t *val, const uint8_t *p, const uint8_t *q) {
   return 8;
 }
 
-int swim_decode_string(char *str, size_t max_len, const uint8_t *p, const uint8_t *q) {
+int swim_decode_string(char *str, size_t max_len, const uint8_t *p,
+                       const uint8_t *q) {
   if (p + 2 > q) {
     return -1;
   }
@@ -243,43 +261,57 @@ int swim_decode_string(char *str, size_t max_len, const uint8_t *p, const uint8_
   return (int)(2 + len);
 }
 
-int swim_decode_node_id(swim_node_id_t *id, const uint8_t *p, const uint8_t *q) {
+int swim_decode_node_id(swim_node_id_t *id, const uint8_t *p,
+                        const uint8_t *q) {
   const uint8_t *start = p;
   int n;
 
   n = swim_decode_string(id->host, sizeof(id->host), p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   uint16_t port;
   n = swim_decode_int16(&port, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   id->port = port;
   p += n;
 
   n = swim_decode_string(id->cookie, sizeof(id->cookie), p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   return (int)(p - start);
 }
 
-int swim_decode_membership(swim_member_t *m, const uint8_t *p, const uint8_t *q) {
+int swim_decode_membership(swim_member_t *m, const uint8_t *p,
+                           const uint8_t *q) {
   const uint8_t *start = p;
   int n;
 
   n = swim_decode_node_id(&m->id, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   uint8_t status;
   n = swim_decode_int8(&status, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   m->status = (swim_status_t)status;
   p += n;
 
   n = swim_decode_int64(&m->incarnation, p, q);
-  if (n < 0) { return -1; }
+  if (n < 0) {
+    return -1;
+  }
   p += n;
 
   m->dead_at = 0;
@@ -300,7 +332,8 @@ int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
   // 1. Message Type
   n = swim_decode_int8(&msg->type, p, end);
   if (n < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for message type");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Buffer too short for message type");
   }
   if (msg->type < SWIM_MSG_PING || msg->type > SWIM_MSG_LEAVE) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid message type value");
@@ -310,7 +343,8 @@ int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
   // 2. Sequence number
   n = swim_decode_int32(&msg->seq, p, end);
   if (n < 0) {
-    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for sequence number");
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Buffer too short for sequence number");
   }
   p += n;
 
@@ -337,7 +371,8 @@ int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
   int count = 0;
   while (p < end) {
     if (count >= SWIM_MAX_EVENTS) {
-      return swim_set_error(SWIM_ERR_INVALID, "Event count exceeds maximum allowed");
+      return swim_set_error(SWIM_ERR_INVALID,
+                            "Event count exceeds maximum allowed");
     }
     n = swim_decode_membership(&msg->events[count], p, end);
     if (n < 0) {

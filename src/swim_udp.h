@@ -1,13 +1,7 @@
 #ifndef SWIM_UDP_H
 #define SWIM_UDP_H
 
-#include "swim_node_id.h"
-#include <stddef.h>
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "swim_protocol.h"
 
 typedef struct swim_udp_t swim_udp_t;
 
@@ -19,14 +13,14 @@ typedef struct swim_udp_t swim_udp_t;
  * @param port The local port to bind to.
  * @return a new swim_udp_t instance, or NULL on failure.
  */
-swim_udp_t *swim_udp_init(const char *host, uint16_t port);
+SWIM_EXTERN swim_udp_t *swim_udp_init(const char *host, uint16_t port);
 
 /**
  * Destroy the UDP transport and close the socket.
  *
  * @param u The UDP transport instance.
  */
-void swim_udp_final(swim_udp_t *u);
+SWIM_EXTERN void swim_udp_final(swim_udp_t *u);
 
 /**
  * Send a packet to a target destination.
@@ -37,8 +31,8 @@ void swim_udp_final(swim_udp_t *u);
  * @param size The size of the payload.
  * @return 0 on success, -1 on failure.
  */
-int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
-                  size_t size);
+SWIM_EXTERN int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest,
+                              const uint8_t *buf, size_t size);
 
 /**
  * Receive a packet. Non-blocking.
@@ -50,8 +44,8 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
  * @return The number of bytes received on success, 0 if no data is available
  * (EWOULDBLOCK), -1 on error.
  */
-int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
-                  size_t size);
+SWIM_EXTERN int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
+                              uint8_t *buf, size_t size);
 
 /**
  * Return the underlying socket file descriptor.
@@ -59,7 +53,7 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
  * @param u The UDP transport instance.
  * @return The socket file descriptor, or -1.
  */
-int swim_udp_fd(const swim_udp_t *u);
+SWIM_EXTERN int swim_udp_fd(const swim_udp_t *u);
 
 #ifdef __cplusplus
 }

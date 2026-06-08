@@ -1,15 +1,13 @@
 #include "swim_gossip_queue.h"
 #include "swim_codec.h"
-#include "swim_errno.h"
-#include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
-typedef struct {
+typedef struct gossip_entry_t gossip_entry_t;
+struct gossip_entry_t {
   swim_member_t event;
   uint32_t transmit_count;
   uint32_t multiplier;
-} gossip_entry_t;
+};
 
 struct swim_gossip_queue_t {
   gossip_entry_t *entries;
@@ -210,7 +208,6 @@ int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
 
   return (int)(p - start);
 }
-
 
 int swim_gossip_queue_size(const swim_gossip_queue_t *q) {
   return q ? q->count : 0;

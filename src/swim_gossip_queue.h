@@ -2,14 +2,7 @@
 #define SWIM_GOSSIP_QUEUE_H
 
 #include "swim_membership.h"
-#include "swim_node_id.h"
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "swim_protocol.h"
 
 typedef struct swim_gossip_queue_t swim_gossip_queue_t;
 
@@ -18,14 +11,14 @@ typedef struct swim_gossip_queue_t swim_gossip_queue_t;
  *
  * @return a new gossip queue; free it with swim_gossip_queue_final().
  */
-swim_gossip_queue_t *swim_gossip_queue_init(void);
+SWIM_EXTERN swim_gossip_queue_t *swim_gossip_queue_init(void);
 
 /**
  * Destroy the gossip queue and free all associated memory.
  *
  * @param q The gossip queue instance.
  */
-void swim_gossip_queue_final(swim_gossip_queue_t *q);
+SWIM_EXTERN void swim_gossip_queue_final(swim_gossip_queue_t *q);
 
 /**
  * Enqueue a gossip event for dissemination.
@@ -40,11 +33,11 @@ void swim_gossip_queue_final(swim_gossip_queue_t *q);
  * >= 1.
  * @return 0 on success, -1 on error.
  */
-int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
-                              const swim_node_id_t *id, uint64_t incarnation,
-                              uint32_t multiplier);
-
-
+SWIM_EXTERN int swim_gossip_queue_enqueue(swim_gossip_queue_t *q,
+                                          swim_status_t status,
+                                          const swim_node_id_t *id,
+                                          uint64_t incarnation,
+                                          uint32_t multiplier);
 
 /**
  * Pack events into an outgoing message buffer using the gossip wire format.
@@ -56,9 +49,9 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
  * @param q            Pointer to the end of the buffer (one past the end).
  * @return The number of bytes written on success, or -1 on error.
  */
-int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
-                              uint8_t *p, uint8_t *q);
-
+SWIM_EXTERN int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue,
+                                          uint32_t cluster_size, uint8_t *p,
+                                          uint8_t *q);
 
 /**
  * Return the number of events currently in the gossip queue.
@@ -66,7 +59,7 @@ int swim_gossip_queue_pack_ex(swim_gossip_queue_t *queue, uint32_t cluster_size,
  * @param q The gossip queue instance.
  * @return The count of queued events.
  */
-int swim_gossip_queue_size(const swim_gossip_queue_t *q);
+SWIM_EXTERN int swim_gossip_queue_size(const swim_gossip_queue_t *q);
 
 /**
  * For testing and debugging: retrieve the list of queued events in priority
@@ -77,11 +70,7 @@ int swim_gossip_queue_size(const swim_gossip_queue_t *q);
  * @param max_len      Size of the out_events array.
  * @return The number of events copied, or -1 on error.
  */
-int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
-                           swim_member_t *out_events, int max_len);
-
-#ifdef __cplusplus
-}
-#endif
+SWIM_EXTERN int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
+                                       swim_member_t *out_events, int max_len);
 
 #endif // SWIM_GOSSIP_QUEUE_H

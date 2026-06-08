@@ -56,8 +56,7 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
   }
   if (n < 1) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "String count n must be >= 1");
+    return swim_set_error(SWIM_ERR_INVALID, "String count n must be >= 1");
   }
 
   pthread_mutex_lock(&feed->mutex);
@@ -227,9 +226,8 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
   }
   if (payload_len > (size_t)bufsz) {
     pthread_mutex_unlock(&feed->mutex);
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Record size %zu exceeds bufsz %d", payload_len,
-                          bufsz);
+    return swim_set_error(SWIM_ERR_INVALID, "Record size %zu exceeds bufsz %d",
+                          payload_len, bufsz);
   }
 
   // Copy the payload out and consume the record while still under the lock.

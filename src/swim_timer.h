@@ -1,9 +1,7 @@
 #ifndef SWIM_TIMER_H
 #define SWIM_TIMER_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "swim_protocol.h"
 
 /**
  * A passive delta-list timer.
@@ -57,7 +55,7 @@ typedef void (*swim_timer_cb_t)(void *ctx, swim_timer_event_t ev, void *param);
  *
  * @return a new timer; free it with swim_timer_final().
  */
-swim_timer_t *swim_timer_init(void);
+SWIM_EXTERN swim_timer_t *swim_timer_init(void);
 
 /**
  * Cancel every pending alarm, firing SWIM_TIMER_CANCEL on each,
@@ -65,7 +63,7 @@ swim_timer_t *swim_timer_init(void);
  *
  * @param t the timer.
  */
-void swim_timer_cancel_all(swim_timer_t *t);
+SWIM_EXTERN void swim_timer_cancel_all(swim_timer_t *t);
 
 /**
  * Cancel every pending alarm (as swim_timer_cancel_all) and then
@@ -73,7 +71,7 @@ void swim_timer_cancel_all(swim_timer_t *t);
  *
  * @param t the timer.
  */
-void swim_timer_final(swim_timer_t *t);
+SWIM_EXTERN void swim_timer_final(swim_timer_t *t);
 
 /**
  * Arm an alarm to fire @ticks ticks from now.
@@ -91,8 +89,8 @@ void swim_timer_final(swim_timer_t *t);
  * @param ctx   opaque context passed back to @cb.
  * @param param opaque per-alarm datum passed back to @cb.
  */
-int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
-                   swim_timer_cb_t cb, void *ctx, void *param);
+SWIM_EXTERN int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
+                               swim_timer_cb_t cb, void *ctx, void *param);
 
 /**
  * Cancel the first pending alarm whose name equals @name.
@@ -104,7 +102,7 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
  * @param t    the timer.
  * @param name name passed to swim_timer_add().
  */
-void swim_timer_cancel(swim_timer_t *t, const char *name);
+SWIM_EXTERN void swim_timer_cancel(swim_timer_t *t, const char *name);
 
 /**
  * Advance the timer by one tick (100 ms) and fire every alarm now
@@ -113,10 +111,6 @@ void swim_timer_cancel(swim_timer_t *t, const char *name);
  *
  * @param t the timer.
  */
-void swim_timer_tick(swim_timer_t *t);
-
-#ifdef __cplusplus
-}
-#endif
+SWIM_EXTERN void swim_timer_tick(swim_timer_t *t);
 
 #endif /* SWIM_TIMER_H */

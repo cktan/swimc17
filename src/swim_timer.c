@@ -1,5 +1,5 @@
 #include "swim_timer.h"
-#include "swim_errno.h"
+#include "swim_protocol.h"
 
 #include <assert.h>
 #include <stdlib.h>

@@ -1,5 +1,4 @@
-#include "swim_node_id.h"
-#include "swim_errno.h"
+#include "swim_protocol.h"
 
 #include <stdbool.h>
 #include <stdio.h>

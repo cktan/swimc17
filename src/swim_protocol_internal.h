@@ -1,9 +1,8 @@
 #ifndef SWIM_PROTOCOL_INTERNAL_H
 #define SWIM_PROTOCOL_INTERNAL_H
 
-#include <stdbool.h>
-
 #include "swim_membership.h"
+#include "swim_protocol.h"
 
 /*
  * Internal/QA-only interface. Not part of the public API exposed in
@@ -20,7 +19,7 @@
  * @param include_dead Whether to include dead nodes in the list.
  * @return The number of members copied, or -1 on error.
  */
-int swim_members(const char *name, swim_member_t *out_list, int max_len,
-                 bool include_dead);
+SWIM_EXTERN int swim_members(const char *name, swim_member_t *out_list,
+                             int max_len, bool include_dead);
 
 #endif // SWIM_PROTOCOL_INTERNAL_H

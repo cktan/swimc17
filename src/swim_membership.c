@@ -1,9 +1,7 @@
 #include "swim_membership.h"
-#include "swim_errno.h"
+#include "swim_protocol.h"
 
-#include <assert.h>
 #include <stdlib.h>
-#include <string.h>
 
 struct swim_membership_t {
   swim_member_t *members;
