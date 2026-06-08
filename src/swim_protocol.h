@@ -1,10 +1,11 @@
 #ifndef SWIM_PROTOCOL_H
 #define SWIM_PROTOCOL_H
 
+#include "swim_codec.h"
+#include "swim_feed.h"
+#include "swim_gossip_queue.h"
 #include "swim_membership.h"
 #include "swim_node_id.h"
-#include "swim_gossip_queue.h"
-#include "swim_codec.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,14 +20,6 @@ typedef enum {
 
 typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
                                 const swim_node_id_t *node);
-
-// Telemetry observer. `sexp` is borrowed (valid only for this call; copy it to
-// retain), and is always a NUL-terminated, single-line, printable-ASCII
-// s-expression, e.g. (node down "10.0.0.1:7771:c7"), (ping rtt "10.0.0.2:7771"
-// 42), (cluster size 8), (message dropped "10.0.0.3:7771"). Called from the
-// protocol thread: it must be cheap and non-blocking, and must not re-enter the
-// swim API for this instance.
-typedef void (*swim_observer_t)(void *ctx, const char *sexp);
 
 typedef struct {
   const char *host;
@@ -94,15 +87,15 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
 
 /**
- * Register (or replace) the telemetry observer for a named instance. One
- * observer per instance; pass observer = NULL to disable.
+ * Read the next event from the feed of the named instance.
  *
  * @param name     The name of the instance (mandatory).
- * @param observer The observer callback, or NULL to disable.
- * @param ctx      Opaque context passed back to the observer.
- * @return 0 on success, -1 on failure.
+ * @param ctx      Opaque context passed back to the callback.
+ * @param cb       Callback function to execute on success.
+ * @return 1 if an event was successfully read, 0 if the feed is empty,
+ *         or -1 on error (sets swim_errno).
  */
-int swim_observe(const char *name, swim_observer_t observer, void *ctx);
+int swim_get_event(const char *name, void *ctx, swim_feed_cb cb);
 
 /**
  * Feed out-of-band reachability signal to cancel suspicion and revive a node.
@@ -112,8 +105,6 @@ int swim_observe(const char *name, swim_observer_t observer, void *ctx);
  * @return 0 on success, -1 on failure.
  */
 int swim_hint_alive(const char *name, const swim_node_id_t *peer);
-
-
 
 #ifdef __cplusplus
 }

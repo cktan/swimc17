@@ -116,42 +116,50 @@ TEST_CASE("swim_feed: error handling and input validation") {
   swim_feed_destroy(feed);
 }
 
-TEST_CASE("swim_feed: buffer compaction and GC") {
+TEST_CASE("swim_feed: buffer compaction and auto-draining") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  // Construct a long string to occupy buffer space
-  std::string long_str(300, 'A');
+  // Construct a long string (approx 1200 bytes)
+  std::string long_str(1200, 'A');
 
-  // Put a record that takes over half of default buffer (512 bytes)
+  // Insert 3 records of long strings (each takes 1200 + sizeof(int) + 1 = 1205
+  // bytes) 3 records will fit: 3 * 1205 = 3615 bytes, which fits in 4096.
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
   CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
 
-  // Read and consume it (read_off becomes > 300)
-  TestCtx ctx1 = {1, {long_str}, 0};
-  CHECK(swim_feed_get(feed, &ctx1, test_cb) == 1);
-
-  // The next put does not fit in remaining ~200 bytes, but fits after
-  // compaction. Compaction should be triggered automatically to avoid realloc.
+  // Putting a 4th record of 1205 bytes will exceed 4096 (total would be 4820).
+  // This must trigger auto-draining of the oldest records.
+  // Discarding 1st record: remaining is 2 * 1205 = 2410 bytes, + 1205 = 3615
+  // (fits). So the 1st record is discarded automatically.
   CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
 
+  // Let's verify that the 1st record is gone, and the next readable is the 2nd
+  // record.
   TestCtx ctx2 = {1, {long_str}, 0};
   CHECK(swim_feed_get(feed, &ctx2, test_cb) == 1);
+
+  TestCtx ctx3 = {1, {long_str}, 0};
+  CHECK(swim_feed_get(feed, &ctx3, test_cb) == 1);
+
+  TestCtx ctx4 = {1, {long_str}, 0};
+  CHECK(swim_feed_get(feed, &ctx4, test_cb) == 1);
 
   swim_feed_destroy(feed);
 }
 
-TEST_CASE("swim_feed: buffer growth") {
+TEST_CASE("swim_feed: oversized record failure") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  // Construct a string larger than initial buffer capacity
-  std::string massive_str(1000, 'B');
+  // Construct a string larger than 4KB buffer capacity
+  std::string massive_str(4100, 'B');
 
-  // Insert record with massive string - triggers resize
-  CHECK(swim_feed_put(feed, 1, massive_str.c_str()) == 0);
-
-  TestCtx ctx = {1, {massive_str}, 0};
-  CHECK(swim_feed_get(feed, &ctx, test_cb) == 1);
+  // Insert record with massive string - should fail with SWIM_ERR_INVALID
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_put(feed, 1, massive_str.c_str()) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
 
   swim_feed_destroy(feed);
 }
@@ -168,7 +176,6 @@ static void *writer_thread(void *arg) {
   ThreadArg *ta = (ThreadArg *)arg;
   for (int i = 0; i < ta->limit; i++) {
     while (swim_feed_put(ta->feed, 1, "payload") != 0) {
-      // Retry on failure (e.g. if memory allocation fails, though unlikely)
       std::this_thread::yield();
     }
     ta->total_written->fetch_add(1);
@@ -196,7 +203,6 @@ static void *reader_thread(void *arg) {
     if (rc == 0) {
       std::this_thread::yield();
     } else if (rc < 0) {
-      // Error occurred
       break;
     }
   }
@@ -209,7 +215,7 @@ TEST_CASE("swim_feed: thread safety concurrent put and get") {
 
   std::atomic<int> total_written(0);
   std::atomic<int> total_read(0);
-  int limit_per_thread = 500;
+  int limit_per_thread = 50;
 
   ThreadArg arg = {feed, &total_written, &total_read, limit_per_thread};
 

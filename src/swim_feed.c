@@ -11,7 +11,7 @@ struct swim_feed {
   size_t write_off; // End of the last written record (first free byte)
 };
 
-#define SWIM_FEED_INIT_CAPACITY 512
+#define SWIM_FEED_BUFFER_SIZE 4096
 
 swim_feed_t *swim_feed_create(void) {
   swim_feed_t *feed = malloc(sizeof(*feed));
@@ -26,7 +26,7 @@ swim_feed_t *swim_feed_create(void) {
     return NULL;
   }
 
-  feed->buf = malloc(SWIM_FEED_INIT_CAPACITY);
+  feed->buf = malloc(SWIM_FEED_BUFFER_SIZE);
   if (!feed->buf) {
     pthread_mutex_destroy(&feed->mutex);
     free(feed);
@@ -34,7 +34,7 @@ swim_feed_t *swim_feed_create(void) {
     return NULL;
   }
 
-  feed->capacity = SWIM_FEED_INIT_CAPACITY;
+  feed->capacity = SWIM_FEED_BUFFER_SIZE;
   feed->read_off = 0;
   feed->write_off = 0;
 
@@ -88,30 +88,68 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   }
   va_end(args);
 
-  // Check capacity and compact/resize if necessary
-  size_t free_space = feed->capacity - feed->write_off;
-  if (free_space < needed) {
-    // Check if compaction would help
-    size_t total_free = feed->capacity - (feed->write_off - feed->read_off);
-    if (total_free >= needed) {
-      swim_feed_compact_locked(feed);
-    } else {
-      // Realloc is required. Compact first so we only keep active data starting
-      // at 0
-      swim_feed_compact_locked(feed);
-      size_t new_cap = feed->capacity + (feed->capacity / 2);
-      if (new_cap < feed->write_off + needed) {
-        new_cap = feed->write_off + needed;
+  // If the record exceeds the maximum fixed buffer size, it can never fit.
+  if (needed > SWIM_FEED_BUFFER_SIZE) {
+    pthread_mutex_unlock(&feed->mutex);
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Record size %zu exceeds buffer capacity %d", needed,
+                          SWIM_FEED_BUFFER_SIZE);
+  }
+
+  // Auto-draining: discard oldest records if space is insufficient
+  while (SWIM_FEED_BUFFER_SIZE - (feed->write_off - feed->read_off) < needed) {
+    // We have active records in the buffer. Let's discard the oldest one at
+    // read_off.
+    if (feed->read_off + sizeof(int) > feed->write_off) {
+      // Corrupt buffer state (should not happen normally) - reset offsets
+      feed->read_off = 0;
+      feed->write_off = 0;
+      break;
+    }
+
+    int old_n;
+    memcpy(&old_n, feed->buf + feed->read_off, sizeof(int));
+    if (old_n < 0) {
+      // Corrupt record count - reset offsets
+      feed->read_off = 0;
+      feed->write_off = 0;
+      break;
+    }
+
+    size_t scan_off = feed->read_off + sizeof(int);
+    int valid = 1;
+    for (int i = 0; i < old_n; i++) {
+      if (scan_off >= feed->write_off) {
+        valid = 0;
+        break;
       }
-      char *new_buf = realloc(feed->buf, new_cap);
-      if (!new_buf) {
-        pthread_mutex_unlock(&feed->mutex);
-        return swim_set_error(SWIM_ERR_NOMEM, "Failed to reallocate buffer");
+      char *nul_pos =
+          memchr(feed->buf + scan_off, '\0', feed->write_off - scan_off);
+      if (!nul_pos) {
+        valid = 0;
+        break;
       }
-      feed->buf = new_buf;
-      feed->capacity = new_cap;
+      scan_off = (nul_pos - feed->buf) + 1;
+    }
+
+    if (!valid) {
+      // Corrupt record layout - reset offsets
+      feed->read_off = 0;
+      feed->write_off = 0;
+      break;
+    }
+
+    // Advance read_off to discard this record
+    feed->read_off = scan_off;
+
+    if (feed->read_off == feed->write_off) {
+      feed->read_off = 0;
+      feed->write_off = 0;
     }
   }
+
+  // Now compact the buffer to make space contiguous at the beginning
+  swim_feed_compact_locked(feed);
 
   // Write the record
   memcpy(feed->buf + feed->write_off, &n, sizeof(int));

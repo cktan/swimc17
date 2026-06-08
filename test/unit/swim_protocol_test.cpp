@@ -53,15 +53,27 @@ EventLog get_log_event(size_t idx) {
   return ev;
 }
 
-// --- Observer (L3) capture helpers ---
+// --- Telemetry Feed capture helpers ---
 std::vector<std::string> g_obs;
 pthread_mutex_t g_obs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void test_observer(void *ctx, const char *sexp) {
+void test_feed_cb(void *ctx, int n, const char **strs) {
   (void)ctx;
+  std::string s;
+  for (int i = 0; i < n; i++) {
+    if (i > 0)
+      s += " ";
+    s += strs[i];
+  }
   pthread_mutex_lock(&g_obs_mutex);
-  g_obs.push_back(sexp);
+  g_obs.push_back(s);
   pthread_mutex_unlock(&g_obs_mutex);
+}
+
+void poll_feed_events(const char *name) {
+  while (swim_get_event(name, nullptr, test_feed_cb) == 1) {
+    // Keep polling until feed is empty
+  }
 }
 
 void clear_obs() {
@@ -226,7 +238,8 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 
   // Construct PING packet from mock
   uint8_t buf[256];
-  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0, buf, sizeof(buf));
+  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+                                buf, sizeof(buf));
   REQUIRE(len > 0);
 
   // Send packet to node
@@ -348,7 +361,8 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
     uint8_t buf[256];
-    int len = swim_encode_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt, nullptr, 0, buf, sizeof(buf));
+    int len = swim_encode_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
+                                  nullptr, 0, buf, sizeof(buf));
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
   };
@@ -436,7 +450,8 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
   swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20402);
   REQUIRE(mock_udp != nullptr);
   uint8_t buf[256];
-  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0, buf, sizeof(buf));
+  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+                                buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
 
@@ -585,11 +600,13 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
       strcpy(ev_id.host, host);
       ev_id.port = 30000 + idx;
       sprintf(ev_id.cookie, "cookie-cookie-cookie-cookie-%d", idx);
-      swim_gossip_queue_enqueue(test_q, SWIM_STATUS_ALIVE, &ev_id, 100 + idx, 1);
+      swim_gossip_queue_enqueue(test_q, SWIM_STATUS_ALIVE, &ev_id, 100 + idx,
+                                1);
     }
 
     uint8_t send_buf[1024];
-    int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr, test_q, 1, send_buf, sizeof(send_buf));
+    int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
+                                  test_q, 1, send_buf, sizeof(send_buf));
     swim_gossip_queue_final(test_q);
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
@@ -637,11 +654,14 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
 
   // Enqueue a gossip event
   swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") == 0);
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100, 1) == 0);
+  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") ==
+          0);
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
+                                    1) == 0);
 
   uint8_t buf[2048];
-  int bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q, swim_membership_count(m), buf, sizeof(buf));
+  int bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
+                                  swim_membership_count(m), buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
@@ -659,7 +679,8 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   CHECK(swim_node_id_compare(&msg.events[0].id, &gossip_node) == 0);
 
   // Check error handling with buffer too small
-  int err_bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q, swim_membership_count(m), buf, 10);
+  int err_bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer,
+                                      q, swim_membership_count(m), buf, 10);
   CHECK(err_bytes == -1);
 
   swim_membership_final(m);
@@ -677,12 +698,15 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
 
   // Enqueue a gossip event (should be ignored for LEAVE)
   swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") == 0);
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100, 1) == 0);
+  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001:gossip_cookie") ==
+          0);
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
+                                    1) == 0);
 
   uint8_t buf[2048];
   // Pass NULL gossip queue
-  int bytes = swim_encode_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr, nullptr, 0, buf, sizeof(buf));
+  int bytes = swim_encode_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr,
+                                  nullptr, 0, buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
@@ -722,38 +746,35 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   opts.protocol_period_ms = 200;
 
   REQUIRE(swim_start(&opts) == 0);
-  REQUIRE(swim_observe("obs_node", test_observer, nullptr) == 0);
 
   swim_udp_t *mock_udp = swim_udp_init("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
 
   uint8_t buf[256];
-  int len =
-      swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0, buf,
-                          sizeof(buf));
+  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+                                buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
 
   usleep(400000); // packet processing + a few ticks for the cluster-size emit
 
-  // node up transition, with the cookie escaped: 'a', 'b' pass; ' ' -> \x20,
-  // '!' -> \x21.
-  CHECK(obs_contains("(node up \"127.0.0.1:20502:a\\x20b\\x21\")"));
+  // node up transition, with the cookie unescaped
+  poll_feed_events("obs_node");
+  CHECK(obs_contains("node up 127.0.0.1:20502:a b!"));
   // cluster-size gauge moved from 0 to 1.
-  CHECK(obs_contains("(cluster size 1)"));
+  CHECK(obs_contains("cluster size 1"));
 
-  // Disabling the observer stops delivery.
-  REQUIRE(swim_observe("obs_node", nullptr, nullptr) == 0);
   clear_obs();
   swim_udp_final(mock_udp);
   usleep(300000);
+  poll_feed_events("obs_node");
   CHECK(obs_size() == 0);
 
   swim_leave("obs_node");
   swim_set_error(SWIM_OK, nullptr);
 }
 
-// L3: a clean direct probe round-trip produces a (ping rtt ...) observation.
+// L3: a clean direct probe round-trip produces a ping rtt feed event.
 TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   clear_obs();
 
@@ -787,13 +808,13 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 
   REQUIRE(swim_start(&a) == 0);
   REQUIRE(swim_start(&b) == 0);
-  REQUIRE(swim_observe("rtt_a", test_observer, nullptr) == 0);
 
   // Let the nodes discover each other and run several probe cycles, so A sends
   // a direct ping to B and B acks it.
   usleep(1200000);
+  poll_feed_events("rtt_a");
 
-  CHECK(obs_contains("(ping rtt \"127.0.0.1:20512"));
+  CHECK(obs_contains("ping rtt 127.0.0.1:20512"));
 
   CHECK(swim_leave("rtt_a") == 0);
   CHECK(swim_leave("rtt_b") == 0);
@@ -801,7 +822,8 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 }
 
 // L3: registering an observer on a missing instance fails cleanly.
-TEST_CASE("protocol: swim_observe on unknown instance fails (L3)") {
-  REQUIRE(swim_observe("no_such_instance", test_observer, nullptr) != 0);
+TEST_CASE("protocol: swim_get_event on unknown instance fails (L3)") {
+  REQUIRE(swim_get_event("no_such_instance", nullptr, test_feed_cb) == -1);
+  CHECK(swim_errno == SWIM_ERR_BAD_STATE);
   swim_set_error(SWIM_OK, nullptr);
 }
