@@ -12,7 +12,7 @@
  * "host:port" or "[host]:port" unambiguously — without
  * any colon-counting that would break on bare IPv6.
  */
-#include "swim_protocol.h"
+#include "swim_node_id.h"
 
 #include <stdbool.h>
 #include <stdio.h>

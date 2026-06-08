@@ -2,6 +2,7 @@
 #define SWIM_TIMER_H
 
 #include "swim_protocol.h"
+#include "swim_node_id.h"
 
 /**
  * A passive delta-list timer.

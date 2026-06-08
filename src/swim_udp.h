@@ -2,6 +2,7 @@
 #define SWIM_UDP_H
 
 #include "swim_protocol.h"
+#include "swim_node_id.h"
 
 typedef struct swim_udp_t swim_udp_t;
 

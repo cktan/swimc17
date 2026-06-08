@@ -2,6 +2,7 @@
 #define SWIM_MEMBERSHIP_H
 
 #include "swim_protocol.h"
+#include "swim_node_id.h"
 
 typedef char swim_status_t;
 #define SWIM_STATUS_ALIVE 'A'
