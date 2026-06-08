@@ -991,11 +991,18 @@ int swim_start(const swim_start_opts_t *opts) {
 
   // Set up logical alarms
   // 1. Probe cycle timer (self-rearming)
-  swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                 probe_timer_cb, inst, NULL);
-  // 2. Seed retry timer (self-rearming) - Schedule the first retry timer to run
-  // in 1 tick (100ms) to bootstrap immediately
-  swim_timer_add(inst->timer, 1, "seed_retry", seed_retry_timer_cb, inst, NULL);
+  if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
+                     probe_timer_cb, inst, NULL) != 0) {
+    swim_set_error(SWIM_ERR_NOMEM, "Failed to arm probe timer");
+    goto error_cleanup;
+  }
+  // 2. Seed retry timer (self-rearming) — fire after 1 tick (100ms) to
+  // bootstrap seed discovery immediately rather than waiting a full period.
+  if (swim_timer_add(inst->timer, 1, "seed_retry", seed_retry_timer_cb, inst,
+                     NULL) != 0) {
+    swim_set_error(SWIM_ERR_NOMEM, "Failed to arm seed retry timer");
+    goto error_cleanup;
+  }
 
   // Start background event loop thread
   if (pthread_create(&inst->thread, NULL, swim_protocol_thread_entry, inst) !=
