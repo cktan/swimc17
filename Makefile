@@ -45,6 +45,7 @@ install: all
 	install -m 0644 src/swim_codec.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/swim_udp.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/swim_protocol.h $(DESTDIR)${prefix}/include/
+	install -m 0644 src/swim_feed.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/libswimc17.a $(DESTDIR)${prefix}/lib/
 	@echo "$$PCFILE" >> $(DESTDIR)${prefix}/lib/pkgconfig/libswimc17.pc
 

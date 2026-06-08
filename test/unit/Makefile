@@ -7,7 +7,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -
 
 all: unit_test
 
-unit_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o
+unit_test: swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_feed_test.o swim_timer.o swim_errno.o swim_node_id.o swim_membership.o swim_gossip_queue.o swim_codec.o swim_udp.o swim_protocol.o swim_feed.o
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm -pthread
 
 swim_timer_test.o: swim_timer_test.cpp ../../ext/include/doctest.h ../../src/swim_timer.h ../../src/swim_errno.h ../../src/swim_node_id.h
@@ -51,6 +51,13 @@ swim_udp.o: ../../src/swim_udp.c ../../src/swim_udp.h
 
 swim_protocol.o: ../../src/swim_protocol.c ../../src/swim_protocol.h
 	$(CC) $(CFLAGS) -c ../../src/swim_protocol.c
+
+swim_feed_test.o: swim_feed_test.cpp ../../ext/include/doctest.h ../../src/swim_feed.h ../../src/swim_errno.h
+	$(CXX) $(CXXFLAGS) -c $<
+
+swim_feed.o: ../../src/swim_feed.c ../../src/swim_feed.h
+	$(CC) $(CFLAGS) -c ../../src/swim_feed.c
+
 
 test: unit_test
 	./unit_test
