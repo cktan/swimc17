@@ -162,6 +162,8 @@ struct swim_instance_t {
 static swim_instance_t *g_instances[16] = {0};
 static pthread_mutex_t g_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+
+// TODO: can this be find_instance and lock mutex?
 static swim_instance_t *find_instance(const char *name) {
   if (!name || name[0] == '\0') {
     return NULL;
@@ -1077,6 +1079,8 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   }
 
   pthread_mutex_lock(&inst->mutex);
+  // QUESTION: why can't we release g_instances_mutex here?
+  
   int idx = -1;
   for (int i = 0; i < inst->subscriber_count; i++) {
     if (inst->subscribers[i].cb == callback &&
@@ -1130,6 +1134,8 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
   }
 
   pthread_mutex_lock(&inst->mutex);
+  // QUESTION: why can't we release g_instances_mutex here?
+  
   const swim_member_t *m = swim_membership_get(inst->membership, peer);
   if (m) {
     if (m->status == SWIM_STATUS_SUSPECT) {
