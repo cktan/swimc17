@@ -162,8 +162,6 @@ struct swim_instance_t {
 static swim_instance_t *g_instances[16] = {0};
 static pthread_mutex_t g_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-
-// TODO: can this be find_instance and lock mutex?
 static swim_instance_t *find_instance(const char *name) {
   if (!name || name[0] == '\0') {
     return NULL;
@@ -174,6 +172,19 @@ static swim_instance_t *find_instance(const char *name) {
     }
   }
   return NULL;
+}
+
+/* Lock g_instances_mutex, find the instance, lock inst->mutex, release
+ * g_instances_mutex, and return inst.  Returns NULL (nothing held) when
+ * the instance does not exist. */
+static swim_instance_t *find_and_lock_instance(const char *name) {
+  pthread_mutex_lock(&g_instances_mutex);
+  swim_instance_t *inst = find_instance(name);
+  if (inst) {
+    pthread_mutex_lock(&inst->mutex);
+  }
+  pthread_mutex_unlock(&g_instances_mutex);
+  return inst;
 }
 
 // Forward declarations
@@ -994,19 +1005,14 @@ int swim_members(const char *name, swim_member_t *out_list, int max_len,
   if (!name || name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
   }
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
+  swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  pthread_mutex_lock(&inst->mutex);
   int ret =
       swim_membership_list(inst->membership, out_list, max_len, include_dead);
   pthread_mutex_unlock(&inst->mutex);
-
-  pthread_mutex_unlock(&g_instances_mutex);
   return ret;
 }
 
@@ -1044,17 +1050,13 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx) {
                           "Invalid NULL callback in swim_subscribe");
   }
 
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
+  swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  pthread_mutex_lock(&inst->mutex);
   if (inst->subscriber_count >= 16) {
     pthread_mutex_unlock(&inst->mutex);
-    pthread_mutex_unlock(&g_instances_mutex);
     return swim_set_error(SWIM_ERR_FULL, "Maximum subscriber limit reached");
   }
 
@@ -1063,7 +1065,6 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx) {
   inst->subscriber_count++;
 
   pthread_mutex_unlock(&inst->mutex);
-  pthread_mutex_unlock(&g_instances_mutex);
   return 0;
 }
 
@@ -1071,16 +1072,11 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   if (!name || name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
   }
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
+  swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  pthread_mutex_lock(&inst->mutex);
-  // QUESTION: why can't we release g_instances_mutex here?
-  
   int idx = -1;
   for (int i = 0; i < inst->subscriber_count; i++) {
     if (inst->subscribers[i].cb == callback &&
@@ -1096,7 +1092,6 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   }
 
   pthread_mutex_unlock(&inst->mutex);
-  pthread_mutex_unlock(&g_instances_mutex);
   return 0;
 }
 
@@ -1126,16 +1121,11 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
                           "Invalid NULL peer in swim_hint_alive");
   }
 
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
+  swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  pthread_mutex_lock(&inst->mutex);
-  // QUESTION: why can't we release g_instances_mutex here?
-  
   const swim_member_t *m = swim_membership_get(inst->membership, peer);
   if (m) {
     if (m->status == SWIM_STATUS_SUSPECT) {
@@ -1161,7 +1151,6 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
   notify_batch_t batch;
   take_notifications(inst, &batch);
   pthread_mutex_unlock(&inst->mutex);
-  pthread_mutex_unlock(&g_instances_mutex);
 
   // Callbacks run with no locks held and touch only the batch, so they may
   // re-enter the API and are unaffected if the instance is torn down meanwhile.
