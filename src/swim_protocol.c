@@ -33,6 +33,14 @@ static uint64_t get_now_ms(void) {
 // Round n up to the next multiple of 8.
 static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
 
+// Build the suspicion-timer key for a node. The cookie is part of node
+// identity (DESIGN S3), so it must be in the key: otherwise two members that
+// share a host:port collide on one key and an event for one cancels the
+// other's suspicion timer. Centralized so the arm/cancel keys cannot drift.
+static void suspect_key(char *buf, size_t n, const swim_node_id_t *id) {
+  snprintf(buf, n, "suspect:%s:%u:%s", id->host, id->port, id->cookie);
+}
+
 // Structures for internal protocol use
 typedef struct {
   swim_callback_t cb;
@@ -326,8 +334,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       if (suspect_param) {
         *suspect_param = target;
         char alarm_name[384];
-        snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", target.host,
-                 target.port);
+        suspect_key(alarm_name, sizeof(alarm_name), &target);
         swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
                        alarm_name, suspicion_timer_cb, inst, suspect_param);
       }
@@ -475,8 +482,7 @@ static void update_node_alive(swim_instance_t *inst,
     swim_membership_set_alive(inst->membership, node, m->incarnation);
 
     char alarm_name[384];
-    snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", node->host,
-             node->port);
+    suspect_key(alarm_name, sizeof(alarm_name), node);
     swim_timer_cancel(inst->timer, alarm_name);
 
     swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, node,
@@ -540,8 +546,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
           queue_notification(inst, SWIM_NODE_DOWN, &ev->id);
           // Cancel suspicion timer if any
           char alarm_name[384];
-          snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", ev->id.host,
-                   ev->id.port);
+          suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
           swim_timer_cancel(inst->timer, alarm_name);
         } else if (ev->status == SWIM_STATUS_SUSPECT) {
           queue_notification(inst, SWIM_NODE_SUSPECT, &ev->id);
@@ -551,8 +556,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
           if (suspect_param) {
             *suspect_param = ev->id;
             char alarm_name[384];
-            snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u",
-                     ev->id.host, ev->id.port);
+            suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
             swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
                            alarm_name, suspicion_timer_cb, inst, suspect_param);
           }
@@ -560,8 +564,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
           queue_notification(inst, SWIM_NODE_UP, &ev->id);
           // Cancel suspicion timer
           char alarm_name[384];
-          snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", ev->id.host,
-                   ev->id.port);
+          suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
           swim_timer_cancel(inst->timer, alarm_name);
         }
       }
@@ -645,8 +648,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
                                 inc, 1);
       queue_notification(inst, SWIM_NODE_DOWN, &msg.sender);
       char alarm_name[384];
-      snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", msg.sender.host,
-               msg.sender.port);
+      suspect_key(alarm_name, sizeof(alarm_name), &msg.sender);
       swim_timer_cancel(inst->timer, alarm_name);
     }
     break;
@@ -1015,8 +1017,7 @@ int swim_hint_alive(const char *name, const swim_node_id_t *peer) {
     if (m->status == SWIM_STATUS_SUSPECT) {
       // Cancel suspicion timer
       char alarm_name[384];
-      snprintf(alarm_name, sizeof(alarm_name), "suspect:%s:%u", peer->host,
-               peer->port);
+      suspect_key(alarm_name, sizeof(alarm_name), peer);
       swim_timer_cancel(inst->timer, alarm_name);
 
       // Re-announce as alive
