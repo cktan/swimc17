@@ -3,15 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SWIM_FEED_BUFFER_SIZE 4096
+
 struct swim_feed {
   pthread_mutex_t mutex;
-  char *buf;
-  size_t capacity;
+  char buf[SWIM_FEED_BUFFER_SIZE];
   size_t read_off;  // Start of the first unread record
   size_t write_off; // End of the last written record (first free byte)
 };
-
-#define SWIM_FEED_BUFFER_SIZE 4096
 
 swim_feed_t *swim_feed_create(void) {
   swim_feed_t *feed = malloc(sizeof(*feed));
@@ -26,15 +25,6 @@ swim_feed_t *swim_feed_create(void) {
     return NULL;
   }
 
-  feed->buf = malloc(SWIM_FEED_BUFFER_SIZE);
-  if (!feed->buf) {
-    pthread_mutex_destroy(&feed->mutex);
-    free(feed);
-    swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate internal buffer");
-    return NULL;
-  }
-
-  feed->capacity = SWIM_FEED_BUFFER_SIZE;
   feed->read_off = 0;
   feed->write_off = 0;
 
@@ -46,7 +36,6 @@ void swim_feed_destroy(swim_feed_t *feed) {
     return;
   }
   pthread_mutex_destroy(&feed->mutex);
-  free(feed->buf);
   free(feed);
 }
 
@@ -248,7 +237,7 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
   if (feed->read_off == feed->write_off) {
     feed->read_off = 0;
     feed->write_off = 0;
-  } else if (feed->read_off >= feed->capacity / 2) {
+  } else if (feed->read_off >= SWIM_FEED_BUFFER_SIZE / 2) {
     swim_feed_compact_locked(feed);
   }
 
