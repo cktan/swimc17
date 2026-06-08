@@ -209,14 +209,15 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
     }
   }
 
-  size_t scan_off = feed->read_off + sizeof(int);
+  // Validate the record extent under the lock (no ptrs into buf yet).
+  size_t payload_start = feed->read_off + sizeof(int);
+  size_t scan_off = payload_start;
   int valid = 1;
   for (int i = 0; i < n; i++) {
     if (scan_off >= feed->write_off) {
       valid = 0;
       break;
     }
-    ptrs[i] = feed->buf + scan_off;
     // Scan for NUL terminator within buffer bounds
     char *nul_pos =
         memchr(feed->buf + scan_off, '\0', feed->write_off - scan_off);
@@ -236,17 +237,14 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
                           "Corrupt buffer: incomplete strings for record");
   }
 
-  // Call the callback while holding the lock
-  cb(ctx, n, ptrs);
+  // Copy the payload out so the callback runs WITHOUT feed->mutex held. The
+  // record fits within the fixed buffer, so the stack copy is bounded.
+  size_t payload_len = scan_off - payload_start;
+  char copy[SWIM_FEED_BUFFER_SIZE];
+  memcpy(copy, feed->buf + payload_start, payload_len);
 
-  if (n > 16) {
-    free(ptrs);
-  }
-
-  // Consume the record
+  // Consume the record and compact while still under the lock.
   feed->read_off = scan_off;
-
-  // Automatic GC / compaction
   if (feed->read_off == feed->write_off) {
     feed->read_off = 0;
     feed->write_off = 0;
@@ -255,5 +253,17 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
   }
 
   pthread_mutex_unlock(&feed->mutex);
+
+  // Point into the local copy and invoke the callback with no feed lock held.
+  size_t off = 0;
+  for (int i = 0; i < n; i++) {
+    ptrs[i] = copy + off;
+    off += strlen(copy + off) + 1;
+  }
+  cb(ctx, n, ptrs);
+
+  if (n > 16) {
+    free(ptrs);
+  }
   return 1;
 }

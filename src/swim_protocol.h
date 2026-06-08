@@ -87,7 +87,9 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
 
 /**
- * Read the next event from the feed of the named instance.
+ * Read the next event from the feed of the named instance. `cb` is invoked
+ * with the global instance lock held, so it must not re-enter the swim API for
+ * any instance; it should be cheap and non-blocking.
  *
  * @param name     The name of the instance (mandatory).
  * @param ctx      Opaque context passed back to the callback.

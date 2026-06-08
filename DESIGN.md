@@ -328,46 +328,52 @@ library directly without calling `swim_leave`.
 
 ## 12. Observability
 
-The library emits telemetry through a single per-instance
-**observer** callback that the application registers with
-`swim_observe(name, observer, ctx)` (pass `NULL` to disable).
-There is no logging in the library itself — the observer is the
-only output channel.
+The library emits telemetry through a per-instance **feed**: a
+fixed-size (4 KB) FIFO buffer of records that the protocol thread
+writes and the application drains. There is no logging in the
+library itself — the feed is the only output channel.
 
-### Observer callback
+### Reading the feed
 
 ```
-typedef void (*swim_observer_t)(void *ctx, const char *sexp);
+int swim_get_event(name, ctx, cb);
 ```
 
-The observer is called once for every transition and every
-measurement. `sexp` is a borrowed, NUL-terminated, single-line,
-printable-ASCII s-expression, valid only for the duration of the
-call (copy it to retain). The observer runs on the protocol
-thread, so it must be cheap, non-blocking, and must not re-enter
-the swim API for that instance.
+The application pulls events by calling `swim_get_event`
+repeatedly: it returns `1` and invokes `cb` with the next record,
+`0` when the feed is empty, or `-1` on error. The callback
+signature is:
+
+```
+typedef void (*swim_feed_cb)(void *ctx, int n, const char **strs);
+```
+
+Each record is `n` borrowed, NUL-terminated strings, valid only
+for the duration of the call (copy them to retain). `cb` runs
+with the global instance lock held, so it must be cheap,
+non-blocking, and must not re-enter the swim API for any
+instance.
 
 ### Events
 
 ```
-(node up "host:port[:cookie]")          # a peer became alive
-(node suspect "host:port[:cookie]")     # a peer became suspect
-(node down "host:port[:cookie]")        # a peer was declared dead
-(ping rtt "host:port[:cookie]" <ms>)    # direct probe round-trip
-(cluster size <n>)                      # alive+suspect count, on change
-(message dropped "host:port[:cookie]")  # an outbound message was dropped
+"node"    "up"      "host:port[:cookie]"   # a peer became alive
+"node"    "suspect" "host:port[:cookie]"   # a peer became suspect
+"node"    "down"    "host:port[:cookie]"   # a peer was declared dead
+"ping"    "rtt"     "host:port[:cookie]" "<ms>"  # direct probe round-trip
+"cluster" "size"    "<n>"                  # alive+suspect count, on change
+"warning" "message dropped to host:port[:cookie]"  # outbound drop
 ```
 
 - A node renders as `host:port[:cookie]`, with IPv6 hosts
-  bracketed. Every non-alphanumeric byte of the cookie is
-  escaped as lowercase `\xNN`, so the token is always safe
-  inside an s-expression string.
+  bracketed (via `swim_node_id_format`). The cookie is carried
+  as its own record string, so no escaping is needed.
 - `ping rtt` is reported only for a clean **direct** probe
   round-trip (a direct ack to our ping); indirect/relayed
   resolutions produce no rtt event.
 - `cluster size` is emitted only when the count changes.
-- Telemetry is lossy: observations may be dropped under memory
-  pressure rather than block the protocol.
+- Telemetry is lossy: when the fixed buffer fills, the oldest
+  records are dropped rather than block the protocol.
 
 ---
 
