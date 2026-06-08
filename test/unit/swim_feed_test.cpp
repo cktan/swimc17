@@ -12,19 +12,20 @@ extern "C" {
 #include <thread>
 #include <vector>
 
-struct TestCtx {
-  int expected_n;
-  std::vector<std::string> expected_strs;
-  int call_count;
-};
-
-static void test_cb(void *ctx, int n, const char **strs) {
-  TestCtx *c = (TestCtx *)ctx;
-  c->call_count++;
-  CHECK(n == c->expected_n);
-  for (int i = 0; i < n; i++) {
-    CHECK(std::string(strs[i]) == c->expected_strs[i]);
+// Read one record via the copy-out interface and check it matches `expected`.
+// Returns the swim_feed_get return value (string count, 0 if empty, -1 error).
+static int read_and_check(swim_feed_t *feed,
+                          std::vector<std::string> expected) {
+  char buf[4096];
+  char *ptr[10];
+  int n = swim_feed_get(feed, sizeof(buf), buf, 10, ptr);
+  if (n > 0) {
+    CHECK(n == (int)expected.size());
+    for (int i = 0; i < n && i < (int)expected.size(); i++) {
+      CHECK(std::string(ptr[i]) == expected[i]);
+    }
   }
+  return n;
 }
 
 TEST_CASE("swim_feed: basic put and get") {
@@ -32,24 +33,16 @@ TEST_CASE("swim_feed: basic put and get") {
   REQUIRE(feed != nullptr);
 
   // Initial state: empty read
-  TestCtx ctx = {0, {}, 0};
-  int rc = swim_feed_get(feed, &ctx, test_cb);
-  CHECK(rc == 0);
-  CHECK(ctx.call_count == 0);
+  CHECK(read_and_check(feed, {}) == 0);
 
   // Insert a single record
-  rc = swim_feed_put(feed, 3, "hello", "world", "!");
-  CHECK(rc == 0);
+  CHECK(swim_feed_put(feed, 3, "hello", "world", "!") == 0);
 
   // Read the record
-  ctx = {3, {"hello", "world", "!"}, 0};
-  rc = swim_feed_get(feed, &ctx, test_cb);
-  CHECK(rc == 1);
-  CHECK(ctx.call_count == 1);
+  CHECK(read_and_check(feed, {"hello", "world", "!"}) == 3);
 
   // Read again: should be empty
-  rc = swim_feed_get(feed, &ctx, test_cb);
-  CHECK(rc == 0);
+  CHECK(read_and_check(feed, {}) == 0);
 
   swim_feed_destroy(feed);
 }
@@ -63,25 +56,13 @@ TEST_CASE("swim_feed: multiple put and get (FIFO)") {
   CHECK(swim_feed_put(feed, 2, "second", "part") == 0);
   CHECK(swim_feed_put(feed, 1, "third") == 0);
 
-  // Read first
-  TestCtx ctx1 = {1, {"first"}, 0};
-  CHECK(swim_feed_get(feed, &ctx1, test_cb) == 1);
-  CHECK(ctx1.call_count == 1);
-
-  // Read second
-  TestCtx ctx2 = {2, {"second", "part"}, 0};
-  CHECK(swim_feed_get(feed, &ctx2, test_cb) == 1);
-  CHECK(ctx2.call_count == 1);
-
-  // Read third
-  TestCtx ctx3 = {1, {"third"}, 0};
-  CHECK(swim_feed_get(feed, &ctx3, test_cb) == 1);
-  CHECK(ctx3.call_count == 1);
+  // Read in FIFO order
+  CHECK(read_and_check(feed, {"first"}) == 1);
+  CHECK(read_and_check(feed, {"second", "part"}) == 2);
+  CHECK(read_and_check(feed, {"third"}) == 1);
 
   // Read fourth (empty)
-  TestCtx ctx4 = {0, {}, 0};
-  CHECK(swim_feed_get(feed, &ctx4, test_cb) == 0);
-  CHECK(ctx4.call_count == 0);
+  CHECK(read_and_check(feed, {}) == 0);
 
   swim_feed_destroy(feed);
 }
@@ -90,9 +71,16 @@ TEST_CASE("swim_feed: error handling and input validation") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
+  char buf[4096];
+  char *ptr[10];
+
   // Invalid parameters to swim_feed_put
   swim_errno = SWIM_OK;
   CHECK(swim_feed_put(nullptr, 1, "test") == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_put(feed, 0) == -1);
   CHECK(swim_errno == SWIM_ERR_INVALID);
 
   swim_errno = SWIM_OK;
@@ -104,14 +92,51 @@ TEST_CASE("swim_feed: error handling and input validation") {
   CHECK(swim_errno == SWIM_ERR_INVALID);
 
   // Invalid parameters to swim_feed_get
-  TestCtx ctx = {0, {}, 0};
   swim_errno = SWIM_OK;
-  CHECK(swim_feed_get(nullptr, &ctx, test_cb) == -1);
+  CHECK(swim_feed_get(nullptr, sizeof(buf), buf, 10, ptr) == -1);
   CHECK(swim_errno == SWIM_ERR_INVALID);
 
   swim_errno = SWIM_OK;
-  CHECK(swim_feed_get(feed, &ctx, nullptr) == -1);
+  CHECK(swim_feed_get(feed, sizeof(buf), nullptr, 10, ptr) == -1);
   CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_get(feed, 0, buf, 10, ptr) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_get(feed, sizeof(buf), buf, 10, nullptr) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_get(feed, sizeof(buf), buf, 0, ptr) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  swim_feed_destroy(feed);
+}
+
+TEST_CASE("swim_feed: record that does not fit is left in the feed") {
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
+  CHECK(swim_feed_put(feed, 3, "a", "b", "c") == 0);
+
+  char buf[4096];
+  char *ptr[10];
+
+  // Too few pointers: 3 strings cannot fit in nptr=2. Record is not consumed.
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_get(feed, sizeof(buf), buf, 2, ptr) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  // Too small a buffer: "a\0b\0c\0" is 6 bytes, does not fit in bufsz=3.
+  swim_errno = SWIM_OK;
+  CHECK(swim_feed_get(feed, 3, buf, 10, ptr) == -1);
+  CHECK(swim_errno == SWIM_ERR_INVALID);
+
+  // The record survived both failures and can still be read with room.
+  CHECK(read_and_check(feed, {"a", "b", "c"}) == 3);
+  CHECK(read_and_check(feed, {}) == 0);
 
   swim_feed_destroy(feed);
 }
@@ -137,14 +162,9 @@ TEST_CASE("swim_feed: buffer compaction and auto-draining") {
 
   // Let's verify that the 1st record is gone, and the next readable is the 2nd
   // record.
-  TestCtx ctx2 = {1, {long_str}, 0};
-  CHECK(swim_feed_get(feed, &ctx2, test_cb) == 1);
-
-  TestCtx ctx3 = {1, {long_str}, 0};
-  CHECK(swim_feed_get(feed, &ctx3, test_cb) == 1);
-
-  TestCtx ctx4 = {1, {long_str}, 0};
-  CHECK(swim_feed_get(feed, &ctx4, test_cb) == 1);
+  CHECK(read_and_check(feed, {long_str}) == 1);
+  CHECK(read_and_check(feed, {long_str}) == 1);
+  CHECK(read_and_check(feed, {long_str}) == 1);
 
   swim_feed_destroy(feed);
 }
@@ -183,27 +203,23 @@ static void *writer_thread(void *arg) {
   return nullptr;
 }
 
-static void concurrent_cb(void *ctx, int n, const char **strs) {
-  std::atomic<int> *count = (std::atomic<int> *)ctx;
-  (void)n;
-  if (strcmp(strs[0], "payload") == 0) {
-    count->fetch_add(1);
-  }
-}
-
 static void *reader_thread(void *arg) {
   ThreadArg *ta = (ThreadArg *)arg;
+  char buf[4096];
+  char *ptr[10];
   while (true) {
     int current_read = ta->total_read->load();
     if (current_read >= ta->limit * 4) {
       break;
     }
 
-    int rc = swim_feed_get(ta->feed, ta->total_read, concurrent_cb);
+    int rc = swim_feed_get(ta->feed, sizeof(buf), buf, 10, ptr);
     if (rc == 0) {
       std::this_thread::yield();
     } else if (rc < 0) {
       break;
+    } else if (strcmp(ptr[0], "payload") == 0) {
+      ta->total_read->fetch_add(1);
     }
   }
   return nullptr;
@@ -238,8 +254,7 @@ TEST_CASE("swim_feed: thread safety concurrent put and get") {
   CHECK(total_read.load() == limit_per_thread * 4);
 
   // Empty feed check
-  TestCtx ctx = {0, {}, 0};
-  CHECK(swim_feed_get(feed, &ctx, test_cb) == 0);
+  CHECK(read_and_check(feed, {}) == 0);
 
   swim_feed_destroy(feed);
 }

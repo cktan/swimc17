@@ -11,15 +11,6 @@ extern "C" {
 typedef struct swim_feed swim_feed_t;
 
 /**
- * Callback function signature for reading a record.
- *
- * @param ctx     User context.
- * @param n       Number of strings in the record.
- * @param strs    Array of pointers to the NUL-terminated strings.
- */
-typedef void (*swim_feed_cb)(void *ctx, int n, const char **strs);
-
-/**
  * Create a new swim_feed_t instance.
  *
  * @return A pointer to the newly allocated swim_feed_t, or NULL on error.
@@ -37,22 +28,33 @@ void swim_feed_destroy(swim_feed_t *feed);
  * Insert a record of n NUL-terminated strings into the feed.
  *
  * @param feed The feed instance.
- * @param n    Number of strings to insert.
+ * @param n    Number of strings to insert (must be >= 1).
  * @param ...  n NUL-terminated strings (const char *).
  * @return 0 on success, or -1 on error (sets swim_errno).
  */
 int swim_feed_put(swim_feed_t *feed, int n, ...);
 
 /**
- * Read the next record from the feed and invoke the callback.
+ * Read the next record from the feed, copying its strings out to the caller.
  *
- * @param feed The feed instance.
- * @param ctx  User context passed to the callback.
- * @param cb   Callback function to execute on success.
- * @return 1 if a record was successfully read, 0 if the feed is empty,
- *         or -1 on error (sets swim_errno).
+ * On success the record's NUL-terminated strings are copied contiguously into
+ * `buf`, and `ptr[0..count-1]` are set to point at each string within `buf`.
+ *
+ * `bufsz` should be 4096 (SWIM_FEED_BUFFER_SIZE) and `nptr` should be 10, which
+ * are large enough to hold any record the feed can store.
+ *
+ * @param feed  The feed instance.
+ * @param bufsz Size of `buf` in bytes (should be 4096).
+ * @param buf   Destination buffer for the record's string bytes.
+ * @param nptr  Number of entries in `ptr` (should be 10).
+ * @param ptr   Destination array of string pointers into `buf`.
+ * @return the number of strings copied (>= 1) on success, 0 if the feed is
+ *         empty, or -1 on error (sets swim_errno). If the record does not fit
+ *         within `bufsz` or has more strings than `nptr`, returns -1 and the
+ *         record is left in the feed.
  */
-int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb);
+int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
+                  char **ptr);
 
 #ifdef __cplusplus
 }

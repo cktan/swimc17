@@ -1040,12 +1040,10 @@ int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
   return 0;
 }
 
-int swim_get_event(const char *name, void *ctx, swim_feed_cb cb) {
+int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
+                   char **ptr) {
   if (!name || name[0] == '\0') {
     return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
-  }
-  if (!cb) {
-    return swim_set_error(SWIM_ERR_INVALID, "Callback function is mandatory");
   }
   pthread_mutex_lock(&g_instances_mutex);
   swim_instance_t *inst = find_instance(name);
@@ -1054,7 +1052,7 @@ int swim_get_event(const char *name, void *ctx, swim_feed_cb cb) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
   }
 
-  int rc = swim_feed_get(inst->feed, ctx, cb);
+  int rc = swim_feed_get(inst->feed, bufsz, buf, nptr, ptr);
   pthread_mutex_unlock(&g_instances_mutex);
   return rc;
 }

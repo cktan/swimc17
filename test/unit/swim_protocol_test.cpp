@@ -57,22 +57,20 @@ EventLog get_log_event(size_t idx) {
 std::vector<std::string> g_obs;
 pthread_mutex_t g_obs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void test_feed_cb(void *ctx, int n, const char **strs) {
-  (void)ctx;
-  std::string s;
-  for (int i = 0; i < n; i++) {
-    if (i > 0)
-      s += " ";
-    s += strs[i];
-  }
-  pthread_mutex_lock(&g_obs_mutex);
-  g_obs.push_back(s);
-  pthread_mutex_unlock(&g_obs_mutex);
-}
-
 void poll_feed_events(const char *name) {
-  while (swim_get_event(name, nullptr, test_feed_cb) == 1) {
-    // Keep polling until feed is empty
+  char buf[4096];
+  char *ptr[10];
+  int n;
+  while ((n = swim_get_event(name, sizeof(buf), buf, 10, ptr)) > 0) {
+    std::string s;
+    for (int i = 0; i < n; i++) {
+      if (i > 0)
+        s += " ";
+      s += ptr[i];
+    }
+    pthread_mutex_lock(&g_obs_mutex);
+    g_obs.push_back(s);
+    pthread_mutex_unlock(&g_obs_mutex);
   }
 }
 
@@ -823,7 +821,9 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 
 // L3: registering an observer on a missing instance fails cleanly.
 TEST_CASE("protocol: swim_get_event on unknown instance fails (L3)") {
-  REQUIRE(swim_get_event("no_such_instance", nullptr, test_feed_cb) == -1);
+  char buf[4096];
+  char *ptr[10];
+  REQUIRE(swim_get_event("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
   CHECK(swim_errno == SWIM_ERR_BAD_STATE);
   swim_set_error(SWIM_OK, nullptr);
 }

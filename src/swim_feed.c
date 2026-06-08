@@ -55,9 +55,9 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   if (!feed) {
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
   }
-  if (n < 0) {
+  if (n < 1) {
     return swim_set_error(SWIM_ERR_INVALID,
-                          "String count n must be non-negative");
+                          "String count n must be >= 1");
   }
 
   pthread_mutex_lock(&feed->mutex);
@@ -157,12 +157,16 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   return 0;
 }
 
-int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
+int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
+                  char **ptr) {
   if (!feed) {
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
   }
-  if (!cb) {
-    return swim_set_error(SWIM_ERR_INVALID, "Callback cannot be NULL");
+  if (!buf || bufsz <= 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Output buffer is invalid");
+  }
+  if (!ptr || nptr <= 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Pointer array is invalid");
   }
 
   pthread_mutex_lock(&feed->mutex);
@@ -181,24 +185,13 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
 
   int n;
   memcpy(&n, feed->buf + feed->read_off, sizeof(int));
-  if (n < 0) {
+  if (n < 1) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
-                          "Corrupt buffer: negative string count %d", n);
+                          "Corrupt buffer: invalid string count %d", n);
   }
 
-  // Allocate array of pointers. Use stack for small n, malloc for larger n.
-  const char *small_ptrs[16];
-  const char **ptrs = small_ptrs;
-  if (n > 16) {
-    ptrs = malloc(n * sizeof(char *));
-    if (!ptrs) {
-      pthread_mutex_unlock(&feed->mutex);
-      return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate pointer array");
-    }
-  }
-
-  // Validate the record extent under the lock (no ptrs into buf yet).
+  // Validate the record extent under the lock.
   size_t payload_start = feed->read_off + sizeof(int);
   size_t scan_off = payload_start;
   int valid = 1;
@@ -218,21 +211,30 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
   }
 
   if (!valid) {
-    if (n > 16) {
-      free(ptrs);
-    }
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
                           "Corrupt buffer: incomplete strings for record");
   }
 
-  // Copy the payload out so the callback runs WITHOUT feed->mutex held. The
-  // record fits within the fixed buffer, so the stack copy is bounded.
   size_t payload_len = scan_off - payload_start;
-  char copy[SWIM_FEED_BUFFER_SIZE];
-  memcpy(copy, feed->buf + payload_start, payload_len);
 
-  // Consume the record and compact while still under the lock.
+  // Ensure the record fits the caller's buffers. If not, leave it untouched in
+  // the feed so the caller can retry with larger buffers.
+  if (n > nptr) {
+    pthread_mutex_unlock(&feed->mutex);
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Record has %d strings, exceeds nptr %d", n, nptr);
+  }
+  if (payload_len > (size_t)bufsz) {
+    pthread_mutex_unlock(&feed->mutex);
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "Record size %zu exceeds bufsz %d", payload_len,
+                          bufsz);
+  }
+
+  // Copy the payload out and consume the record while still under the lock.
+  memcpy(buf, feed->buf + payload_start, payload_len);
+
   feed->read_off = scan_off;
   if (feed->read_off == feed->write_off) {
     feed->read_off = 0;
@@ -243,16 +245,12 @@ int swim_feed_get(swim_feed_t *feed, void *ctx, swim_feed_cb cb) {
 
   pthread_mutex_unlock(&feed->mutex);
 
-  // Point into the local copy and invoke the callback with no feed lock held.
+  // Point ptr[] at each string within the caller's buffer.
   size_t off = 0;
   for (int i = 0; i < n; i++) {
-    ptrs[i] = copy + off;
-    off += strlen(copy + off) + 1;
+    ptr[i] = buf + off;
+    off += strlen(buf + off) + 1;
   }
-  cb(ctx, n, ptrs);
 
-  if (n > 16) {
-    free(ptrs);
-  }
-  return 1;
+  return n;
 }

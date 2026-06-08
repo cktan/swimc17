@@ -87,17 +87,23 @@ int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
 int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
 
 /**
- * Read the next event from the feed of the named instance. `cb` is invoked
- * with the global instance lock held, so it must not re-enter the swim API for
- * any instance; it should be cheap and non-blocking.
+ * Read the next event from the feed of the named instance, copying its strings
+ * out to the caller. On success the event's NUL-terminated strings are copied
+ * contiguously into `buf` and `ptr[0..count-1]` point at each string in `buf`.
  *
- * @param name     The name of the instance (mandatory).
- * @param ctx      Opaque context passed back to the callback.
- * @param cb       Callback function to execute on success.
- * @return 1 if an event was successfully read, 0 if the feed is empty,
- *         or -1 on error (sets swim_errno).
+ * `bufsz` should be 4096 and `nptr` should be 10, which are large enough to
+ * hold any event the feed can store.
+ *
+ * @param name  The name of the instance (mandatory).
+ * @param bufsz Size of `buf` in bytes (should be 4096).
+ * @param buf   Destination buffer for the event's string bytes.
+ * @param nptr  Number of entries in `ptr` (should be 10).
+ * @param ptr   Destination array of string pointers into `buf`.
+ * @return the number of strings copied (>= 1) on success, 0 if the feed is
+ *         empty, or -1 on error (sets swim_errno).
  */
-int swim_get_event(const char *name, void *ctx, swim_feed_cb cb);
+int swim_get_event(const char *name, int bufsz, char *buf, int nptr,
+                   char **ptr);
 
 /**
  * Feed out-of-band reachability signal to cancel suspicion and revive a node.
