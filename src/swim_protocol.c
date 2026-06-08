@@ -30,6 +30,9 @@ static uint64_t get_now_ms(void) {
   return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
+// Round n up to the next multiple of 8.
+static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
+
 // Structures for internal protocol use
 typedef struct {
   swim_callback_t cb;
@@ -103,6 +106,7 @@ struct swim_instance_t {
   swim_member_t *shuffle_list;
   int shuffle_count;
   int shuffle_idx;
+  int shuffle_cap; // allocated capacity in elements (a multiple of 8)
 
   pending_probe_t pending_probe;
 
@@ -190,9 +194,23 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
   // Shuffle target selection
   if (inst->shuffle_idx >= inst->shuffle_count) {
-    free(inst->shuffle_list);
-    inst->shuffle_list = malloc(active_count * sizeof(swim_member_t));
-    if (inst->shuffle_list) {
+    // Grow the shuffle list in 8-element buckets so a real reallocation
+    // only happens when the cluster crosses an 8-member boundary.
+    int need = (int)align8((size_t)active_count);
+    if (need > inst->shuffle_cap) {
+      swim_member_t *grown =
+          realloc(inst->shuffle_list, (size_t)need * sizeof(swim_member_t));
+      if (grown) {
+        inst->shuffle_list = grown;
+        inst->shuffle_cap = need;
+      }
+    }
+    // shuffle_cap < active_count only if the realloc above failed (it leaves
+    // the old buffer intact, so nothing leaks). In that case skip probing this
+    // period; the timer re-arms and the next period retries the grow. A missed
+    // probe is harmless for a failure detector, and there is no logging channel
+    // to report it through (see Observability, DESIGN.md S12).
+    if (inst->shuffle_cap >= active_count) {
       inst->shuffle_count = swim_membership_list(
           inst->membership, inst->shuffle_list, active_count, false);
       // Fisher-Yates Shuffle
