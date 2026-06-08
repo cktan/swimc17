@@ -885,9 +885,11 @@ int swim_start(const swim_start_opts_t *opts) {
                           "Invalid start options: self and name are mandatory");
   }
 
+  // Extract self_id
   swim_node_id_t self_id;
-  if (swim_node_id_parse(&self_id, opts->self) != 0)
+  if (swim_node_id_parse(&self_id, opts->self)) {
     return -1;
+  }
 
   pthread_mutex_lock(&g_instances_mutex);
 
@@ -897,7 +899,7 @@ int swim_start(const swim_start_opts_t *opts) {
     return swim_set_error(SWIM_ERR_BAD_STATE, "Instance already exists");
   }
 
-  // Find slot in g_instances
+  // Find a free slot in g_instances
   int slot = -1;
   for (int i = 0; i < 16; i++) {
     if (g_instances[i] == NULL) {
@@ -910,6 +912,7 @@ int swim_start(const swim_start_opts_t *opts) {
     return swim_set_error(SWIM_ERR_FULL, "Maximum active instances exceeded");
   }
 
+  // Allocate an instance
   swim_instance_t *inst = calloc(1, sizeof(*inst));
   if (!inst) {
     pthread_mutex_unlock(&g_instances_mutex);
@@ -959,9 +962,11 @@ int swim_start(const swim_start_opts_t *opts) {
 
   // Parse seeds list
   if (opts->seeds) {
+    // Count how many seeds
     int n = 0;
     while (opts->seeds[n]) n++;
     if (n > 0) {
+      // Alloc array and fill
       inst->seeds = malloc(n * sizeof(swim_node_id_t));
       if (!inst->seeds) {
         swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate seeds array");
