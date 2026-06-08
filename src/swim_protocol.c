@@ -18,8 +18,6 @@
 #include <time.h>
 #include <unistd.h>
 
-// TODO: just have an atomic storing the
-// wallclock ms at start, and keep incrementing it.
 // Helper to get monotonic time in milliseconds
 static uint64_t get_monotonic_time_ms(void) {
   struct timespec ts;
@@ -112,25 +110,28 @@ struct swim_instance_t {
   uint64_t seed_retry_interval_ms;
   uint64_t dead_node_expiry_ms;
 
-  // TODO: need comment
+  // Bootstrap addresses from opts->seed_list; pinged periodically until
+  // at least one responds and the node joins the cluster.
   swim_node_id_t *seeds;
   int seed_count;
 
-  // TODO: need comment here - is this all the known peers?
-  // Round-robin shuffle list
+  // Round-robin probe list: a shuffled snapshot of alive members rebuilt
+  // each time shuffle_idx reaches shuffle_count.
   swim_member_t *shuffle_list;
   int shuffle_count;
   int shuffle_idx;
   int shuffle_cap; // allocated capacity in elements (a multiple of 8)
 
-  // TODO: need comment here .. what is a probe?
+  // The single outstanding liveness probe (direct or indirect) per SWIM round.
   pending_probe_t pending_probe;
 
-  // TODO: need comment here .. what is relay?
+  // In-flight PING-REQ relays: indirect probes sent to helpers when a direct
+  // probe times out. Capped at 32; entries are removed on ACK or timeout.
   relay_probe_t relays[32];
   int relay_count;
 
-  // TODO: need comment here .. what if exceeded 16 sub?
+  // Event subscribers. swim_subscribe returns SWIM_ERR_FULL when all 16 slots
+  // are occupied.
   swim_sub_t subscribers[16];
   int subscriber_count;
 
@@ -271,7 +272,8 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 }
 
 
-// TODO: need comment
+// Fires when a suspected node has not refuted suspicion within
+// suspicion_timeout_ms. Declares it dead and enqueues a gossip event.
 static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   swim_instance_t *inst = (swim_instance_t *)ctx;
   swim_node_id_t *target = (swim_node_id_t *)param;
