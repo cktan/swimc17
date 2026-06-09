@@ -274,3 +274,52 @@ TEST_CASE("swim_feed: thread safety concurrent put and get") {
 
   swim_feed_destroy(feed);
 }
+
+TEST_CASE("swim_feed: wait returns immediately when data already present") {
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
+  CHECK(swim_feed_put(feed, 1, "hello") == 0);
+
+  // Should return 0 without blocking, even though no signal was sent.
+  auto t0 = std::chrono::steady_clock::now();
+  CHECK(swim_feed_wait(feed, 5000) == 0);
+  auto elapsed = std::chrono::steady_clock::now() - t0;
+  CHECK(elapsed < std::chrono::milliseconds(100));
+
+  swim_feed_destroy(feed);
+}
+
+TEST_CASE("swim_feed: wakeall unblocks waiting threads") {
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
+  std::atomic<bool> woke{false};
+  std::thread waiter([&]() {
+    swim_feed_wait(feed, SWIM_WAIT_FOREVER);
+    woke.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  CHECK(!woke.load());
+  swim_feed_wakeall(feed);
+  waiter.join();
+  CHECK(woke.load());
+
+  swim_feed_destroy(feed);
+}
+
+TEST_CASE("swim_feed: SWIM_WAIT_FOREVER wakes on write") {
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
+  std::thread writer([feed]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    swim_feed_put(feed, 1, "wake");
+  });
+
+  CHECK(swim_feed_wait(feed, SWIM_WAIT_FOREVER) == 0);
+  writer.join();
+
+  swim_feed_destroy(feed);
+}

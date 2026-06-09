@@ -1,145 +1,122 @@
-# SWIM Code Review Findings (Since 55c93143)
+# SWIM Code Review Findings (Since 3bebccb1)
 
-This code review analyzes all commits introduced to the SWIM library since commit `55c931431f115cfe869e00646759b50300980baf` up to `1e557ea42f29ac9e1d734f807afe39d958aaea48`.
+This code review analyzes all commits introduced to the SWIM library since commit `3bebccb185bc99d3d6b36f705bc94b61e6a8ec13` (which refactored `swim_feed` into a paged queue) up to `HEAD` (`ec9fd7748a62414e6c5cc454d887f182c6b536b2`).
 
 ## Executive Summary of Changes
-- **Single-Callback Model**: Replaced the dynamic list of up to 16 subscribers (`swim_subscribe` / `swim_unsubscribe`) with a single callback and context registered at startup time in `swim_start_opts_t` (`opts.callback` and `opts.ctx`).
-- **Telemetry Feed (`SWIM_FEED`)**: Added the `SWIM_FEED` event to `swim_event_t`. When new entries are written to the telemetry feed, the background protocol loop notifies the callback with a `SWIM_FEED` event, instructing the subscriber to drain the feed using `swim_read_feed()`.
-- **Simplification**: Removed the internal subscription arrays from `swim_instance_t` and simplified `notify_batch_t`.
-- **Validation**: Added a safety assert inside `swim_gossip_queue_pack` to ensure correctness during entry squeezing.
+
+* **Removal of Callback System**: Replaced the previous single-callback model (`opts.callback` and `opts.ctx` in `swim_start_opts_t`) and the related event types (`swim_event_t`) with a pull-based telemetry system. The global `swim_read_feed()` API has also been removed.
+* **User-Owned Telemetry Feed**: Telemetry is now captured via `swim_feed_t`, whose lifecycle is managed explicitly by the caller using `swim_feed_create()` and `swim_feed_destroy()`. The feed is optionally passed to `swim_start_opts_t` (`opts.feed`), allowing telemetry to be disabled entirely if `NULL`.
+* **Blocking Wait Capability**: Added the `swim_feed_wait(feed, timeout_ms)` function to allow reader threads to block until telemetry is written to the feed or a timeout occurs, avoiding the need for busy-polling.
+* **Simplification of Internals**: Removed the deferred notification queues (`pending_notify_t`, `notify_batch_t`) and dispatch machinery (`take_notifications`, `dispatch_notifications`). The protocol loop now writes directly to the user-supplied feed under `inst->mutex`, eliminating re-entrancy deadlock risks.
+* **Single Header Interface**: Moved the public `swim_feed_t` declarations from `swim_feed.h` into the main public header `swim.h`.
 
 ---
 
 ## Detailed Findings
 
-### 1. [CRITICAL] Race Condition and Use-After-Free (UAF) in `swim_hint_alive`
+### 1. [HIGH] Lost Wakeup / Race Condition in `swim_feed_wait`
 
 #### Description
-In [swim_hint_alive](file:///home/sprite/p/swimc17/src/swim_main.c#L1159-L1206), the code unlocks the instance mutex before dispatching notifications to avoid deadlocks:
-```c
-  notify_batch_t batch;
-  take_notifications(inst, &batch);
-  swim_callback_t cb = inst->callback;
-  void *ctx = inst->ctx;
-  pthread_mutex_unlock(&inst->mutex);
+In [swim_feed_wait](file:///home/sprite/p/swimc17/src/swim_feed.c#L158-L180), the function locks `feed->mutex` and immediately calls `pthread_cond_timedwait` without checking if the feed already contains unread data:
 
-  dispatch_notifications(&batch, cb, ctx, inst->feed);
-```
-However, the pointer `inst->feed` is passed to [dispatch_notifications](file:///home/sprite/p/swimc17/src/swim_main.c#L538-L552), which accesses it without holding `inst->mutex`:
 ```c
-static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
-                                   void *ctx, swim_feed_t *feed) {
-  if (cb) {
-    ...
-    if (!swim_feed_empty(feed))
-      cb(ctx, SWIM_FEED, NULL);
-  }
+int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms) {
+  ...
+  pthread_mutex_lock(&feed->mutex);
+  int rc = pthread_cond_timedwait(&feed->cond, &feed->mutex, &ts);
+  pthread_mutex_unlock(&feed->mutex);
   ...
 }
 ```
-If [swim_leave](file:///home/sprite/p/swimc17/src/swim_main.c#L1037-L1108) is called concurrently on another thread:
-1. `swim_leave` removes the instance from the registry.
-2. It locks `inst->mutex` (blocking until `swim_hint_alive` unlocks it).
-3. Once unlocked, `swim_leave` acquires the lock, performs cleanup, destroys the feed structure (`swim_feed_destroy(inst->feed)`), and frees `inst`.
-4. Meanwhile, `swim_hint_alive` resumes on the first thread and runs `dispatch_notifications(&batch, cb, ctx, inst->feed)`.
-5. Since `inst` and `inst->feed` have been freed and destroyed, calling `swim_feed_empty(feed)` causes a use-after-free (UAF) bug.
+
+This creates a classic **lost wakeup** race condition:
+1. A reader thread drains the feed via `swim_feed_get` and finds it empty.
+2. Before the reader thread calls `swim_feed_wait` and locks the mutex, the protocol worker thread writes a new event to the feed (calling `swim_feed_put`), signals the condition variable `feed->cond`, and unlocks the mutex.
+3. The reader thread then locks the mutex and calls `pthread_cond_timedwait`. Since the signal occurred before the reader began waiting, the signal has no effect. The reader blocks and sleeps for the full `timeout_ms`, despite there being unread data in the queue.
+
+Similarly, if data was written to the feed during initialization before the reader thread started its wait loop, the first call to `swim_feed_wait` will block and delay processing of that initial data until a timeout occurs or a new event is written.
 
 #### Impact
-**High Risk / Critical Severity.** Can cause segment faults, memory corruption, or unpredictable behavior when hints and instance teardowns run concurrently.
+**High Severity / Latency Issue.** Telemetry events will be delayed and sit unprocessed in the queue for up to `timeout_ms` (which is typically `1000` ms in the documentation examples), failing to deliver near-real-time telemetry.
 
 #### Recommendation
-Do not pass or dereference `inst->feed` after unlocking the instance mutex. Instead, check if the feed is empty while still holding the mutex, store the result in a boolean flag `feed_has_data`, and pass that flag to `dispatch_notifications`:
+Check if the feed is empty (under the lock) before calling `pthread_cond_timedwait`. If the feed contains unread data, unlock and return `0` immediately:
 
 ```diff
--static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
--                                   void *ctx, swim_feed_t *feed) {
-+static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
-+                                   void *ctx, bool feed_has_data) {
-   if (cb) {
-     for (int i = 0; i < batch->count; i++) {
-       char node_str[350];
-       swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
-       cb(ctx, batch->items[i].event, node_str);
-     }
--    if (!swim_feed_empty(feed))
-+    if (feed_has_data)
-       cb(ctx, SWIM_FEED, NULL);
+@@ -169,5 +169,10 @@
    }
-   free(batch->items);
-   batch->items = NULL;
-   batch->count = 0;
- }
-```
-
-In `swim_protocol_loop` and `swim_hint_alive`:
-```diff
-       take_notifications(instance, &batch);
-+      bool feed_has_data = !swim_feed_empty(instance->feed);
-       pthread_mutex_unlock(&instance->mutex);
--      dispatch_notifications(&batch, instance->callback, instance->ctx,
--                             instance->feed);
-+      dispatch_notifications(&batch, instance->callback, instance->ctx,
-+                             feed_has_data);
+ 
+   pthread_mutex_lock(&feed->mutex);
++  bool empty = (feed->head == NULL || feed->head->bot == feed->head->top);
++  if (!empty) {
++    pthread_mutex_unlock(&feed->mutex);
++    return 0;
++  }
+   int rc = pthread_cond_timedwait(&feed->cond, &feed->mutex, &ts);
+   pthread_mutex_unlock(&feed->mutex);
 ```
 
 ---
 
-### 2. [LOW] Potential NULL Pointer Dereference in `swim_feed_empty`
+### 2. [MEDIUM] Concurrency / Undefined Behavior Hazard on Teardown
 
 #### Description
-The public library function [swim_feed_empty](file:///home/sprite/p/swimc17/src/swim_feed.c#L285-L290) immediately locks `feed->mutex` without checking if `feed` is NULL:
+If a reader thread is blocked inside `swim_feed_wait()` (which yields `feed->mutex` while waiting on `feed->cond`), and another thread calls `swim_feed_destroy()` concurrently, it will call `pthread_cond_destroy` and `pthread_mutex_destroy` while they are still in use:
+
 ```c
-bool swim_feed_empty(swim_feed_t *feed) {
-  pthread_mutex_lock(&feed->mutex);
-  bool empty = (feed->read_off == feed->write_off);
-  pthread_mutex_unlock(&feed->mutex);
-  return empty;
+void swim_feed_destroy(swim_feed_t *feed) {
+  if (!feed)
+    return;
+  pthread_cond_destroy(&feed->cond);
+  pthread_mutex_destroy(&feed->mutex);
+  ...
 }
 ```
-If a caller accidentally passes a `NULL` feed, this function will segfault.
+
+According to POSIX standards, destroying active mutexes or condition variables upon which threads are currently blocked or referenced results in undefined behavior (often causing segment faults or hangs when the waiting thread wakes up and attempts to re-acquire the destroyed mutex).
 
 #### Impact
-**Low Severity.** Most internal calls are protected by verifying the parent instance, but public APIs should always be robust against `NULL` pointers.
+**Medium Severity.** Potential crashes or deadlocks during application shutdown.
 
 #### Recommendation
-Add a defensive NULL check at the beginning of the function:
+**Integration Guidelines for Users:**
+The user must ensure the reader thread is joined or terminated *before* calling `swim_feed_destroy()`. To do this cleanly:
+1. The reader thread should check a shared atomic shutdown flag before calling `swim_feed_wait`.
+2. To prevent the reader thread from blocking for the full timeout during shutdown, the main thread can wake it up immediately by writing a dummy/sentinel record (e.g. `"shutdown"`) to the feed using `swim_feed_put()` prior to joining the thread.
+
+**Suggested API Improvement:**
+Introduce a `swim_feed_shutdown()` or `swim_feed_close()` API that sets a internal `closed` flag inside `swim_feed_t`, signals the condition variable, and causes all subsequent `swim_feed_wait` and `swim_feed_get` calls to fail or return 0 immediately. This allows the reader loop to exit cleanly and guarantees synchronization primitives are not in use when `swim_feed_destroy` is called.
+
+---
+
+### 3. [LOW] Integer Overflow and `EINVAL` with Large Timeouts in `swim_feed_wait`
+
+#### Description
+In `swim_feed_wait`, the timeout calculation adds `timeout_ms` to `ts.tv_sec` and `ts.tv_nsec` without overflow checks:
+
 ```c
-bool swim_feed_empty(swim_feed_t *feed) {
-  if (!feed) {
-    return true;
+  ts.tv_sec  += (time_t)(timeout_ms / 1000);
+  ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+  if (ts.tv_nsec >= 1000000000L) {
+    ts.tv_sec++;
+    ts.tv_nsec -= 1000000000L;
   }
-  pthread_mutex_lock(&feed->mutex);
-  bool empty = (feed->read_off == feed->write_off);
-  pthread_mutex_unlock(&feed->mutex);
-  return empty;
-}
 ```
 
----
-
-### 3. [MEDIUM] Non-portable VLA Initialization in `swim_gossip_queue_pack`
-
-#### Description
-In [swim_gossip_queue_pack](file:///home/sprite/p/swimc17/src/swim_gossip_queue.c#L178-L235), the code allocates a variable-length array (VLA) `keep` and initializes it via `memset`:
-```c
-  bool keep[queue->count];
-  memset(keep, 1, queue->count);
-```
-Specifying `queue->count` as the byte-size argument to `memset` assumes that `sizeof(bool) == 1`. While this is common on modern systems/compilers, the C standard does not guarantee it. If compiled on an architecture where `sizeof(bool) > 1`, `memset` will leave the majority of the `keep` array uninitialized, causing undefined behavior in the subsequent loop.
+If a caller passes `UINT64_MAX` or a value close to it to represent an infinite wait, `ts.tv_sec` will overflow (either 32-bit or 64-bit depending on the system's `time_t`). An overflowed/negative `tv_sec` or a value in the past causes `pthread_cond_timedwait` to fail immediately with `EINVAL`, making the wait return `-1` with error `SWIM_ERR_INVALID`.
 
 #### Impact
-**Medium Severity / Portability Issue.** Can lead to hard-to-debug failures on non-standard compilers or architectures.
+**Low Severity.** Users cannot perform clean infinite/long waits using large timeout values.
 
 #### Recommendation
-Use `sizeof(keep)` to guarantee that the entire array is initialized regardless of the platform's representation of `bool`:
-```diff
--  memset(keep, 1, queue->count);
-+  memset(keep, 1, sizeof(keep));
-```
-Alternatively, initialize it using a standard loop:
+Add an overflow check, or support a timeout of `0` (or a special constant like `SWIM_WAIT_FOREVER`) to perform a standard, non-timed `pthread_cond_wait`:
+
 ```c
-  for (int i = 0; i < queue->count; i++) {
-    keep[i] = true;
+  if (timeout_ms == SWIM_WAIT_FOREVER) {
+    pthread_mutex_lock(&feed->mutex);
+    int rc = pthread_cond_wait(&feed->cond, &feed->mutex);
+    pthread_mutex_unlock(&feed->mutex);
+    ...
   }
 ```
 
@@ -148,12 +125,14 @@ Alternatively, initialize it using a standard loop:
 ## Architectural & Design Observations
 
 ### Locking Hierarchy Check
-The locking hierarchy is consistent and acyclic:
-1. `g_instances_mutex` (Global Registry Lock) -> `inst->mutex` (Instance Lock) -> `feed->mutex` (Feed Ring Buffer Lock)
-This prevents deadlock scenarios between concurrent `swim_start`, `swim_leave`, `swim_read_feed`, and protocol operations.
+The locking hierarchy remains acyclic and safe:
+$$\text{inst}\rightarrow\text{mutex} \implies \text{feed}\rightarrow\text{mutex}$$
+No library function holding `feed->mutex` ever calls an API that acquires `inst->mutex`. This guarantees there are no deadlock cycles between protocol actions and feed operations.
 
-### Callback Execution Semantics
-Because the callback registered in `swim_start_opts_t` is called directly from the background worker thread, any long-running or blocking user code in the callback will halt the protocol tick loop, potentially resulting in delayed pings/probes and false-suspect node failure detections. 
-The documentation in `DESIGN.md` correctly warns the user about this constraint:
-> "It must be non-blocking; offload heavy work to another thread."
-This documentation warning is sufficient and crucial.
+### Callback Elimination
+Eliminating the callback system is a major architectural improvement:
+1. **No Re-entrancy Deadlocks**: The background protocol thread no longer runs arbitrary user code. Previously, if user callbacks called public SWIM functions, it could easily deadlock the worker thread.
+2. **Decoupled Lifetimes**: Decoupling feed ownership from the `swim_instance_t` lifetime resolves the previous Use-After-Free (UAF) vulnerabilities on instance teardown. The feed remains allocated and safe to read even if the instance is destroyed.
+
+### Copying Semantics
+The design of `swim_feed_get` utilizes copying semantics to copy records from the internal `feed_page_t` structures directly into the user-supplied buffer. This is a very clean memory barrier: the caller does not retain pointers into the feed's internal memory pages, allowing pages to be freed or recycled safely without risking dangling pointers in the calling application.

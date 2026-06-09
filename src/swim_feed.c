@@ -159,17 +159,28 @@ int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms) {
   if (!feed)
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
 
-  struct timespec ts;
-  clock_gettime(CLOCK_REALTIME, &ts);
-  ts.tv_sec  += (time_t)(timeout_ms / 1000);
-  ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
-  if (ts.tv_nsec >= 1000000000L) {
-    ts.tv_sec++;
-    ts.tv_nsec -= 1000000000L;
+  pthread_mutex_lock(&feed->mutex);
+
+  bool has_data = (feed->head != NULL && feed->head->bot != feed->head->top);
+  if (has_data) {
+    pthread_mutex_unlock(&feed->mutex);
+    return 0;
   }
 
-  pthread_mutex_lock(&feed->mutex);
-  int rc = pthread_cond_timedwait(&feed->cond, &feed->mutex, &ts);
+  int rc;
+  if (timeout_ms == SWIM_WAIT_FOREVER) {
+    rc = pthread_cond_wait(&feed->cond, &feed->mutex);
+  } else {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec  += (time_t)(timeout_ms / 1000);
+    ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+      ts.tv_sec++;
+      ts.tv_nsec -= 1000000000L;
+    }
+    rc = pthread_cond_timedwait(&feed->cond, &feed->mutex, &ts);
+  }
   pthread_mutex_unlock(&feed->mutex);
 
   if (rc == ETIMEDOUT)
@@ -270,6 +281,14 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
   }
 
   return n;
+}
+
+void swim_feed_wakeall(swim_feed_t *feed) {
+  if (!feed)
+    return;
+  pthread_mutex_lock(&feed->mutex);
+  pthread_cond_broadcast(&feed->cond);
+  pthread_mutex_unlock(&feed->mutex);
 }
 
 bool swim_feed_empty(swim_feed_t *feed) {

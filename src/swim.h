@@ -19,8 +19,11 @@
 #define SWIM_ERR_BAD_STATE 5
 
 // Feed record limits (enforced at write time)
-#define SWIM_FEED_MAX_RECORD_SIZE 1024 // max string-payload bytes per record
-#define SWIM_FEED_MAX_ELEMENTS    10   // max strings per record
+#define SWIM_FEED_MAX_RECORD_SIZE 1024  // max string-payload bytes per record
+#define SWIM_FEED_MAX_ELEMENTS    10    // max strings per record
+
+// Pass as timeout_ms to swim_feed_wait to block without a deadline.
+#define SWIM_WAIT_FOREVER UINT64_MAX
 
 /**
  * Return the latest thread-local errno
@@ -59,9 +62,25 @@ SWIM_EXTERN swim_feed_t *swim_feed_create(void);
 /**
  * Destroy and free a swim_feed_t instance.
  *
+ * Caller must ensure no threads are blocked in
+ * swim_feed_wait before calling this function. The
+ * typical shutdown sequence is: set a flag, call
+ * swim_feed_wakeall, join reader threads, then call
+ * swim_feed_destroy.
+ *
  * @param feed The feed to destroy.
  */
 SWIM_EXTERN void swim_feed_destroy(swim_feed_t *feed);
+
+/**
+ * Wake all threads currently blocked in swim_feed_wait.
+ * Does not modify the feed contents. Intended for orderly
+ * shutdown: set a flag, call this, then join reader threads
+ * before calling swim_feed_destroy.
+ *
+ * @param feed The feed instance.
+ */
+SWIM_EXTERN void swim_feed_wakeall(swim_feed_t *feed);
 
 /**
  * Insert a record of n NUL-terminated strings into the feed. Fails
@@ -106,14 +125,17 @@ SWIM_EXTERN bool swim_feed_empty(swim_feed_t *feed);
 
 /**
  * Block until the feed is signalled or timeout_ms milliseconds
- * elapse. A return value of 0 means the feed was signalled; it does
- * NOT guarantee a record is present (spurious wakeups are possible
- * and concurrent readers may drain). Always follow with
+ * elapse. Returns 0 immediately if the feed already contains
+ * unread data. A return value of 0 means data may be present;
+ * it does NOT guarantee a record is available (spurious wakeups
+ * or concurrent readers may drain). Always follow with
  * swim_feed_get.
  *
+ * Pass SWIM_WAIT_FOREVER to block without a deadline.
+ *
  * @param feed       The feed instance.
- * @param timeout_ms Maximum time to wait in milliseconds.
- * @return 0 if signalled, 1 on timeout, -1 on error.
+ * @param timeout_ms Maximum wait in ms, or SWIM_WAIT_FOREVER.
+ * @return 0 if signalled or data present, 1 on timeout, -1 on error.
  */
 SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
 
