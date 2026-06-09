@@ -15,12 +15,12 @@ TEST_CASE("codec: ping/ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/my_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_encode_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_decode_message(buf, enc_len, &decoded);
+  int rc = swim_unpack_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_PING);
@@ -35,12 +35,12 @@ TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&peer, "[::1]:9002/target_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_decode_message(buf, enc_len, &decoded);
+  int rc = swim_unpack_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_PING_REQ);
@@ -67,12 +67,12 @@ TEST_CASE("codec: full message roundtrip with events") {
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_DEAD, &id3, 999ULL, 1) == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_encode_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
   memset(&decoded, 0, sizeof(decoded));
-  int rc = swim_decode_message(buf, enc_len, &decoded);
+  int rc = swim_unpack_message(buf, enc_len, &decoded);
   REQUIRE(rc == 0);
 
   CHECK(decoded.type == SWIM_MSG_ACK);
@@ -104,17 +104,17 @@ TEST_CASE("codec: error validation and bounds checking") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001") == 0);
 
   uint8_t buf[256];
-  int enc_len = swim_encode_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   // 1. Buffer too small for decode
   swim_message_t decoded;
-  int rc = swim_decode_message(buf, 5, &decoded);
+  int rc = swim_unpack_message(buf, 5, &decoded);
   CHECK(rc == -1);
 
   // 2. Corrupt message type value
   buf[0] = 99; // invalid type
-  rc = swim_decode_message(buf, enc_len, &decoded);
+  rc = swim_unpack_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
   // Reset type back to normal
@@ -123,7 +123,7 @@ TEST_CASE("codec: error validation and bounds checking") {
   // 3. Corrupt node ID length leading to out-of-bounds
   // Offset of sender host_len is 5
   buf[5] = 250; // host_len 250 (which overflows bounds check)
-  rc = swim_decode_message(buf, enc_len, &decoded);
+  rc = swim_unpack_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
   // Restore clean errno state so other test cases are not affected
@@ -131,7 +131,7 @@ TEST_CASE("codec: error validation and bounds checking") {
 }
 
 
-TEST_CASE("codec: swim_encode_membership") {
+TEST_CASE("codec: swim_pack_membership") {
   swim_member_t member;
   REQUIRE(swim_node_id_parse(&member.id, "127.0.0.1:8001/my_cookie") == 0);
   member.status = SWIM_STATUS_ALIVE;
@@ -139,7 +139,7 @@ TEST_CASE("codec: swim_encode_membership") {
   member.dead_at = 12345; // Should be ignored
 
   uint8_t buf[256];
-  int rc = swim_encode_membership(&member, buf, buf + sizeof(buf));
+  int rc = swim_pack_membership(&member, buf, buf + sizeof(buf));
   REQUIRE(rc == 33);
 
   // Decode/check the fields manually
@@ -156,11 +156,11 @@ TEST_CASE("codec: swim_encode_membership") {
   CHECK(buf[32] == 42);
 
   // Exact-fit encode must succeed (q is one past the end)
-  rc = swim_encode_membership(&member, buf, buf + 33);
+  rc = swim_pack_membership(&member, buf, buf + 33);
   CHECK(rc == 33);
 
   // Overflow check
-  rc = swim_encode_membership(&member, buf, buf + 32);
+  rc = swim_pack_membership(&member, buf, buf + 32);
   CHECK(rc == -1);
 }
 

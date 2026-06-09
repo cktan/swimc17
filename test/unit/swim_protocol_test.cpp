@@ -220,7 +220,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 
   // Construct PING packet from mock
   uint8_t buf[256];
-  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
                                 buf, sizeof(buf));
   REQUIRE(len > 0);
 
@@ -341,7 +341,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
     uint8_t buf[256];
-    int len = swim_encode_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
+    int len = swim_pack_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
                                   nullptr, 0, buf, sizeof(buf));
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
@@ -376,7 +376,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
     int n = swim_udp_recv(target, &src, buf, sizeof(buf));
     if (n > 0) {
       swim_message_t in;
-      if (swim_decode_message(buf, n, &in) == 0 && in.type == SWIM_MSG_PING &&
+      if (swim_unpack_message(buf, n, &in) == 0 && in.type == SWIM_MSG_PING &&
           in.seq == 9999 && swim_node_id_compare(&in.sender, &node_id) == 0) {
         relay_ping_seen = true;
       }
@@ -429,7 +429,7 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20402);
   REQUIRE(mock_udp != nullptr);
   uint8_t buf[256];
-  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
                                 buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
@@ -578,7 +578,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     }
 
     uint8_t send_buf[1024];
-    int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
+    int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
                                   test_q, 1, send_buf, sizeof(send_buf));
     swim_gossip_queue_destroy(test_q);
     REQUIRE(len > 0);
@@ -592,7 +592,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
       int n = swim_udp_recv(mock_udp, &src, recv_buf, sizeof(recv_buf));
       if (n > 0) {
         swim_message_t in;
-        if (swim_decode_message(recv_buf, n, &in) == 0 &&
+        if (swim_unpack_message(recv_buf, n, &in) == 0 &&
             in.type == SWIM_MSG_ACK && in.seq == 100 + p) {
           ack_seen = true;
           // For the last ACK (p == 4), verify the packet sizes and counts.
@@ -633,13 +633,13 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
                                     1) == 0);
 
   uint8_t buf[2048];
-  int bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
+  int bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
                                   swim_membership_count(m), buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
   memset(&msg, 0, sizeof(msg));
-  int rc = swim_decode_message(buf, bytes, &msg);
+  int rc = swim_unpack_message(buf, bytes, &msg);
   REQUIRE(rc == 0);
 
   CHECK(msg.type == SWIM_MSG_PING_REQ);
@@ -652,7 +652,7 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   CHECK(swim_node_id_compare(&msg.gossip[0].id, &gossip_node) == 0);
 
   // Check error handling with buffer too small
-  int err_bytes = swim_encode_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer,
+  int err_bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer,
                                       q, swim_membership_count(m), buf, 10);
   CHECK(err_bytes == -1);
 
@@ -678,13 +678,13 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
 
   uint8_t buf[2048];
   // Pass NULL gossip queue
-  int bytes = swim_encode_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr,
+  int bytes = swim_pack_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr,
                                   nullptr, 0, buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
   memset(&msg, 0, sizeof(msg));
-  int rc = swim_decode_message(buf, bytes, &msg);
+  int rc = swim_unpack_message(buf, bytes, &msg);
   REQUIRE(rc == 0);
 
   CHECK(msg.type == SWIM_MSG_LEAVE);
@@ -722,7 +722,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   REQUIRE(mock_udp != nullptr);
 
   uint8_t buf[256];
-  int len = swim_encode_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
                                 buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);

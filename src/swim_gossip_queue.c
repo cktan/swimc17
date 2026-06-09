@@ -204,7 +204,7 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
       break;
     gossip_entry_t *entry = &queue->entries[i];
 
-    int n = swim_encode_membership(&entry->update, p, q);
+    int n = swim_pack_membership(&entry->update, p, q);
     if (n < 0) {
       // Out of buffer space: stop packing
       break;

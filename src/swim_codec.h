@@ -26,16 +26,16 @@ struct swim_message_t {
 
 struct swim_gossip_queue_t;
 
-SWIM_EXTERN int swim_encode_membership(const swim_member_t *m, uint8_t *p,
+SWIM_EXTERN int swim_pack_membership(const swim_member_t *m, uint8_t *p,
                                        uint8_t *q);
 
-SWIM_EXTERN int swim_encode_message(uint8_t type, const swim_node_id_t *sender,
+SWIM_EXTERN int swim_pack_message(uint8_t type, const swim_node_id_t *sender,
                                     uint32_t seq, const swim_node_id_t *peer,
                                     struct swim_gossip_queue_t *q,
                                     uint32_t active_members, uint8_t *buf,
                                     int bufsz);
 
-SWIM_EXTERN int swim_decode_message(const uint8_t *buf, size_t size,
+SWIM_EXTERN int swim_unpack_message(const uint8_t *buf, size_t size,
                                     swim_message_t *msg);
 
 #endif // SWIM_CODEC_H

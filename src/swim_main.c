@@ -467,7 +467,7 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   swim_gossip_queue_t *q_to_pass =
       (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
-  int len = swim_encode_message(type, sender, seq, peer, q_to_pass,
+  int len = swim_pack_message(type, sender, seq, peer, q_to_pass,
                                 swim_membership_count(inst->membership), buf,
                                 sizeof(buf));
   if (len > 0) {
@@ -615,7 +615,7 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
   if (len <= 0) {
     return -1;
   }
-  return swim_decode_message(buf, len, msg);
+  return swim_unpack_message(buf, len, msg);
 }
 
 // Packet receiver and protocol handler
