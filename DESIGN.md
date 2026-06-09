@@ -391,10 +391,10 @@ library directly without calling `swim_leave`.
 
 ## 12. Observability
 
-The library emits telemetry through a per-instance **feed**: a
-fixed-size (4 KB) FIFO buffer of records that the protocol thread
-writes and the application drains. There is no logging in the
-library itself — the feed is the only output channel.
+The library emits telemetry through a per-instance **feed**:
+a growable FIFO queue of 4 KB pages that the protocol thread
+writes and the application drains. There is no logging in
+the library itself — the feed is the only output channel.
 
 ### Reading the feed
 
@@ -437,8 +437,11 @@ while ((n = swim_read_feed("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
   round-trip (a direct ack to our ping); indirect/relayed
   resolutions produce no rtt event.
 - `cluster size` is emitted only when the count changes.
-- Telemetry is lossy: when the fixed buffer fills, the oldest
-  records are dropped rather than block the protocol.
+- Telemetry is lossless under normal conditions. A new 4 KB
+  page is allocated whenever the tail page is full. Under
+  OOM, the oldest pages are freed to make room; if no pages
+  can be freed (feed empty, malloc still failing), the write
+  returns an error and that record is lost.
 
 ---
 
