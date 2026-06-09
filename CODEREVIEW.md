@@ -1,127 +1,159 @@
-# Code Review: swimc17
+# SWIM Code Review Findings (Since 55c93143)
 
-This document contains a comprehensive code review of the
-`swimc17` library, a C17 implementation of the SWIM gossip
-membership protocol.
+This code review analyzes all commits introduced to the SWIM library since commit `55c931431f115cfe869e00646759b50300980baf` up to `1e557ea42f29ac9e1d734f807afe39d958aaea48`.
 
----
-
-## 1. Architecture & Design
-
-The library is structured as a collection of decoupled,
-cohesive modules:
-- **`swim_main`**: Orchestrates the main protocol loop,
-  manages instances, and coordinates timing.
-- **`swim_membership`**: Maintains the registry of cluster
-  members, sorted by node ID to allow $O(\log N)$ lookup.
-- **`swim_gossip_queue`**: Tracks membership updates to be
-  piggybacked onto outgoing UDP packets.
-- **`swim_timer`**: Implements a passive, delta-list timer
-  driven by logical ticks rather than wall-clock time.
-- **`swim_feed`**: An auto-draining ring buffer for lossy,
-  non-blocking telemetry events.
-- **`swim_udp`**: Handles binding, sending, and receiving
-  non-blocking IPv4 and IPv6 packets.
-- **`swim_codec`**: Handles network-byte-order binary
-  serialization and deserialization.
-
-### Design Highlights
-1. **Logical Timer**: Decoupling the timer from actual
-   system threads and clocks via `swim_timer_tick` makes the
-   protocol engine highly testable and deterministic.
-2. **Decoupled Telemetry**: The lock-free/non-blocking
-   telemetry feed ensures that instrumenting events never
-   blocks the protocol loop.
+## Executive Summary of Changes
+- **Single-Callback Model**: Replaced the dynamic list of up to 16 subscribers (`swim_subscribe` / `swim_unsubscribe`) with a single callback and context registered at startup time in `swim_start_opts_t` (`opts.callback` and `opts.ctx`).
+- **Telemetry Feed (`SWIM_FEED`)**: Added the `SWIM_FEED` event to `swim_event_t`. When new entries are written to the telemetry feed, the background protocol loop notifies the callback with a `SWIM_FEED` event, instructing the subscriber to drain the feed using `swim_read_feed()`.
+- **Simplification**: Removed the internal subscription arrays from `swim_instance_t` and simplified `notify_batch_t`.
+- **Validation**: Added a safety assert inside `swim_gossip_queue_pack` to ensure correctness during entry squeezing.
 
 ---
 
-## 2. Concurrency & Synchronization
+## Detailed Findings
 
-The library runs a background thread per instance. Thread
-synchronization and safety are well-thought-out:
-- The global registry is guarded by `g_instances_mutex`.
-- Individual instances are guarded by `inst->mutex`.
-- Telemetry feeds have an internal `feed->mutex` lock.
+### 1. [CRITICAL] Race Condition and Use-After-Free (UAF) in `swim_hint_alive`
 
-### Deadlock Analysis
-Lock ordering is strictly hierarchical and acyclic:
-1. `g_instances_mutex` -> `inst->mutex`
-2. `g_instances_mutex` -> `feed->mutex` (in `swim_read_feed`)
-3. `inst->mutex` -> `feed->mutex` (in protocol thread)
-
-Because `feed->mutex` is always a leaf lock, and the global
-mutex is never acquired while holding an instance lock, the
-locking model is deadlock-free.
-
-### Teardown Safety
-In `swim_leave`, the instance is first removed from
-`g_instances` under the global lock. The background thread
-is joined (`pthread_join`) before resources are freed.
-Because any concurrent API calls must lookup the instance via
-`g_instances` first, racing threads are serialized safely.
-
----
-
-## 3. Code Quality & Memory Safety
-
-The code follows strict C17 standards and incorporates
-excellent safety patterns:
-- **Safe Allocation**: Resizing functions use temporary
-  pointers for `realloc` results before overwriting existing
-  pointers, preventing memory leaks on failure.
-- **Sanitizers**: AddressSanitizer and
-  UndefinedBehaviorSanitizer are enabled in unit tests,
-  ensuring no memory corruption goes unnoticed.
-- **Thread-Local Errors**: Errors are stored in thread-local
-  diagnostics (`_Thread_local`), ensuring concurrent API
-  calls do not clobber each other's status.
-
----
-
-## 4. Key Findings & Recommendations
-
-### Finding 1: Unchecked `strcpy` in `swim_timer.c`
-In `swim_timer_add`, the alarm key name is copied using
-`strcpy`:
+#### Description
+In [swim_hint_alive](file:///home/sprite/p/swimc17/src/swim_main.c#L1159-L1206), the code unlocks the instance mutex before dispatching notifications to avoid deadlocks:
 ```c
-strcpy(nw->name, name);
+  notify_batch_t batch;
+  take_notifications(inst, &batch);
+  swim_callback_t cb = inst->callback;
+  void *ctx = inst->ctx;
+  pthread_mutex_unlock(&inst->mutex);
+
+  dispatch_notifications(&batch, cb, ctx, inst->feed);
 ```
-- **Risk**: Although an `assert` checks the name length,
-  asserts are compiled out in production (`-DNDEBUG`). A
-  malicious or bugged caller passing a long name could
-  trigger a buffer overflow.
-- **Recommendation**: Use `strncpy` to guarantee bounds
-  safety regardless of compile-time definitions.
-
-### Finding 2: Background Socket Errors are Muted
-In `swim_udp_send` and `swim_udp_recv`, errors set a
-thread-local errno. However:
-- **Risk**: The background thread operates on its own
-  `_Thread_local` variables. Setting `swim_set_error` in the
-  protocol thread has no effect on the user thread's error
-  state, leaving background socket errors completely invisible.
-- **Recommendation**: Capture UDP send/recv failures and
-  write them to the `swim_feed` warning channel so the user
-  application can observe connectivity problems.
-
-### Finding 3: Hard-coded Instance Limit
-The library maintains active instances in a static array:
+However, the pointer `inst->feed` is passed to [dispatch_notifications](file:///home/sprite/p/swimc17/src/swim_main.c#L538-L552), which accesses it without holding `inst->mutex`:
 ```c
-static swim_instance_t *g_instances[16] = {0};
+static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
+                                   void *ctx, swim_feed_t *feed) {
+  if (cb) {
+    ...
+    if (!swim_feed_empty(feed))
+      cb(ctx, SWIM_FEED, NULL);
+  }
+  ...
+}
 ```
-- **Risk**: Applications requiring more than 16 instances in
-  a single process will fail with `SWIM_ERR_FULL`.
-- **Recommendation**: Document this limit clearly in the
-  public API header, or migrate to a dynamically allocated
-  registry.
+If [swim_leave](file:///home/sprite/p/swimc17/src/swim_main.c#L1037-L1108) is called concurrently on another thread:
+1. `swim_leave` removes the instance from the registry.
+2. It locks `inst->mutex` (blocking until `swim_hint_alive` unlocks it).
+3. Once unlocked, `swim_leave` acquires the lock, performs cleanup, destroys the feed structure (`swim_feed_destroy(inst->feed)`), and frees `inst`.
+4. Meanwhile, `swim_hint_alive` resumes on the first thread and runs `dispatch_notifications(&batch, cb, ctx, inst->feed)`.
+5. Since `inst` and `inst->feed` have been freed and destroyed, calling `swim_feed_empty(feed)` causes a use-after-free (UAF) bug.
 
-### Finding 4: Integer Overflow in logical timer
-In `swim_timer.c`:
-```c
-while (*pp && s + (*pp)->tick <= ticks) {
+#### Impact
+**High Risk / Critical Severity.** Can cause segment faults, memory corruption, or unpredictable behavior when hints and instance teardowns run concurrently.
+
+#### Recommendation
+Do not pass or dereference `inst->feed` after unlocking the instance mutex. Instead, check if the feed is empty while still holding the mutex, store the result in a boolean flag `feed_has_data`, and pass that flag to `dispatch_notifications`:
+
+```diff
+-static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
+-                                   void *ctx, swim_feed_t *feed) {
++static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
++                                   void *ctx, bool feed_has_data) {
+   if (cb) {
+     for (int i = 0; i < batch->count; i++) {
+       char node_str[350];
+       swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
+       cb(ctx, batch->items[i].event, node_str);
+     }
+-    if (!swim_feed_empty(feed))
++    if (feed_has_data)
+       cb(ctx, SWIM_FEED, NULL);
+   }
+   free(batch->items);
+   batch->items = NULL;
+   batch->count = 0;
+ }
 ```
-- **Risk**: If a caller passes extremely large ticks, `s`
-  could overflow.
-- **Recommendation**: For safety, cast the addition or
-  perform subtraction bounds-checks. However, this is minor
-  since timing ticks are typically small.
+
+In `swim_protocol_loop` and `swim_hint_alive`:
+```diff
+       take_notifications(instance, &batch);
++      bool feed_has_data = !swim_feed_empty(instance->feed);
+       pthread_mutex_unlock(&instance->mutex);
+-      dispatch_notifications(&batch, instance->callback, instance->ctx,
+-                             instance->feed);
++      dispatch_notifications(&batch, instance->callback, instance->ctx,
++                             feed_has_data);
+```
+
+---
+
+### 2. [LOW] Potential NULL Pointer Dereference in `swim_feed_empty`
+
+#### Description
+The public library function [swim_feed_empty](file:///home/sprite/p/swimc17/src/swim_feed.c#L285-L290) immediately locks `feed->mutex` without checking if `feed` is NULL:
+```c
+bool swim_feed_empty(swim_feed_t *feed) {
+  pthread_mutex_lock(&feed->mutex);
+  bool empty = (feed->read_off == feed->write_off);
+  pthread_mutex_unlock(&feed->mutex);
+  return empty;
+}
+```
+If a caller accidentally passes a `NULL` feed, this function will segfault.
+
+#### Impact
+**Low Severity.** Most internal calls are protected by verifying the parent instance, but public APIs should always be robust against `NULL` pointers.
+
+#### Recommendation
+Add a defensive NULL check at the beginning of the function:
+```c
+bool swim_feed_empty(swim_feed_t *feed) {
+  if (!feed) {
+    return true;
+  }
+  pthread_mutex_lock(&feed->mutex);
+  bool empty = (feed->read_off == feed->write_off);
+  pthread_mutex_unlock(&feed->mutex);
+  return empty;
+}
+```
+
+---
+
+### 3. [MEDIUM] Non-portable VLA Initialization in `swim_gossip_queue_pack`
+
+#### Description
+In [swim_gossip_queue_pack](file:///home/sprite/p/swimc17/src/swim_gossip_queue.c#L178-L235), the code allocates a variable-length array (VLA) `keep` and initializes it via `memset`:
+```c
+  bool keep[queue->count];
+  memset(keep, 1, queue->count);
+```
+Specifying `queue->count` as the byte-size argument to `memset` assumes that `sizeof(bool) == 1`. While this is common on modern systems/compilers, the C standard does not guarantee it. If compiled on an architecture where `sizeof(bool) > 1`, `memset` will leave the majority of the `keep` array uninitialized, causing undefined behavior in the subsequent loop.
+
+#### Impact
+**Medium Severity / Portability Issue.** Can lead to hard-to-debug failures on non-standard compilers or architectures.
+
+#### Recommendation
+Use `sizeof(keep)` to guarantee that the entire array is initialized regardless of the platform's representation of `bool`:
+```diff
+-  memset(keep, 1, queue->count);
++  memset(keep, 1, sizeof(keep));
+```
+Alternatively, initialize it using a standard loop:
+```c
+  for (int i = 0; i < queue->count; i++) {
+    keep[i] = true;
+  }
+```
+
+---
+
+## Architectural & Design Observations
+
+### Locking Hierarchy Check
+The locking hierarchy is consistent and acyclic:
+1. `g_instances_mutex` (Global Registry Lock) -> `inst->mutex` (Instance Lock) -> `feed->mutex` (Feed Ring Buffer Lock)
+This prevents deadlock scenarios between concurrent `swim_start`, `swim_leave`, `swim_read_feed`, and protocol operations.
+
+### Callback Execution Semantics
+Because the callback registered in `swim_start_opts_t` is called directly from the background worker thread, any long-running or blocking user code in the callback will halt the protocol tick loop, potentially resulting in delayed pings/probes and false-suspect node failure detections. 
+The documentation in `DESIGN.md` correctly warns the user about this constraint:
+> "It must be non-blocking; offload heavy work to another thread."
+This documentation warning is sufficient and crucial.
