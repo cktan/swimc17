@@ -215,7 +215,7 @@ Returns `0` on success. On failure, returns `-1` and sets:
 
 Acquires the global registry lock, extracts the instance,
 stops the background loop, increments the incarnation count,
-directly broadcasts a `DEAD` gossip event to up to
+directly broadcasts a `DEAD` gossip update to up to
 `max(⌈N×0.25⌉, 8)` random peers, closes the UDP socket,
 terminates active timers, joins the worker thread, and
 releases memory. Thread-safe.
@@ -328,7 +328,7 @@ Returns `0` on success. On failure, returns `-1` and sets:
 Acquires the instance lock. If the peer is currently in
 `SUSPECT` status, it revives the node to `ALIVE` locally,
 cancels its suspicion timer, enqueues an `alive` gossip
-event, and triggers a `SWIM_NODE_UP` notification. Also
+update, and triggers a `SWIM_NODE_UP` notification. Also
 cancels in-flight probe timeouts to avoid immediate
 re-suspicion. Releases the lock. Thread-safe.
 
