@@ -68,18 +68,23 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   assert(cb);
 
   entry_t *nw;
-  if (t->free_list) {
-    nw = t->free_list;
-    t->free_list = nw->next;
-    memset(nw, 0, sizeof(*nw));
-  } else {
-    nw = calloc(1, sizeof(*nw));
-    if (!nw) {
-      return swim_set_error(SWIM_ERR_NOMEM,
-                            "Failed to allocate entry_t node for alarm '%s'",
-                            name);
+  if (!t->free_list) {
+    for (int i = 0; i < 8; i++) {
+      nw = calloc(1, sizeof(*nw));
+      if (!nw) {
+	return swim_set_error(SWIM_ERR_NOMEM,
+			      "Failed to allocate entry_t node for alarm '%s'",
+			      name);
+      }
+      nw->next = t->free_list;
+      t->free_list = nw;
     }
   }
+  assert(t->free_list);
+  nw = t->free_list;
+  t->free_list = nw->next;
+  memset(nw, 0, sizeof(*nw));
+
   nw->cb = cb;
   nw->ctx = ctx;
   nw->param = param;
