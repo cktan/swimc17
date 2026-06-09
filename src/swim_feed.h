@@ -36,7 +36,7 @@ SWIM_EXTERN int swim_feed_put(swim_feed_t *feed, int n, ...);
  * On success the record's NUL-terminated strings are copied contiguously into
  * `buf`, and `ptr[0..count-1]` are set to point at each string within `buf`.
  *
- * `bufsz` should be 4096 (SWIM_FEED_BUFFER_SIZE) and `nptr` should be 10, which
+ * `bufsz` should be at least SWIM_FEED_MAX_RECORD_SIZE and nptr should be at least SWIM_FEED_MAX_ELEMENTS, which
  * are large enough to hold any record the feed can store.
  *
  * @param feed  The feed instance.
