@@ -536,13 +536,15 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
 // copies), never the originating instance, so it is safe even if that instance
 // is being torn down concurrently. Consumes (frees) the batch.
 static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
-                                   void *ctx) {
+                                   void *ctx, swim_feed_t *feed) {
   if (cb) {
     for (int i = 0; i < batch->count; i++) {
       char node_str[350];
       swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
       cb(ctx, batch->items[i].event, node_str);
     }
+    if (!swim_feed_empty(feed))
+      cb(ctx, SWIM_FEED, NULL);
   }
   free(batch->items);
   batch->items = NULL;
@@ -793,9 +795,8 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       }
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
-      dispatch_notifications(&batch, instance->callback, instance->ctx);
-      if (instance->callback && !swim_feed_empty(instance->feed))
-        instance->callback(instance->ctx, SWIM_FEED, NULL);
+      dispatch_notifications(&batch, instance->callback, instance->ctx,
+                             instance->feed);
       exp += 100;
     }
 
@@ -816,9 +817,8 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       swim_protocol_handle_incoming(instance);
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
-      dispatch_notifications(&batch, instance->callback, instance->ctx);
-      if (instance->callback && !swim_feed_empty(instance->feed))
-        instance->callback(instance->ctx, SWIM_FEED, NULL);
+      dispatch_notifications(&batch, instance->callback, instance->ctx,
+                             instance->feed);
     }
   }
   return NULL;
@@ -1201,6 +1201,6 @@ int swim_hint_alive(const char *name, const char *peer) {
   void *ctx = inst->ctx;
   pthread_mutex_unlock(&inst->mutex);
 
-  dispatch_notifications(&batch, cb, ctx);
+  dispatch_notifications(&batch, cb, ctx, inst->feed);
   return 0;
 }
