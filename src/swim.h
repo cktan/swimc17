@@ -18,6 +18,10 @@
 #define SWIM_ERR_TIMEOUT 4
 #define SWIM_ERR_BAD_STATE 5
 
+// Feed record limits (enforced at write time)
+#define SWIM_FEED_MAX_RECORD_SIZE 1024 // max string-payload bytes per record
+#define SWIM_FEED_MAX_ELEMENTS    10   // max strings per record
+
 /**
  * Return the latest thread-local errno
  *
@@ -164,13 +168,14 @@ SWIM_EXTERN char *swim_peers(const char *name, bool include_dead, int *count);
  * out to the caller. On success the event's NUL-terminated strings are copied
  * contiguously into `buf` and `ptr[0..count-1]` point at each string in `buf`.
  *
- * `bufsz` should be 4096 and `nptr` should be 10, which are large enough to
- * hold any event the feed can store.
+ * `bufsz` should be SWIM_FEED_MAX_RECORD_SIZE and `nptr` should be
+ * SWIM_FEED_MAX_ELEMENTS, which are large enough to hold any record
+ * the feed can store.
  *
  * @param name  The name of the instance (mandatory).
- * @param bufsz Size of `buf` in bytes (should be 4096).
+ * @param bufsz Size of `buf` in bytes (should be SWIM_FEED_MAX_RECORD_SIZE).
  * @param buf   Destination buffer for the event's string bytes.
- * @param nptr  Number of entries in `ptr` (should be 10).
+ * @param nptr  Number of entries in `ptr` (should be SWIM_FEED_MAX_ELEMENTS).
  * @param ptr   Destination array of string pointers into `buf`.
  * @return the number of strings copied (>= 1) on success, 0 if the feed is
  *         empty, or -1 on error (sets swim_errno).

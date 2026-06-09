@@ -81,8 +81,9 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   if (!feed) {
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
   }
-  if (n < 1) {
-    return swim_set_error(SWIM_ERR_INVALID, "String count n must be >= 1");
+  if (n < 1 || n > SWIM_FEED_MAX_ELEMENTS) {
+    return swim_set_error(SWIM_ERR_INVALID,
+                          "String count n must be 1..%d", SWIM_FEED_MAX_ELEMENTS);
   }
 
   pthread_mutex_lock(&feed->mutex);
@@ -102,12 +103,11 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   }
   va_end(args);
 
-  // If the record exceeds the maximum fixed buffer size, it can never fit.
-  if (needed > SWIM_FEED_BUFFER_SIZE) {
+  if (needed - sizeof(int) > SWIM_FEED_MAX_RECORD_SIZE) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
-                          "Record size %zu exceeds buffer capacity %d", needed,
-                          SWIM_FEED_BUFFER_SIZE);
+                          "Record size %zu exceeds limit %d",
+                          needed - sizeof(int), SWIM_FEED_MAX_RECORD_SIZE);
   }
 
   // Auto-draining: discard oldest records if space is insufficient

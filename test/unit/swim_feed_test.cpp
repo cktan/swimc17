@@ -91,6 +91,10 @@ TEST_CASE("swim_feed: error handling and input validation") {
   CHECK(swim_feed_put(feed, 2, "one", nullptr) == -1);
   CHECK(swim_errno() == SWIM_ERR_INVALID);
 
+  swim_set_error(SWIM_OK, NULL);
+  CHECK(swim_feed_put(feed, SWIM_FEED_MAX_ELEMENTS + 1) == -1);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
+
   // Invalid parameters to swim_feed_get
   swim_set_error(SWIM_OK, NULL);
   CHECK(swim_feed_get(nullptr, sizeof(buf), buf, 10, ptr) == -1);
@@ -145,23 +149,20 @@ TEST_CASE("swim_feed: buffer compaction and auto-draining") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  // Construct a long string (approx 1200 bytes)
-  std::string long_str(1200, 'A');
+  // 1000-byte string: payload 1001 bytes, record 1005 bytes (within 1024 limit).
+  // Four records = 4020 bytes (fits in 4096); fifth triggers auto-drain.
+  std::string long_str(1000, 'A');
 
-  // Insert 3 records of long strings (each takes 1200 + sizeof(int) + 1 = 1205
-  // bytes) 3 records will fit: 3 * 1205 = 3615 bytes, which fits in 4096.
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 1
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 2
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 3
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 4
 
-  // Putting a 4th record of 1205 bytes will exceed 4096 (total would be 4820).
-  // This must trigger auto-draining of the oldest records.
-  // Discarding 1st record: remaining is 2 * 1205 = 2410 bytes, + 1205 = 3615
-  // (fits). So the 1st record is discarded automatically.
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0);
+  // 5th record: 4020 + 1005 = 5025 > 4096 — auto-drains record 1.
+  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 5
 
-  // Let's verify that the 1st record is gone, and the next readable is the 2nd
-  // record.
+  // Record 1 was discarded; reads give records 2, 3, 4, 5.
+  CHECK(read_and_check(feed, {long_str}) == 1);
   CHECK(read_and_check(feed, {long_str}) == 1);
   CHECK(read_and_check(feed, {long_str}) == 1);
   CHECK(read_and_check(feed, {long_str}) == 1);
@@ -173,12 +174,11 @@ TEST_CASE("swim_feed: oversized record failure") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  // Construct a string larger than 4KB buffer capacity
-  std::string massive_str(4100, 'B');
+  // String one byte over SWIM_FEED_MAX_RECORD_SIZE — must be rejected.
+  std::string oversized_str(SWIM_FEED_MAX_RECORD_SIZE + 1, 'B');
 
-  // Insert record with massive string - should fail with SWIM_ERR_INVALID
   swim_set_error(SWIM_OK, NULL);
-  CHECK(swim_feed_put(feed, 1, massive_str.c_str()) == -1);
+  CHECK(swim_feed_put(feed, 1, oversized_str.c_str()) == -1);
   CHECK(swim_errno() == SWIM_ERR_INVALID);
 
   swim_feed_destroy(feed);
