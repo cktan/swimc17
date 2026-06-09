@@ -193,7 +193,7 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
   qsort(queue->entries, queue->count, sizeof(gossip_entry_t), compare_entries);
 
   bool keep[queue->count];
-  memset(keep, 1, queue->count);
+  memset(keep, 1, sizeof(keep));
 
   uint32_t limit = get_transmit_limit(cluster_size);
 

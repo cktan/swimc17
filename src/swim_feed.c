@@ -283,6 +283,8 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
 }
 
 bool swim_feed_empty(swim_feed_t *feed) {
+  if (!feed)
+    return true;
   pthread_mutex_lock(&feed->mutex);
   bool empty = (feed->read_off == feed->write_off);
   pthread_mutex_unlock(&feed->mutex);

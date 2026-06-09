@@ -536,14 +536,14 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
 // copies), never the originating instance, so it is safe even if that instance
 // is being torn down concurrently. Consumes (frees) the batch.
 static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
-                                   void *ctx, swim_feed_t *feed) {
+                                   void *ctx, bool feed_has_data) {
   if (cb) {
     for (int i = 0; i < batch->count; i++) {
       char node_str[350];
       swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
       cb(ctx, batch->items[i].event, node_str);
     }
-    if (!swim_feed_empty(feed))
+    if (feed_has_data)
       cb(ctx, SWIM_FEED, NULL);
   }
   free(batch->items);
@@ -794,9 +794,10 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
         swim_feed_put(instance->feed, 3, "cluster", "size", size_str);
       }
       take_notifications(instance, &batch);
+      bool feed_has_data = !swim_feed_empty(instance->feed);
       pthread_mutex_unlock(&instance->mutex);
       dispatch_notifications(&batch, instance->callback, instance->ctx,
-                             instance->feed);
+                             feed_has_data);
       exp += 100;
     }
 
@@ -816,9 +817,10 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       pthread_mutex_lock(&instance->mutex);
       swim_protocol_handle_incoming(instance);
       take_notifications(instance, &batch);
+      bool feed_has_data = !swim_feed_empty(instance->feed);
       pthread_mutex_unlock(&instance->mutex);
       dispatch_notifications(&batch, instance->callback, instance->ctx,
-                             instance->feed);
+                             feed_has_data);
     }
   }
   return NULL;
@@ -1199,8 +1201,9 @@ int swim_hint_alive(const char *name, const char *peer) {
   take_notifications(inst, &batch);
   swim_callback_t cb = inst->callback;
   void *ctx = inst->ctx;
+  bool feed_has_data = !swim_feed_empty(inst->feed);
   pthread_mutex_unlock(&inst->mutex);
 
-  dispatch_notifications(&batch, cb, ctx, inst->feed);
+  dispatch_notifications(&batch, cb, ctx, feed_has_data);
   return 0;
 }
