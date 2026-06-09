@@ -83,25 +83,25 @@ The cookie is optionally specified by the user during node startup or when defin
 ```
 # ping
 {ping, sender :: {host, port, cookie}, seq :: non_neg_integer,
-       events :: [event]}
+       updates :: [update]}
 
 # ack
 {ack, sender :: {host, port, cookie}, seq :: non_neg_integer,
-      events :: [event]}
+      updates :: [update]}
 
 # ping_req (A asks C to ping B)
 {ping_req, sender :: {host, port, cookie}, seq :: non_neg_integer,
-           target :: {host, port, cookie}, events :: [event]}
+           target :: {host, port, cookie}, updates :: [update]}
 
 # forwarded ack (C tells A that B responded)
 {fwd_ack, sender :: {host, port, cookie}, seq :: non_neg_integer,
-          source :: {host, port, cookie}, events :: [event]}
+          source :: {host, port, cookie}, updates :: [update]}
 
 # leave
 {leave, sender :: {host, port, cookie}, seq :: non_neg_integer}
 ```
 
-- **Event shape:**
+- **Update shape:**
 
 ```
 {alive,   {host, port, cookie}, incarnation :: non_neg_integer}
