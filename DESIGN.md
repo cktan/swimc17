@@ -185,7 +185,9 @@ the design choices.
   for the same node arrives, the old event is replaced
   in the queue immediately.
 - **Expiry:** events are dropped from the queue once
-  their transmit count reaches the current multiplier.
+  their transmit count reaches the transmit limit
+  (which is the base limit scaled by the event's
+  own multiplier).
 
 ---
 
@@ -313,7 +315,7 @@ The callback has the signature:
 
 ```c
 void callback(void *ctx, swim_event_t event,
-              const swim_node_id_t *node);
+              const char *node);
 ```
 
 The opaque `ctx` pointer is passed back unchanged on every
@@ -457,7 +459,7 @@ with pure random selection.
   and reorder for protocol correctness tests.
 - **Large-scale Stress tests:** 64-node clusters
   testing staged startup, churn, and network
-  partitions (see `QA.md` for details).
+  partitions.
 - **Property tests:**
   1. Encoding roundtrip: `∀ msg → encode → decode = msg`
   2. State machine: no invalid transitions regardless

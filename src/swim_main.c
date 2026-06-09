@@ -9,13 +9,13 @@
  * Up to 16 named instances are registered in a global
  * array (g_instances) protected by g_instances_mutex.
  * Each instance runs a background thread that calls
- * swim_timer_tick() every protocol_period_ms and processes
+ * swim_timer_tick() every 100 ms and processes
  * incoming UDP packets.
  *
  * Locking: g_instances_mutex is used only to look up (or
  * register/remove) an instance. find_and_lock_instance()
  * acquires inst->mutex while holding g_instances_mutex —
- * preventing a concurrent swim_stop() from removing the
+ * preventing a concurrent swim_leave() from removing the
  * instance between lookup and lock — then immediately
  * releases g_instances_mutex so the global lock is not
  * held during the actual work.

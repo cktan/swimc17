@@ -128,8 +128,9 @@ Status changes are spread by piggybacking events
 
 D1. **Enqueue**: when a node adopts a status change, it
     puts the event in a per-node gossip queue. Fresh
-    `alive` rumors (joins and refutations) get extra
-    transmit slots (`refutation_multiplier`).
+    self-refutation rumors (where the node refutes a false
+    accusation about itself) get extra transmit slots
+    (refutation_multiplier = 2, vs 1 for other updates).
 
 D2. **Supersession**: a newer event for the same node
     (higher incarnation, or more urgent status at the same

@@ -102,7 +102,7 @@ Helper functions are provided to format and parse node IDs:
 
 ```c
 swim_node_id_t id;
-swim_node_id_parse(&id, "10.0.0.7:7771:c1");
+swim_node_id_parse(&id, "10.0.0.7:7771/c1");
 
 char buf[384];
 swim_node_id_format(&id, buf, sizeof(buf));
@@ -264,7 +264,7 @@ pointer passed back to the callback.
 
 The callback prototype is defined as:
 ```c
-typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const swim_node_id_t *node);
+typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const char *node);
 ```
 Where `event` is:
 - `SWIM_NODE_UP`: A new node has joined or suspect node revived.
@@ -310,15 +310,15 @@ subscriber, and updates the count. Thread-safe.
 ### `swim_hint_alive`
 
 ```c
-int swim_hint_alive(const char *name, const swim_node_id_t *peer);
+int swim_hint_alive(const char *name, const char *peer);
 ```
 
 Feeds an out-of-band reachability signal into the failure
 detector to cancel suspicion and revive a node.
 
 The `name` argument specifies the instance. It must be
-non-NULL and non-empty. `peer` is a pointer to the
-`swim_node_id_t` identifying the target peer node.
+non-NULL and non-empty. `peer` is a string identifying the
+target peer node.
 
 Returns `0` on success. On failure, returns `-1` and sets:
 - `SWIM_ERR_INVALID`: `name` is NULL or empty, or `peer` is
@@ -449,8 +449,10 @@ swim_start_opts_t opts_b = { .self = "10.0.0.1:7772", .name = "cluster_b" };
 swim_start(&opts_a);
 swim_start(&opts_b);
 
-swim_node_id_t members[32];
-swim_peers("cluster_a", members, 32, false);
+int count;
+char *p = swim_peers("cluster_a", false, &count);
+// iterate or use p...
+free(p);
 ```
 
 ---
