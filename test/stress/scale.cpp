@@ -12,14 +12,20 @@ extern "C" {
 #include <cstring>
 #include <unistd.h>
 #include <vector>
-#include <string>
+#include <thread>
+#include <chrono>
+
+// Global observation storage for test scaffolding
+static std::vector<std::string> g_observations;
 
 // Helper utilities (shared across tests)
 static void clear_obs() {
-  // TODO: implement observation clearing if needed
+  g_observations.clear();
 }
 static bool obs_contains(const char *needle) {
-  // TODO: implement observation check if needed
+  for (const auto &obs : g_observations) {
+    if (obs.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 
@@ -27,22 +33,130 @@ static bool obs_contains(const char *needle) {
 // 1. 64-node network: staged startup, failure detection, and pause/unpause
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
-  // TODO: Implement the full 64-node scenario using swim_start, swim_leave,
-  // swim_hint_alive, etc. This is a scaffold – replace with actual logic.
-  // Steps (as described in scale_test_cases.md):
-  // 1. Start seed node (node_1).
-  // 2. Spawn odd-indexed nodes (1,3,…,63) without seeds.
-  // 3. Verify convergence of odd nodes.
-  // 4. Spawn even-indexed nodes with seed.
-  // 5. Verify convergence of all 64 nodes.
-  // 6. Subscribe collector processes (optional – feed API).
-  // 7. Kill node_7 and assert death detection.
-  // 8. Verify node_down event.
-  // 9. Pause node_14 (packet_loss=1.0) and assert dead.
-  // 10. Unpause node_14 (packet_loss=0.0) and confirm rejoins.
-  // 11. Graceful leave of node_14 and assert death detection.
-  REQUIRE(true); // placeholder
+  clear_obs();
+
+  // 1. Seed node (node_1)
+  const char *seed_name = "node_1";
+  swim_start_opts_t seed_opts = swim_opts_for(64, 15000);
+  seed_opts.self = "127.0.0.1:5001/seed_cookie";
+  seed_opts.name = seed_name;
+  seed_opts.seeds = nullptr; // no seeds for seed node
+  REQUIRE(swim_start(&seed_opts) == 0);
+
+  // 2. Spawn odd‑indexed nodes (1,3,…,63) without explicit seeds
+  std::vector<std::string> odd_names;
+  for (int i = 1; i <= 63; i += 2) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = swim_opts_for(64, 15000);
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = nullptr; // start without explicit seed
+    REQUIRE(swim_start(&opts) == 0);
+    odd_names.push_back(name);
+  }
+
+  // 3. Verify convergence of odd nodes (should see 31 peers + seed => 32 total)
+  for (const auto &nm : odd_names) {
+    int cnt = 0;
+    char *peers = swim_peers(nm.c_str(), false, &cnt);
+    REQUIRE(peers != nullptr);
+    // odd nodes + seed = 32 total nodes, each sees 31 others
+    REQUIRE(cnt == 31);
+    free(peers);
+  }
+
+  // 4. Spawn even‑indexed nodes (2,4,…,64) with the seed
+  std::vector<std::string> even_names;
+  for (int i = 2; i <= 64; i += 2) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = swim_opts_for(64, 15000);
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    const char *seeds[] = {"127.0.0.1:5001/seed_cookie", nullptr};
+    opts.seeds = seeds;
+    REQUIRE(swim_start(&opts) == 0);
+    even_names.push_back(name);
+  }
+
+  // 5. Verify convergence of the full 64‑node cluster
+  for (int i = 1; i <= 64; ++i) {
+    std::string name = "node_" + std::to_string(i);
+    int cnt = 0;
+    char *peers = swim_peers(name.c_str(), false, &cnt);
+    REQUIRE(peers != nullptr);
+    // full cluster size is 64 → each node sees 63 others
+    REQUIRE(cnt == 63);
+    free(peers);
+  }
+
+  // 6. Subscribe a collector process via telemetry feed (attach to seed)
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+  // Re‑start seed with feed attached
+  swim_leave(seed_name);
+  seed_opts.feed = feed;
+  REQUIRE(swim_start(&seed_opts) == 0);
+
+  // Helper to drain the feed into g_observations
+  auto drain_feed = [&]() {
+    char buf[SWIM_FEED_MAX_RECORD_SIZE];
+    const char *ptr[SWIM_FEED_MAX_ELEMENTS];
+    while (!swim_feed_empty(feed)) {
+      int n = swim_feed_get(feed, sizeof(buf), buf, SWIM_FEED_MAX_ELEMENTS, (char **)ptr);
+      if (n > 0) {
+        std::string record(ptr[0], strlen(ptr[0]));
+        for (int i = 1; i < n; ++i) record += " | " + std::string(ptr[i], strlen(ptr[i]));
+        g_observations.push_back(record);
+      }
+    }
+  };
+
+  // 7. Kill node_7 and assert death detection
+  REQUIRE(swim_leave("node_7") == 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  drain_feed();
+  CHECK(obs_contains(":node_down"));
+  CHECK(obs_contains("node_7"));
+
+  // 8. Pause node_14 (packet loss = 1.0) and assert it is marked dead
+  extern int swim_set_packet_loss(const char *name, double loss);
+  REQUIRE(swim_set_packet_loss("node_14", 1.0) == 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  drain_feed();
+  CHECK(obs_contains(":node_down"));
+  CHECK(obs_contains("node_14"));
+
+  // 9. Unpause node_14 (packet loss = 0.0) and confirm it rejoins
+  REQUIRE(swim_set_packet_loss("node_14", 0.0) == 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  // Verify full convergence again
+  for (int i = 1; i <= 64; ++i) {
+    if (i == 14) continue; // skip the node itself during check
+    std::string name = "node_" + std::to_string(i);
+    int cnt = 0;
+    char *peers = swim_peers(name.c_str(), false, &cnt);
+    REQUIRE(peers != nullptr);
+    REQUIRE(cnt == 63);
+    free(peers);
+  }
+
+  // 10. Graceful leave of node_14 and assert death detection again
+  REQUIRE(swim_leave("node_14") == 0);
+  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  drain_feed();
+  CHECK(obs_contains(":node_down"));
+  CHECK(obs_contains("node_14"));
+
+  // Clean up remaining nodes
+  for (int i = 1; i <= 64; ++i) {
+    std::string name = "node_" + std::to_string(i);
+    swim_leave(name.c_str());
+  }
+  swim_feed_destroy(feed);
 }
+
 
 // ---------------------------------------------------------------------------
 // 2. 64-node network: partition and heal
