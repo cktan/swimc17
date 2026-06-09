@@ -19,51 +19,15 @@ extern "C" {
 
 namespace {
 
-struct EventLog {
-  swim_event_t event;
-  std::string node;
-};
-
-std::vector<EventLog> g_events;
-pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void test_callback(void *ctx, swim_event_t event, const char *node) {
-  (void)ctx;
-  if (event == SWIM_FEED) return;
-  pthread_mutex_lock(&g_log_mutex);
-  g_events.push_back({event, node});
-  pthread_mutex_unlock(&g_log_mutex);
-}
-
-void clear_log() {
-  pthread_mutex_lock(&g_log_mutex);
-  g_events.clear();
-  pthread_mutex_unlock(&g_log_mutex);
-}
-
-size_t get_log_size() {
-  pthread_mutex_lock(&g_log_mutex);
-  size_t sz = g_events.size();
-  pthread_mutex_unlock(&g_log_mutex);
-  return sz;
-}
-
-EventLog get_log_event(size_t idx) {
-  pthread_mutex_lock(&g_log_mutex);
-  EventLog ev = g_events[idx];
-  pthread_mutex_unlock(&g_log_mutex);
-  return ev;
-}
-
-// --- Telemetry Feed capture helpers ---
+// --- Telemetry feed capture helpers ---
 std::vector<std::string> g_obs;
 pthread_mutex_t g_obs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void poll_feed_events(const char *name) {
+void poll_feed_events(swim_feed_t *feed) {
   char buf[4096];
   char *ptr[10];
   int n;
-  while ((n = swim_read_feed(name, sizeof(buf), buf, 10, ptr)) > 0) {
+  while ((n = swim_feed_get(feed, sizeof(buf), buf, 10, ptr)) > 0) {
     std::string s;
     for (int i = 0; i < n; i++) {
       if (i > 0)
@@ -102,15 +66,9 @@ size_t obs_size() {
   return sz;
 }
 
-// --- SWIM_FEED callback helpers ---
-std::atomic<bool> g_feed_fired{false};
-std::vector<std::string> g_feed_records;
-pthread_mutex_t g_feed_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 } // namespace
 
 TEST_CASE("protocol: single node startup and leave") {
-  clear_log();
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
   opts.self = "127.0.0.1:20001";
@@ -131,8 +89,6 @@ TEST_CASE("protocol: single node startup and leave") {
 }
 
 TEST_CASE("protocol: multi-node auto-discovery") {
-  clear_log();
-
   // Node 1 setup (seed: Node 2)
   const char *seeds1[] = { "127.0.0.1:20102/c2", nullptr };
   swim_start_opts_t opts1;
@@ -193,13 +149,16 @@ TEST_CASE("protocol: multi-node auto-discovery") {
 }
 
 TEST_CASE("protocol: failure detection and liveness hint") {
-  clear_log();
+  clear_obs();
 
   swim_node_id_t self_id;
   REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20201/c1") == 0);
 
   swim_node_id_t mock_id;
   REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20202/mock") == 0);
+
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -208,7 +167,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   opts.protocol_period_ms = 400;
   opts.ping_timeout_ms = 100;
   opts.suspicion_timeout_ms = 600;
-  opts.callback = test_callback;
+  opts.feed = feed;
 
   REQUIRE(swim_start(&opts) == 0);
 
@@ -236,13 +195,9 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   CHECK(swim_node_id_compare(&members[0].id, &mock_id) == 0);
   CHECK(members[0].status == SWIM_STATUS_ALIVE);
 
-  // Verify subscription event
-  REQUIRE(get_log_size() >= 1);
-  {
-    EventLog ev = get_log_event(0);
-    CHECK(ev.event == SWIM_NODE_UP);
-    CHECK(ev.node == "127.0.0.1:20202/mock");
-  }
+  // Verify feed event
+  poll_feed_events(feed);
+  CHECK(obs_contains("node up 127.0.0.1:20202/mock"));
 
   // Now silently crash the mock node by closing its UDP socket
   swim_udp_destroy(mock_udp);
@@ -250,8 +205,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   // Wait for failure detector to execute:
   // - Direct probe will fail (ping_timeout = 100ms)
   // - Indirect probe will fail (ping_timeout = 100ms)
-  // - Node will declare SUSPECT and log event (400ms protocol period + timeouts
-  // ~ 600ms)
+  // - Node will declare SUSPECT (400ms protocol period + timeouts ~ 600ms)
   usleep(700000);
 
   // Verify node is SUSPECT
@@ -259,17 +213,8 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_SUSPECT);
 
-  // Verify SUSPECT subscription event
-  bool suspect_found = false;
-  size_t log_sz = get_log_size();
-  for (size_t i = 0; i < log_sz; i++) {
-    EventLog ev = get_log_event(i);
-    if (ev.event == SWIM_NODE_SUSPECT) {
-      suspect_found = true;
-      CHECK(ev.node == "127.0.0.1:20202/mock");
-    }
-  }
-  CHECK(suspect_found);
+  poll_feed_events(feed);
+  CHECK(obs_contains("node suspect 127.0.0.1:20202/mock"));
 
   // Provide a liveness hint to revive the suspected node
   rc = swim_hint_alive("failure_node", "127.0.0.1:20202/mock");
@@ -280,10 +225,11 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_ALIVE);
 
+  poll_feed_events(feed);
+  // hint_alive emits another node-up
+  CHECK(obs_contains("node up 127.0.0.1:20202/mock"));
+
   // Now wait long enough without hints to let it time out and die
-  // - Direct/indirect timeouts will trigger again.
-  // - SUSPECT transition will happen.
-  // - After suspicion_timeout (600ms) -> DEAD transition.
   usleep(1500000);
 
   // Verify it is DEAD (not in active list since include_dead = false)
@@ -295,19 +241,11 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_DEAD);
 
-  // Verify DOWN subscription event
-  bool down_found = false;
-  log_sz = get_log_size();
-  for (size_t i = 0; i < log_sz; i++) {
-    EventLog ev = get_log_event(i);
-    if (ev.event == SWIM_NODE_DOWN) {
-      down_found = true;
-      CHECK(ev.node == "127.0.0.1:20202/mock");
-    }
-  }
-  CHECK(down_found);
+  poll_feed_events(feed);
+  CHECK(obs_contains("node down 127.0.0.1:20202/mock"));
 
   swim_leave("failure_node");
+  swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
 
@@ -316,8 +254,6 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 // stops relaying. We flood the node with 32 ping_reqs for dead targets, let
 // them expire, then verify a fresh ping_req still produces a relay ping.
 TEST_CASE("protocol: relay table does not permanently fill") {
-  clear_log();
-
   swim_node_id_t node_id, requester_id, target_id;
   REQUIRE(swim_node_id_parse(&node_id, "127.0.0.1:20301/c1") == 0);
   REQUIRE(swim_node_id_parse(&requester_id, "127.0.0.1:20302/r") == 0);
@@ -390,57 +326,6 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   swim_set_error(SWIM_OK, nullptr);
 }
 
-// Regression for H3: a subscriber callback must be able to re-enter the public
-// API. Callbacks fire after the instance lock is released, so a callback that
-// calls swim_peers() succeeds; before the fix this self-deadlocked the worker
-// thread (and would hang the whole suite here).
-static std::atomic<bool> g_reentrant_ok{false};
-static void reentrant_members_cb(void *ctx, swim_event_t event,
-                                 const char *node) {
-  (void)ctx;
-  (void)event;
-  (void)node;
-  int n;
-  char *p = swim_peers("h3_reentrant", true, &n);
-  free(p);
-  (void)n;
-  g_reentrant_ok = true;
-}
-
-TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
-  swim_node_id_t self_id, mock_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20401/c1") == 0);
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20402/mock") == 0);
-
-  swim_start_opts_t opts;
-  memset(&opts, 0, sizeof(opts));
-  opts.self = "127.0.0.1:20401/c1";
-  opts.name = "h3_reentrant";
-  opts.protocol_period_ms = 400;
-  opts.ping_timeout_ms = 100;
-  opts.callback = reentrant_members_cb;
-
-  g_reentrant_ok = false;
-  REQUIRE(swim_start(&opts) == 0);
-
-  // A raw PING from a mock makes the node discover it -> NODE_UP -> callback.
-  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20402);
-  REQUIRE(mock_udp != nullptr);
-  uint8_t buf[256];
-  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                                buf, sizeof(buf));
-  REQUIRE(len > 0);
-  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
-
-  usleep(200000); // if the callback deadlocked, the worker would be stuck here
-
-  CHECK(g_reentrant_ok == true);
-
-  swim_udp_destroy(mock_udp);
-  swim_leave("h3_reentrant");
-  swim_set_error(SWIM_OK, nullptr);
-}
-
 // Regression for H3 lifetime: swim_hint_alive must not touch the instance after
 // releasing its locks, so it can race swim_leave (which frees the instance)
 // without a use-after-free. Hammer hint_alive from several threads while the
@@ -457,11 +342,6 @@ static void *hint_spammer(void *a) {
   }
   return nullptr;
 }
-static void noop_cb(void *ctx, swim_event_t e, const char *n) {
-  (void)ctx;
-  (void)e;
-  (void)n;
-}
 
 TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
           "(H3)") {
@@ -471,7 +351,6 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
   opts.name = "h3_race";
   opts.protocol_period_ms = 100;
   opts.ping_timeout_ms = 50;
-  opts.callback = noop_cb;
 
   REQUIRE(swim_start(&opts) == 0);
 
@@ -694,8 +573,7 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   swim_gossip_queue_destroy(q);
 }
 
-// L3: the observer receives membership transitions and the cluster-size gauge
-// as s-expressions, and a cookie's non-alphanumeric bytes are escaped as \xNN.
+// L3: the observer receives membership transitions and the cluster-size gauge.
 TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping "
           "(L3)") {
   clear_obs();
@@ -708,11 +586,15 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502") == 0);
   strcpy(mock_id.cookie, "a b!");
 
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
   opts.self = "127.0.0.1:20501/c1";
   opts.name = "obs_node";
   opts.protocol_period_ms = 200;
+  opts.feed = feed;
 
   REQUIRE(swim_start(&opts) == 0);
 
@@ -728,7 +610,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   usleep(400000); // packet processing + a few ticks for the cluster-size emit
 
   // node up transition, with the cookie unescaped
-  poll_feed_events("obs_node");
+  poll_feed_events(feed);
   CHECK(obs_contains("node up 127.0.0.1:20502/a b!"));
   // cluster-size gauge moved from 0 to 1.
   CHECK(obs_contains("cluster size 1"));
@@ -736,16 +618,20 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   clear_obs();
   swim_udp_destroy(mock_udp);
   usleep(300000);
-  poll_feed_events("obs_node");
+  poll_feed_events(feed);
   CHECK(obs_size() == 0);
 
   swim_leave("obs_node");
+  swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
 
 // L3: a clean direct probe round-trip produces a ping rtt feed event.
 TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   clear_obs();
+
+  swim_feed_t *feed_a = swim_feed_create();
+  REQUIRE(feed_a != nullptr);
 
   const char *seedsA[] = { "127.0.0.1:20512/b1", nullptr };
   swim_start_opts_t a;
@@ -756,6 +642,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   a.protocol_period_ms = 200;
   a.ping_timeout_ms = 100;
   a.seed_retry_interval_ms = 200;
+  a.feed = feed_a;
 
   const char *seedsB[] = { "127.0.0.1:20511/a1", nullptr };
   swim_start_opts_t b;
@@ -773,61 +660,33 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   // Let the nodes discover each other and run several probe cycles, so A sends
   // a direct ping to B and B acks it.
   usleep(1200000);
-  poll_feed_events("rtt_a");
+  poll_feed_events(feed_a);
 
   CHECK(obs_contains("ping rtt 127.0.0.1:20512"));
 
   CHECK(swim_leave("rtt_a") == 0);
   CHECK(swim_leave("rtt_b") == 0);
+  swim_feed_destroy(feed_a);
   swim_set_error(SWIM_OK, nullptr);
 }
 
-// L3: registering an observer on a missing instance fails cleanly.
-TEST_CASE("protocol: swim_read_feed on unknown instance fails (L3)") {
-  char buf[4096];
-  char *ptr[10];
-  REQUIRE(swim_read_feed("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
-  CHECK(swim_errno() == SWIM_ERR_BAD_STATE);
-  swim_set_error(SWIM_OK, nullptr);
-}
-
-static void feed_event_cb(void *ctx, swim_event_t event, const char *node) {
-  (void)node;
-  if (event != SWIM_FEED) return;
-  const char *name = (const char *)ctx;
-  char buf[4096];
-  char *ptr[10];
-  int n;
-  while ((n = swim_read_feed(name, sizeof(buf), buf, 10, ptr)) > 0) {
-    std::string s;
-    for (int i = 0; i < n; i++) {
-      if (i > 0) s += " ";
-      s += ptr[i];
-    }
-    pthread_mutex_lock(&g_feed_mutex);
-    g_feed_records.push_back(s);
-    pthread_mutex_unlock(&g_feed_mutex);
-  }
-  g_feed_fired = true;
-}
-
-TEST_CASE("protocol: SWIM_FEED fires via callback and drains feed") {
-  g_feed_fired = false;
-  pthread_mutex_lock(&g_feed_mutex);
-  g_feed_records.clear();
-  pthread_mutex_unlock(&g_feed_mutex);
+// L3: a feed delivers a node-up event when a mock node joins.
+TEST_CASE("protocol: feed delivers node-up event (L3)") {
+  clear_obs();
 
   swim_node_id_t self_id, mock_id;
   REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20601/c1") == 0);
   REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20602/mock") == 0);
 
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
   opts.self = "127.0.0.1:20601/c1";
-  opts.name = "feed_cb_test";
+  opts.name = "feed_test";
   opts.protocol_period_ms = 200;
-  opts.callback = feed_event_cb;
-  opts.ctx = (void *)"feed_cb_test";
+  opts.feed = feed;
 
   REQUIRE(swim_start(&opts) == 0);
 
@@ -842,15 +701,11 @@ TEST_CASE("protocol: SWIM_FEED fires via callback and drains feed") {
 
   usleep(300000);
 
-  CHECK(g_feed_fired.load());
-  pthread_mutex_lock(&g_feed_mutex);
-  bool found = false;
-  for (const auto &s : g_feed_records)
-    if (s.find("node up") != std::string::npos) { found = true; break; }
-  pthread_mutex_unlock(&g_feed_mutex);
-  CHECK(found);
+  poll_feed_events(feed);
+  CHECK(obs_contains("node up 127.0.0.1:20602/mock"));
 
   swim_udp_destroy(mock_udp);
-  swim_leave("feed_cb_test");
+  swim_leave("feed_test");
+  swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }

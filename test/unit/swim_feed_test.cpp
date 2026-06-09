@@ -1,7 +1,7 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_feed.h"
+#include "swim.h"
 #include "swim_errno.h"
 }
 

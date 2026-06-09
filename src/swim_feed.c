@@ -2,7 +2,7 @@
  * swim_feed.c — Paged telemetry queue.
  *
  * Stores multi-string records (e.g. "node up", "127.0.0.1:8000")
- * across a chain of 4 KB pages for consumption by swim_read_feed().
+ * across a chain of 4 KB pages for consumption by swim_feed_get().
  * Records are encoded as [int n][str0\0][str1\0]...[strN-1\0].
  *
  * Records never span pages. A record that does not fit at the end of
@@ -22,12 +22,15 @@
  * On get, the record is not consumed if it exceeds the caller's
  * bufsz or nptr; the caller must retry with a larger buffer.
  */
-#include "swim_feed.h"
+#include "swim.h"
 #include "swim_errno.h"
+#include <errno.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define SWIM_FEED_PAGE_SIZE 4096
 
@@ -40,6 +43,7 @@ typedef struct feed_page {
 
 struct swim_feed {
   pthread_mutex_t mutex;
+  pthread_cond_t cond;
   feed_page_t *head; // oldest page (read from here)
   feed_page_t *tail; // newest page (write to here)
 };
@@ -55,6 +59,12 @@ swim_feed_t *swim_feed_create(void) {
     swim_set_error(SWIM_ERR_NOMEM, "Failed to initialize mutex");
     return NULL;
   }
+  if (pthread_cond_init(&feed->cond, NULL) != 0) {
+    pthread_mutex_destroy(&feed->mutex);
+    free(feed);
+    swim_set_error(SWIM_ERR_NOMEM, "Failed to initialize condition variable");
+    return NULL;
+  }
   feed->head = NULL;
   feed->tail = NULL;
   return feed;
@@ -63,6 +73,7 @@ swim_feed_t *swim_feed_create(void) {
 void swim_feed_destroy(swim_feed_t *feed) {
   if (!feed)
     return;
+  pthread_cond_destroy(&feed->cond);
   pthread_mutex_destroy(&feed->mutex);
   feed_page_t *page = feed->head;
   while (page) {
@@ -118,14 +129,12 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
       free(old_head);
     }
     page->next = NULL;
-    page->bot = 0;
-    page->top = 0;
+    page->bot = page->top = 0;
     if (feed->tail == NULL) {
-      feed->head = page;
+      feed->tail = feed->head = page;
     } else {
-      feed->tail->next = page;
+      feed->tail = feed->tail->next = page;
     }
-    feed->tail = page;
   }
 
   // Write the record into the tail page.
@@ -141,7 +150,32 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   }
   va_end(args);
 
+  pthread_cond_signal(&feed->cond);
   pthread_mutex_unlock(&feed->mutex);
+  return 0;
+}
+
+int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms) {
+  if (!feed)
+    return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
+
+  struct timespec ts;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  ts.tv_sec  += (time_t)(timeout_ms / 1000);
+  ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+  if (ts.tv_nsec >= 1000000000L) {
+    ts.tv_sec++;
+    ts.tv_nsec -= 1000000000L;
+  }
+
+  pthread_mutex_lock(&feed->mutex);
+  int rc = pthread_cond_timedwait(&feed->cond, &feed->mutex, &ts);
+  pthread_mutex_unlock(&feed->mutex);
+
+  if (rc == ETIMEDOUT)
+    return 1;
+  if (rc != 0)
+    return swim_set_error(SWIM_ERR_INVALID, "swim_feed_wait: cond wait failed");
   return 0;
 }
 

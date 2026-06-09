@@ -44,16 +44,80 @@ SWIM_EXTERN const char *swim_errmsg(void);
  */
 SWIM_EXTERN const char *swim_strerror(int err);
 
-// Event types delivered to the registered callback
-typedef enum {
-  SWIM_NODE_UP,      // Node joined or became active
-  SWIM_NODE_SUSPECT, // Node is suspected of failing
-  SWIM_NODE_DOWN,    // Node is declared dead
-  SWIM_FEED          // Feed has data; drain with swim_read_feed()
-} swim_event_t;
+// --- Telemetry feed ---
 
-typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
-                                const char *node);
+typedef struct swim_feed swim_feed_t;
+
+/**
+ * Create a new swim_feed_t instance. The caller owns the feed and
+ * must pass it to swim_feed_destroy() when done.
+ *
+ * @return A pointer to the newly allocated swim_feed_t, or NULL on error.
+ */
+SWIM_EXTERN swim_feed_t *swim_feed_create(void);
+
+/**
+ * Destroy and free a swim_feed_t instance.
+ *
+ * @param feed The feed to destroy.
+ */
+SWIM_EXTERN void swim_feed_destroy(swim_feed_t *feed);
+
+/**
+ * Insert a record of n NUL-terminated strings into the feed. Fails
+ * if n is outside 1..SWIM_FEED_MAX_ELEMENTS or the total string
+ * payload exceeds SWIM_FEED_MAX_RECORD_SIZE bytes.
+ *
+ * @param feed The feed instance.
+ * @param n    Number of strings (1..SWIM_FEED_MAX_ELEMENTS).
+ * @param ...  n NUL-terminated strings (const char *).
+ * @return 0 on success, or -1 on error (sets swim_errno).
+ */
+SWIM_EXTERN int swim_feed_put(swim_feed_t *feed, int n, ...);
+
+/**
+ * Read the next record from the feed, copying its strings out to the
+ * caller. On success the NUL-terminated strings are copied
+ * contiguously into `buf` and `ptr[0..n-1]` point at each one.
+ *
+ * Use bufsz >= SWIM_FEED_MAX_RECORD_SIZE and
+ * nptr >= SWIM_FEED_MAX_ELEMENTS to accept any record the feed can
+ * hold. If the record exceeds bufsz or nptr, returns -1 and leaves
+ * the record in the feed.
+ *
+ * @param feed  The feed instance.
+ * @param bufsz Capacity of `buf` in bytes.
+ * @param buf   Destination buffer for the string bytes.
+ * @param nptr  Capacity of `ptr` in entries.
+ * @param ptr   Array populated with pointers into `buf`.
+ * @return number of strings (>= 1) on success, 0 if the feed is
+ *         empty, or -1 on error (sets swim_errno).
+ */
+SWIM_EXTERN int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf,
+                              int nptr, char **ptr);
+
+/**
+ * Return true if the feed has no unread records.
+ *
+ * @param feed The feed instance.
+ * @return true if empty, false if records are available.
+ */
+SWIM_EXTERN bool swim_feed_empty(swim_feed_t *feed);
+
+/**
+ * Block until the feed is signalled or timeout_ms milliseconds
+ * elapse. A return value of 0 means the feed was signalled; it does
+ * NOT guarantee a record is present (spurious wakeups are possible
+ * and concurrent readers may drain). Always follow with
+ * swim_feed_get.
+ *
+ * @param feed       The feed instance.
+ * @param timeout_ms Maximum time to wait in milliseconds.
+ * @return 0 if signalled, 1 on timeout, -1 on error.
+ */
+SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
+
+// --- Instance lifecycle ---
 
 typedef struct {
   const char *self;                // "host:port" or "host:port/cookie" (mandatory)
@@ -67,8 +131,7 @@ typedef struct {
   uint64_t seed_retry_interval_ms; // default 5000
   uint64_t dead_node_expiry_ms;    // default 6000
 
-  swim_callback_t callback;        // Event callback; NULL for no notifications
-  void *ctx;                       // Opaque context passed to callback
+  swim_feed_t *feed; // optional; caller owns; NULL disables telemetry
 } swim_start_opts_t;
 
 /**
@@ -141,8 +204,8 @@ SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
 SWIM_EXTERN int swim_start(const swim_start_opts_t *opts);
 
 /**
- * Stop a named instance, perform a graceful leave (notify peers), and free
- * resources.
+ * Stop a named instance, perform a graceful leave (notify peers),
+ * and free resources.
  *
  * @param name The name of the instance (mandatory).
  * @return 0 on success, -1 on failure.
@@ -162,29 +225,9 @@ SWIM_EXTERN int swim_leave(const char *name);
  */
 SWIM_EXTERN char *swim_peers(const char *name, bool include_dead, int *count);
 
-
 /**
- * Read the next event from the feed of the named instance, copying its strings
- * out to the caller. On success the event's NUL-terminated strings are copied
- * contiguously into `buf` and `ptr[0..count-1]` point at each string in `buf`.
- *
- * `bufsz` should be SWIM_FEED_MAX_RECORD_SIZE and `nptr` should be
- * SWIM_FEED_MAX_ELEMENTS, which are large enough to hold any record
- * the feed can store.
- *
- * @param name  The name of the instance (mandatory).
- * @param bufsz Size of `buf` in bytes (should be SWIM_FEED_MAX_RECORD_SIZE).
- * @param buf   Destination buffer for the event's string bytes.
- * @param nptr  Number of entries in `ptr` (should be SWIM_FEED_MAX_ELEMENTS).
- * @param ptr   Destination array of string pointers into `buf`.
- * @return the number of strings copied (>= 1) on success, 0 if the feed is
- *         empty, or -1 on error (sets swim_errno).
- */
-SWIM_EXTERN int swim_read_feed(const char *name, int bufsz, char *buf, int nptr,
-                               char **ptr);
-
-/**
- * Feed out-of-band reachability signal to cancel suspicion and revive a node.
+ * Feed out-of-band reachability signal to cancel suspicion and
+ * revive a node.
  *
  * @param name The name of the instance (mandatory).
  * @param peer The node ID of the peer.

@@ -303,32 +303,35 @@ free(p);
 
 ### Event subscription
 
-A single callback is registered at start time via
-`swim_start_opts_t`:
+Create a `swim_feed_t`, pass it to `swim_start_opts_t`,
+then read records from a separate thread:
 
 ```c
-opts.callback = my_callback;
-opts.ctx      = my_ctx;
+swim_feed_t *feed = swim_feed_create();
+opts.feed = feed;  // caller owns; NULL disables telemetry
+swim_start(&opts);
+
+// reader thread:
+char buf[SWIM_FEED_MAX_RECORD_SIZE];
+char *ptr[SWIM_FEED_MAX_ELEMENTS];
+for (;;) {
+    swim_feed_wait(feed, 1000); // returns 0 or 1 (timeout)
+    int n;
+    while ((n = swim_feed_get(feed, sizeof(buf), buf,
+                              SWIM_FEED_MAX_ELEMENTS, ptr)) > 0) {
+        // process ptr[0..n-1]
+    }
+}
+
+swim_leave("my_cluster");
+swim_feed_destroy(feed);
 ```
 
-The callback has the signature:
-
-```c
-void callback(void *ctx, swim_event_t event,
-              const char *node);
-```
-
-`event` is one of:
-
-- `SWIM_NODE_UP` / `SWIM_NODE_SUSPECT` / `SWIM_NODE_DOWN`:
-  membership transition; `node` is the affected peer string.
-- `SWIM_FEED`: the telemetry feed has records; `node` is
-  NULL. The callback should drain with `swim_read_feed()`
-  until it returns 0.
-
-The callback is invoked from the protocol loop with no locks
-held, so it may re-enter the public API. It must be
-non-blocking; offload heavy work to another thread.
+`swim_feed_wait` blocks until the feed is signalled or
+the timeout elapses. Returning 0 does **not** guarantee a
+record is present — always follow with `swim_feed_get`.
+The feed is optional; pass `opts.feed = NULL` to disable
+telemetry.
 
 ### Liveness hint
 
@@ -391,33 +394,41 @@ library directly without calling `swim_leave`.
 
 ## 12. Observability
 
-The library emits telemetry through a per-instance **feed**:
-a growable FIFO queue of 4 KB pages that the protocol thread
-writes and the application drains. There is no logging in
-the library itself — the feed is the only output channel.
+The library emits telemetry through a caller-supplied
+**feed**: a growable FIFO queue of 4 KB pages that the
+protocol thread writes and the application drains. There
+is no logging in the library itself — the feed is the only
+output channel. Telemetry is optional; pass `opts.feed =
+NULL` to disable it entirely.
+
+### Feed ownership
+
+The caller creates the feed, passes it to `swim_start`,
+and destroys it after `swim_leave` returns:
+
+```c
+swim_feed_t *feed = swim_feed_create();
+opts.feed = feed;
+swim_start(&opts);
+// ... run ...
+swim_leave("my_cluster");
+swim_feed_destroy(feed);
+```
 
 ### Reading the feed
 
 ```c
-int swim_read_feed(const char *name, int bufsz, char *buf, int nptr, char **ptr);
-```
-
-The application pulls events by calling `swim_read_feed`
-repeatedly: it returns the number of strings copied (>= 1)
-on success, `0` when the feed is empty, or `-1` on error.
-A buffer of size 4096 (`bufsz`) and a pointer array of
-size 10 (`nptr`) are recommended.
-
-Example:
-
-```c
-char buf[4096];
-char *ptr[10];
+char buf[SWIM_FEED_MAX_RECORD_SIZE];
+char *ptr[SWIM_FEED_MAX_ELEMENTS];
 int n;
-while ((n = swim_read_feed("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
+while ((n = swim_feed_get(feed, sizeof(buf), buf,
+                          SWIM_FEED_MAX_ELEMENTS, ptr)) > 0) {
   // Process event in ptr[0 ... n-1]
 }
 ```
+
+Use `swim_feed_wait(feed, timeout_ms)` to block until
+data arrives rather than busy-polling.
 
 ### Events
 
