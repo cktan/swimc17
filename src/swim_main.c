@@ -85,14 +85,10 @@ typedef struct {
 } pending_notify_t;
 
 // A self-contained batch of work taken out of an instance under its lock and
-// then dispatched after unlocking. It holds copies only (no pointers into the
-// instance), so dispatch touches nothing owned by the instance and is immune
-// to the instance being freed concurrently (e.g. by swim_leave).
+// then dispatched after unlocking.
 typedef struct {
   pending_notify_t *items;
   int count;
-  swim_callback_t cb;
-  void *ctx;
 } notify_batch_t;
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
@@ -533,20 +529,19 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
   inst->pending_count = 0;
   inst->pending_capacity = 0;
 
-  batch->cb = inst->callback;
-  batch->ctx = inst->ctx;
 }
 
 // Deliver a batch to its subscribers. MUST be called with no locks held: the
 // callbacks may re-enter the public API. Touches only the batch (stack/heap
 // copies), never the originating instance, so it is safe even if that instance
 // is being torn down concurrently. Consumes (frees) the batch.
-static void dispatch_notifications(notify_batch_t *batch) {
-  if (batch->cb) {
+static void dispatch_notifications(notify_batch_t *batch, swim_callback_t cb,
+                                   void *ctx) {
+  if (cb) {
     for (int i = 0; i < batch->count; i++) {
       char node_str[350];
       swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
-      batch->cb(batch->ctx, batch->items[i].event, node_str);
+      cb(ctx, batch->items[i].event, node_str);
     }
   }
   free(batch->items);
@@ -798,9 +793,9 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       }
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
-      dispatch_notifications(&batch);
-      if (batch.cb && !swim_feed_empty(instance->feed))
-        batch.cb(batch.ctx, SWIM_FEED, NULL);
+      dispatch_notifications(&batch, instance->callback, instance->ctx);
+      if (instance->callback && !swim_feed_empty(instance->feed))
+        instance->callback(instance->ctx, SWIM_FEED, NULL);
       exp += 100;
     }
 
@@ -821,9 +816,9 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       swim_protocol_handle_incoming(instance);
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
-      dispatch_notifications(&batch);
-      if (batch.cb && !swim_feed_empty(instance->feed))
-        batch.cb(batch.ctx, SWIM_FEED, NULL);
+      dispatch_notifications(&batch, instance->callback, instance->ctx);
+      if (instance->callback && !swim_feed_empty(instance->feed))
+        instance->callback(instance->ctx, SWIM_FEED, NULL);
     }
   }
   return NULL;
@@ -1202,10 +1197,10 @@ int swim_hint_alive(const char *name, const char *peer) {
   }
   notify_batch_t batch;
   take_notifications(inst, &batch);
+  swim_callback_t cb = inst->callback;
+  void *ctx = inst->ctx;
   pthread_mutex_unlock(&inst->mutex);
 
-  // Callbacks run with no locks held and touch only the batch, so they may
-  // re-enter the API and are unaffected if the instance is torn down meanwhile.
-  dispatch_notifications(&batch);
+  dispatch_notifications(&batch, cb, ctx);
   return 0;
 }
