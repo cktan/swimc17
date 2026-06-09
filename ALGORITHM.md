@@ -22,7 +22,7 @@ on each received packet:     procedure C  (handle message)
 on user leave call:          procedure H  (announce + stop)
 ```
 
-Local subscribers can watch membership changes
+A telemetry feed reports membership and RTT events
 (procedure I).
 
 The heart is the **probe cycle** (A → B), which detects
@@ -87,13 +87,13 @@ B3. **An ack arrives** (directly or via `fwd_ack`) before
     that timeout: target is alive. Done.
 
 B4. **Still no ack**: declare `target` **suspect** — record
-    it, gossip `suspect(target, inc)` (procedure D), notify
-    subscribers, and start a `suspicion_timeout` timer
+    it, gossip `suspect(target, inc)` (procedure D), write a
+    telemetry event (procedure I), and start a `suspicion_timeout` timer
     (procedure E governs the timer).
 
 B5. **`suspicion_timeout` fires** and `target` is still
     suspect at the same incarnation: declare it **dead** —
-    gossip `dead(target, inc)` and notify subscribers.
+    gossip `dead(target, inc)` and write a telemetry event (procedure I).
 
 At any moment, an `alive` rumor with a high enough
 incarnation (procedure F) cancels suspicion and revives the
@@ -168,8 +168,8 @@ events are accepted by these rules:
   **dead > suspect > alive**.
 
 Whenever an event is *adopted* (it actually changed local
-state), it is re-gossiped (procedure D) and subscribers are
-notified (procedure I).
+state), it is re-gossiped (procedure D) and a telemetry event is
+written (procedure I).
 
 **Dead-node retention**: dead entries are kept for
 `dead_node_expiry` to reject stale `alive` rumors, then
@@ -216,22 +216,21 @@ For a silent stop, just shut down the library instead.
 
 ---
 
-## I. Subscribers (membership notifications)
+## I. Telemetry feed (membership and instrumentation events)
 
-A node lets local subscribers observe membership changes
-via callbacks.
+If a telemetry feed is attached, the node writes status transitions and
+other instrumentation records to it.
 
-I1. A subscriber calls `subscribe` with a callback and an
-    opaque `ctx` pointer to register it; `unsubscribe`
-    removes the matching `(callback, ctx)` pair.
+I1. Telemetry records are written to a growable FIFO queue of 4 KB pages
+    (the feed). If memory is exhausted, the oldest unread pages are
+    dropped to make room for new records.
 
-I2. Whenever a status change is adopted (procedure E), the
-    node invokes every registered callback as
-    `callback(ctx, event, node_id)`, where `event` is one
-    of `node_up`, `node_suspect`, or `node_down`. The
-    callback runs on the protocol loop, so it must be cheap
-    and non-blocking. The same transitions are also emitted
-    as instrumentation events.
+I2. When a node status change is adopted (procedure E), the node writes
+    an event record: `["node", "up" | "suspect" | "down", target_id]`
+    to the feed.
 
-Subscribers are observers only — they do not influence the
-protocol.
+I3. On a successful direct probe ack (procedure B1), the node writes a
+    latency record: `["ping", "rtt", target_id, latency_ms]` to the feed.
+
+I4. Outbound message drops or cluster size changes also write records
+    (e.g., `["cluster", "size", count]`, `["warning", message]`).

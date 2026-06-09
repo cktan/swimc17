@@ -301,7 +301,7 @@ char *p = swim_peers("my_cluster", false, &count);
 free(p);
 ```
 
-### Event subscription
+### Telemetry feed
 
 Create a `swim_feed_t`, pass it to `swim_start_opts_t`,
 then read records from a separate thread:
