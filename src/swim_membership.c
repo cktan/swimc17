@@ -127,6 +127,7 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
   if (find_node(m, id, &idx)) {
     swim_member_t *member = &m->members[idx];
 
+    // Higher incarnation always wins; at equal incarnation, DEAD > SUSPECT > ALIVE.
     // Node is already known, apply precedence rules:
     if (member->status == SWIM_STATUS_DEAD) {
       // DEAD is terminal for a given incarnation. Revive only if inc is
@@ -278,6 +279,7 @@ char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
     char tmp[384];
     swim_node_id_format(&member->id, tmp, sizeof(tmp));
     size_t len = strlen(tmp) + 1;
+    // Allocate in 1 KiB chunks to amortize realloc overhead.
     char *b = realloc(buf, align1024(used + len));
     if (!b) {
       free(buf);

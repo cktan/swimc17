@@ -3,6 +3,7 @@
  *
  * Implements a logical (non-wall-clock) timer driven by
  * explicit swim_timer_tick() calls from the protocol loop.
+ * The caller is responsible for invoking swim_timer_tick() once per period.
  * One tick equals one protocol period (100 ms by default).
  *
  * Alarms are stored in a singly-linked list where each

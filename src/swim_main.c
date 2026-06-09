@@ -642,6 +642,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         } else if (ev->status == SWIM_STATUS_SUSPECT) {
           queue_notification(inst, SWIM_NODE_SUSPECT, &ev->id);
 
+          // Heap-allocate the ID; the suspicion callback takes ownership and frees it.
           // Start suspicion timer
           swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
           if (!suspect_param) {

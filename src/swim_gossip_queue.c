@@ -193,6 +193,7 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
   qsort(queue->entries, queue->count, sizeof(gossip_entry_t), compare_entries);
 
   bool keep[queue->count];
+  // memset to true relies on bool being 1 byte; assert enforces this.
   assert(sizeof(bool) == 1);
   memset(keep, 1, queue->count);
 

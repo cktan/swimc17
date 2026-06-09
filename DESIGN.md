@@ -333,7 +333,7 @@ non-blocking; offload heavy work to another thread.
 ### Liveness hint
 
 ```c
-swim_hint_alive("my_cluster", &peer);
+swim_hint_alive("my_cluster", "10.0.0.2:7772");
 ```
 
 Feeds out-of-band evidence that `peer` is alive into the
