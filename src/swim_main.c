@@ -672,7 +672,8 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         if (ev->incarnation >= inst->incarnation) {
           inst->incarnation = ev->incarnation + 1;
           swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
-                                    &inst->self_id, inst->incarnation, 2);
+                                    &inst->self_id, inst->incarnation,
+                                    REFUTATION_MULTIPLIER);
         }
       }
     }

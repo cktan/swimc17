@@ -1,22 +1,26 @@
 /*
- * swim_feed.c — Fixed-size telemetry ring buffer.
+ * swim_feed.c — Paged telemetry queue.
  *
  * Stores multi-string records (e.g. "node up", "127.0.0.1:8000")
- * in a 4 KB byte buffer for consumption by swim_read_feed().
+ * across a chain of 4 KB pages for consumption by swim_read_feed().
  * Records are encoded as [int n][str0\0][str1\0]...[strN-1\0].
  *
- * Auto-draining: when a new record does not fit, the oldest
- * records are discarded one by one until there is room. New
- * events are never blocked; old events are silently lost.
+ * Records never span pages. A record that does not fit at the end of
+ * the current tail page goes onto a freshly allocated page, wasting
+ * the tail of the old page. Max record size is ~1028 bytes
+ * (SWIM_FEED_MAX_RECORD_SIZE + sizeof(int)), well under 4 KB.
  *
- * Compaction (memmove to offset 0) is deferred: it runs
- * lazily when the read pointer crosses the midpoint of the
- * buffer during get, or immediately before a write after
- * draining. This avoids compacting on every read.
+ * Growth: when the tail page has no room, a new page is appended.
+ * Under OOM, oldest pages are freed until malloc succeeds. If only
+ * the tail page remains and malloc still fails, the write returns
+ * SWIM_ERR_NOMEM.
  *
- * On get, the record is not consumed if it exceeds the
- * caller's bufsz or nptr; the caller must retry with a
- * larger buffer.
+ * Shrink: after a get, if the head page is fully consumed (bot==top)
+ * and is not the tail (next!=NULL), it is freed immediately. The
+ * tail page is reset to bot=top=0 instead of freed.
+ *
+ * On get, the record is not consumed if it exceeds the caller's
+ * bufsz or nptr; the caller must retry with a larger buffer.
  */
 #include "swim_feed.h"
 #include "swim_errno.h"
@@ -25,70 +29,60 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SWIM_FEED_BUFFER_SIZE 4096
+#define SWIM_FEED_PAGE_SIZE 4096
+
+typedef struct feed_page {
+  struct feed_page *next;
+  size_t bot; // next byte to read
+  size_t top; // next byte to write
+  char data[SWIM_FEED_PAGE_SIZE];
+} feed_page_t;
 
 struct swim_feed {
   pthread_mutex_t mutex;
-  char buf[SWIM_FEED_BUFFER_SIZE];
-  size_t read_off;  // Start of the first unread record
-  size_t write_off; // End of the last written record (first free byte)
+  feed_page_t *head; // oldest page (read from here)
+  feed_page_t *tail; // newest page (write to here)
 };
 
-// Create a new feed instance. Returns NULL on error.
 swim_feed_t *swim_feed_create(void) {
   swim_feed_t *feed = malloc(sizeof(*feed));
   if (!feed) {
     swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_feed_t");
     return NULL;
   }
-
   if (pthread_mutex_init(&feed->mutex, NULL) != 0) {
     free(feed);
     swim_set_error(SWIM_ERR_NOMEM, "Failed to initialize mutex");
     return NULL;
   }
-
-  feed->read_off = 0;
-  feed->write_off = 0;
-
+  feed->head = NULL;
+  feed->tail = NULL;
   return feed;
 }
 
-// Destroy and free the feed.
 void swim_feed_destroy(swim_feed_t *feed) {
-  if (!feed) {
+  if (!feed)
     return;
-  }
   pthread_mutex_destroy(&feed->mutex);
+  feed_page_t *page = feed->head;
+  while (page) {
+    feed_page_t *next = page->next;
+    free(page);
+    page = next;
+  }
   free(feed);
 }
 
-static void swim_feed_compact_locked(swim_feed_t *feed) {
-  if (feed->read_off == 0) {
-    return;
-  }
-  size_t active_len = feed->write_off - feed->read_off;
-  if (active_len > 0) {
-    memmove(feed->buf, feed->buf + feed->read_off, active_len);
-  }
-  feed->write_off = active_len;
-  feed->read_off = 0;
-}
-
-// Insert a record of n NUL-terminated strings (n >= 1). Oldest records are
-// silently dropped if the buffer is full. Returns 0 on success, -1 on error.
 int swim_feed_put(swim_feed_t *feed, int n, ...) {
-  if (!feed) {
+  if (!feed)
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
-  }
-  if (n < 1 || n > SWIM_FEED_MAX_ELEMENTS) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "String count n must be 1..%d", SWIM_FEED_MAX_ELEMENTS);
-  }
+  if (n < 1 || n > SWIM_FEED_MAX_ELEMENTS)
+    return swim_set_error(SWIM_ERR_INVALID, "String count n must be 1..%d",
+                          SWIM_FEED_MAX_ELEMENTS);
 
   pthread_mutex_lock(&feed->mutex);
 
-  // First pass: validate strings and calculate size needed
+  // First pass: validate strings and measure bytes needed.
   size_t needed = sizeof(int);
   va_list args;
   va_start(args, n);
@@ -105,76 +99,45 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
 
   if (needed - sizeof(int) > SWIM_FEED_MAX_RECORD_SIZE) {
     pthread_mutex_unlock(&feed->mutex);
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Record size %zu exceeds limit %d",
+    return swim_set_error(SWIM_ERR_INVALID, "Record size %zu exceeds limit %d",
                           needed - sizeof(int), SWIM_FEED_MAX_RECORD_SIZE);
   }
 
-  // Auto-draining: discard oldest records if space is insufficient
-  while (SWIM_FEED_BUFFER_SIZE - (feed->write_off - feed->read_off) < needed) {
-    // We have active records in the buffer. Let's discard the oldest one at
-    // read_off.
-    if (feed->read_off + sizeof(int) > feed->write_off) {
-      // Corrupt buffer state (should not happen normally) - reset offsets
-      feed->read_off = 0;
-      feed->write_off = 0;
-      break;
-    }
-
-    int old_n;
-    memcpy(&old_n, feed->buf + feed->read_off, sizeof(int));
-    if (old_n < 0) {
-      // Corrupt record count - reset offsets
-      feed->read_off = 0;
-      feed->write_off = 0;
-      break;
-    }
-
-    size_t scan_off = feed->read_off + sizeof(int);
-    int valid = 1;
-    for (int i = 0; i < old_n; i++) {
-      if (scan_off >= feed->write_off) {
-        valid = 0;
-        break;
+  // Ensure the tail page has room. A fresh page always has room because
+  // needed <= SWIM_FEED_MAX_RECORD_SIZE + sizeof(int) < SWIM_FEED_PAGE_SIZE.
+  if (feed->tail == NULL || feed->tail->top + needed > SWIM_FEED_PAGE_SIZE) {
+    feed_page_t *page;
+    while ((page = malloc(sizeof(feed_page_t))) == NULL) {
+      if (feed->head == feed->tail) {
+        // No pages left to sacrifice (empty or only tail remains).
+        pthread_mutex_unlock(&feed->mutex);
+        return swim_set_error(SWIM_ERR_NOMEM, "Out of memory allocating feed page");
       }
-      char *nul_pos =
-          memchr(feed->buf + scan_off, '\0', feed->write_off - scan_off);
-      if (!nul_pos) {
-        valid = 0;
-        break;
-      }
-      scan_off = (nul_pos - feed->buf) + 1;
+      feed_page_t *old_head = feed->head;
+      feed->head = old_head->next;
+      free(old_head);
     }
-
-    if (!valid) {
-      // Corrupt record layout - reset offsets
-      feed->read_off = 0;
-      feed->write_off = 0;
-      break;
+    page->next = NULL;
+    page->bot = 0;
+    page->top = 0;
+    if (feed->tail == NULL) {
+      feed->head = page;
+    } else {
+      feed->tail->next = page;
     }
-
-    // Advance read_off to discard this record
-    feed->read_off = scan_off;
-
-    if (feed->read_off == feed->write_off) {
-      feed->read_off = 0;
-      feed->write_off = 0;
-    }
+    feed->tail = page;
   }
 
-  // Now compact the buffer to make space contiguous at the beginning
-  swim_feed_compact_locked(feed);
-
-  // Write the record
-  memcpy(feed->buf + feed->write_off, &n, sizeof(int));
-  feed->write_off += sizeof(int);
+  // Write the record into the tail page.
+  memcpy(feed->tail->data + feed->tail->top, &n, sizeof(int));
+  feed->tail->top += sizeof(int);
 
   va_start(args, n);
   for (int i = 0; i < n; i++) {
     const char *str = va_arg(args, const char *);
     size_t len = strlen(str) + 1;
-    memcpy(feed->buf + feed->write_off, str, len);
-    feed->write_off += len;
+    memcpy(feed->tail->data + feed->tail->top, str, len);
+    feed->tail->top += len;
   }
   va_end(args);
 
@@ -182,62 +145,53 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
   return 0;
 }
 
-// Read the next record. Copies strings into buf and sets ptr[0..n-1] to point
-// at each. Returns string count (>= 1), 0 if empty, -1 on error. If the
-// record doesn't fit in bufsz or nptr, returns -1 and leaves it in the feed.
 int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
                   char **ptr) {
-  if (!feed) {
+  if (!feed)
     return swim_set_error(SWIM_ERR_INVALID, "Feed cannot be NULL");
-  }
-  if (!buf || bufsz <= 0) {
+  if (!buf || bufsz <= 0)
     return swim_set_error(SWIM_ERR_INVALID, "Output buffer is invalid");
-  }
-  if (!ptr || nptr <= 0) {
+  if (!ptr || nptr <= 0)
     return swim_set_error(SWIM_ERR_INVALID, "Pointer array is invalid");
-  }
 
   pthread_mutex_lock(&feed->mutex);
 
-  if (feed->read_off == feed->write_off) {
+  if (feed->head == NULL || feed->head->bot == feed->head->top) {
     pthread_mutex_unlock(&feed->mutex);
-    return 0; // End of stream / empty
+    return 0;
   }
 
-  // Ensure we can read the integer `n`
-  if (feed->read_off + sizeof(int) > feed->write_off) {
+  if (feed->head->bot + sizeof(int) > feed->head->top) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
                           "Corrupt buffer: not enough bytes for record header");
   }
 
   int n;
-  memcpy(&n, feed->buf + feed->read_off, sizeof(int));
+  memcpy(&n, feed->head->data + feed->head->bot, sizeof(int));
   if (n < 1) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
                           "Corrupt buffer: invalid string count %d", n);
   }
 
-  // Validate the record extent under the lock.
-  size_t payload_start = feed->read_off + sizeof(int);
+  // Scan string extents within the head page.
+  size_t payload_start = feed->head->bot + sizeof(int);
   size_t scan_off = payload_start;
   int valid = 1;
   for (int i = 0; i < n; i++) {
-    if (scan_off >= feed->write_off) {
+    if (scan_off >= feed->head->top) {
       valid = 0;
       break;
     }
-    // Scan for NUL terminator within buffer bounds
-    char *nul_pos =
-        memchr(feed->buf + scan_off, '\0', feed->write_off - scan_off);
+    char *nul_pos = memchr(feed->head->data + scan_off, '\0',
+                           feed->head->top - scan_off);
     if (!nul_pos) {
       valid = 0;
       break;
     }
-    scan_off = (nul_pos - feed->buf) + 1;
+    scan_off = (nul_pos - feed->head->data) + 1;
   }
-
   if (!valid) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
@@ -246,8 +200,7 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
 
   size_t payload_len = scan_off - payload_start;
 
-  // Ensure the record fits the caller's buffers. If not, leave it untouched in
-  // the feed so the caller can retry with larger buffers.
+  // Leave the record in place if it doesn't fit the caller's buffers.
   if (n > nptr) {
     pthread_mutex_unlock(&feed->mutex);
     return swim_set_error(SWIM_ERR_INVALID,
@@ -259,20 +212,23 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
                           payload_len, bufsz);
   }
 
-  // Copy the payload out and consume the record while still under the lock.
-  memcpy(buf, feed->buf + payload_start, payload_len);
+  memcpy(buf, feed->head->data + payload_start, payload_len);
+  feed->head->bot = scan_off;
 
-  feed->read_off = scan_off;
-  if (feed->read_off == feed->write_off) {
-    feed->read_off = 0;
-    feed->write_off = 0;
-  } else if (feed->read_off >= SWIM_FEED_BUFFER_SIZE / 2) {
-    swim_feed_compact_locked(feed);
+  if (feed->head->bot == feed->head->top) {
+    if (feed->head->next != NULL) {
+      feed_page_t *old_head = feed->head;
+      feed->head = old_head->next;
+      free(old_head);
+    } else {
+      // Tail page: reset rather than free.
+      feed->head->bot = 0;
+      feed->head->top = 0;
+    }
   }
 
   pthread_mutex_unlock(&feed->mutex);
 
-  // Point ptr[] at each string within the caller's buffer.
   size_t off = 0;
   for (int i = 0; i < n; i++) {
     ptr[i] = buf + off;
@@ -286,7 +242,7 @@ bool swim_feed_empty(swim_feed_t *feed) {
   if (!feed)
     return true;
   pthread_mutex_lock(&feed->mutex);
-  bool empty = (feed->read_off == feed->write_off);
+  bool empty = (feed->head == NULL || feed->head->bot == feed->head->top);
   pthread_mutex_unlock(&feed->mutex);
   return empty;
 }

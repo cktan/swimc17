@@ -145,27 +145,43 @@ TEST_CASE("swim_feed: record that does not fit is left in the feed") {
   swim_feed_destroy(feed);
 }
 
-TEST_CASE("swim_feed: buffer compaction and auto-draining") {
+TEST_CASE("swim_feed: multi-page lifecycle") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  // 1000-byte string: payload 1001 bytes, record 1005 bytes (within 1024 limit).
-  // Four records = 4020 bytes (fits in 4096); fifth triggers auto-drain.
-  std::string long_str(1000, 'A');
+  // Record layout: sizeof(int)=4 + 1001-byte payload = 1005 bytes.
+  // floor(4096 / 1005) = 4 records per page (4*1005=4020; 5th won't fit).
+  const int rpp = 4;
+  std::string s(1000, 'X');
 
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 1
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 2
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 3
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 4
+  auto write_n = [&](int n) {
+    for (int i = 0; i < n; i++)
+      CHECK(swim_feed_put(feed, 1, s.c_str()) == 0);
+  };
+  auto read_n = [&](int n) {
+    for (int i = 0; i < n; i++)
+      CHECK(read_and_check(feed, {s}) == 1);
+  };
 
-  // 5th record: 4020 + 1005 = 5025 > 4096 — auto-drains record 1.
-  CHECK(swim_feed_put(feed, 1, long_str.c_str()) == 0); // record 5
+  // Grow to 5 pages (20 records: 4 per page).
+  write_n(5 * rpp);
 
-  // Record 1 was discarded; reads give records 2, 3, 4, 5.
-  CHECK(read_and_check(feed, {long_str}) == 1);
-  CHECK(read_and_check(feed, {long_str}) == 1);
-  CHECK(read_and_check(feed, {long_str}) == 1);
-  CHECK(read_and_check(feed, {long_str}) == 1);
+  // Drain to 2 pages: read 3 pages worth, leaving pages 4 and 5.
+  read_n(3 * rpp);
+
+  // Grow back to 5 pages: write 3 more pages worth (pages 6, 7, 8).
+  write_n(3 * rpp);
+
+  // Drain all the way: 2 surviving + 3 new pages = 5 pages = 20 records.
+  read_n(5 * rpp);
+  CHECK(read_and_check(feed, {}) == 0);
+
+  // Grow to 2 pages: 4 records fill the recycled tail page, 1 starts a new page.
+  write_n(rpp + 1);
+
+  // Drain all the way again.
+  read_n(rpp + 1);
+  CHECK(read_and_check(feed, {}) == 0);
 
   swim_feed_destroy(feed);
 }

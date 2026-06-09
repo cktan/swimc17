@@ -4,6 +4,8 @@
 #include "swim_membership.h"
 #include "swim.h"
 
+#define REFUTATION_MULTIPLIER 2
+
 typedef struct swim_gossip_queue_t swim_gossip_queue_t;
 
 /**
