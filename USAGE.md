@@ -357,13 +357,32 @@ Returns the number of strings copied (>= 1) on success,
 - `SWIM_ERR_INVALID`: `name` is NULL or empty.
 - `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
 
+Records have the following formats:
+
+| `ptr[0]`  | `ptr[1]`  | `ptr[2]`         | `ptr[3]` |
+|-----------|-----------|------------------|----------|
+| `"node"`  | `"up"`    | `"10.0.0.2:7772/abc"` | —   |
+| `"node"`  | `"suspect"` | `"10.0.0.3:7773"` | —     |
+| `"node"`  | `"down"`  | `"10.0.0.4:7774"` | —       |
+| `"ping"`  | `"rtt"`   | `"10.0.0.2:7772"` | `"14"` (ms) |
+| `"cluster"` | `"size"` | `"5"`           | —        |
+| `"warning"` | `"<message>"` | —          | —        |
+
 Example:
 ```c
 char buf[4096];
 char *ptr[10];
 int n;
 while ((n = swim_read_feed("my_cluster", sizeof(buf), buf, 10, ptr)) > 0) {
-    // Process event strings in ptr[0..n-1]
+    if (strcmp(ptr[0], "node") == 0) {
+        printf("node %s: %s\n", ptr[2], ptr[1]);
+    } else if (strcmp(ptr[0], "ping") == 0) {
+        printf("rtt to %s: %s ms\n", ptr[2], ptr[3]);
+    } else if (strcmp(ptr[0], "cluster") == 0) {
+        printf("cluster size: %s\n", ptr[2]);
+    } else if (strcmp(ptr[0], "warning") == 0) {
+        fprintf(stderr, "swim warning: %s\n", ptr[1]);
+    }
 }
 ```
 
