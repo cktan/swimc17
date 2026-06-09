@@ -28,7 +28,7 @@
 
 - **Git Merges:** Always merge branches using `git merge --squash`.
 
-
+- **Code Formatting:** Always run `make format` before committing.
 
 ### 2. Think Before Coding
 
