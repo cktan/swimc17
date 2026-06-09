@@ -29,6 +29,7 @@ pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void test_callback(void *ctx, swim_event_t event, const char *node) {
   (void)ctx;
+  if (event == SWIM_FEED) return;
   pthread_mutex_lock(&g_log_mutex);
   g_events.push_back({event, node});
   pthread_mutex_unlock(&g_log_mutex);
@@ -101,6 +102,11 @@ size_t obs_size() {
   return sz;
 }
 
+// --- SWIM_FEED callback helpers ---
+std::atomic<bool> g_feed_fired{false};
+std::vector<std::string> g_feed_records;
+pthread_mutex_t g_feed_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 } // namespace
 
 TEST_CASE("protocol: single node startup and leave") {
@@ -113,19 +119,11 @@ TEST_CASE("protocol: single node startup and leave") {
   int rc = swim_start(&opts);
   REQUIRE(rc == 0);
 
-  // Subscribe
-  rc = swim_subscribe("single_node", test_callback, nullptr);
-  CHECK(rc == 0);
-
   // Query members (should be empty because self is not in the list)
   int count;
   char *p = swim_peers("single_node", true, &count);
   CHECK(count == 0);
   free(p);
-
-  // Unsubscribe
-  rc = swim_unsubscribe("single_node", test_callback, nullptr);
-  CHECK(rc == 0);
 
   rc = swim_leave("single_node");
   CHECK(rc == 0);
@@ -210,9 +208,9 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   opts.protocol_period_ms = 400;
   opts.ping_timeout_ms = 100;
   opts.suspicion_timeout_ms = 600;
+  opts.callback = test_callback;
 
   REQUIRE(swim_start(&opts) == 0);
-  REQUIRE(swim_subscribe("failure_node", test_callback, nullptr) == 0);
 
   // Simulate a join from a mock node by sending a raw PING packet to opts.port
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20202);
@@ -420,10 +418,10 @@ TEST_CASE("protocol: subscriber callback may re-enter the API (H3 deadlock)") {
   opts.name = "h3_reentrant";
   opts.protocol_period_ms = 400;
   opts.ping_timeout_ms = 100;
+  opts.callback = reentrant_members_cb;
 
   g_reentrant_ok = false;
   REQUIRE(swim_start(&opts) == 0);
-  REQUIRE(swim_subscribe("h3_reentrant", reentrant_members_cb, nullptr) == 0);
 
   // A raw PING from a mock makes the node discover it -> NODE_UP -> callback.
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20402);
@@ -473,9 +471,9 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
   opts.name = "h3_race";
   opts.protocol_period_ms = 100;
   opts.ping_timeout_ms = 50;
+  opts.callback = noop_cb;
 
   REQUIRE(swim_start(&opts) == 0);
-  REQUIRE(swim_subscribe("h3_race", noop_cb, nullptr) == 0);
 
   RaceArg arg;
   arg.name = "h3_race";
@@ -790,5 +788,69 @@ TEST_CASE("protocol: swim_read_feed on unknown instance fails (L3)") {
   char *ptr[10];
   REQUIRE(swim_read_feed("no_such_instance", sizeof(buf), buf, 10, ptr) == -1);
   CHECK(swim_errno() == SWIM_ERR_BAD_STATE);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+static void feed_event_cb(void *ctx, swim_event_t event, const char *node) {
+  (void)node;
+  if (event != SWIM_FEED) return;
+  const char *name = (const char *)ctx;
+  char buf[4096];
+  char *ptr[10];
+  int n;
+  while ((n = swim_read_feed(name, sizeof(buf), buf, 10, ptr)) > 0) {
+    std::string s;
+    for (int i = 0; i < n; i++) {
+      if (i > 0) s += " ";
+      s += ptr[i];
+    }
+    pthread_mutex_lock(&g_feed_mutex);
+    g_feed_records.push_back(s);
+    pthread_mutex_unlock(&g_feed_mutex);
+  }
+  g_feed_fired = true;
+}
+
+TEST_CASE("protocol: SWIM_FEED fires via callback and drains feed") {
+  g_feed_fired = false;
+  pthread_mutex_lock(&g_feed_mutex);
+  g_feed_records.clear();
+  pthread_mutex_unlock(&g_feed_mutex);
+
+  swim_node_id_t self_id, mock_id;
+  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20601/c1") == 0);
+  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20602/mock") == 0);
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.self = "127.0.0.1:20601/c1";
+  opts.name = "feed_cb_test";
+  opts.protocol_period_ms = 200;
+  opts.callback = feed_event_cb;
+  opts.ctx = (void *)"feed_cb_test";
+
+  REQUIRE(swim_start(&opts) == 0);
+
+  swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20602);
+  REQUIRE(mock_udp != nullptr);
+
+  uint8_t buf[256];
+  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
+                                buf, sizeof(buf));
+  REQUIRE(len > 0);
+  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
+
+  usleep(300000);
+
+  CHECK(g_feed_fired.load());
+  pthread_mutex_lock(&g_feed_mutex);
+  bool found = false;
+  for (const auto &s : g_feed_records)
+    if (s.find("node up") != std::string::npos) { found = true; break; }
+  pthread_mutex_unlock(&g_feed_mutex);
+  CHECK(found);
+
+  swim_udp_destroy(mock_udp);
+  swim_leave("feed_cb_test");
   swim_set_error(SWIM_OK, nullptr);
 }

@@ -40,11 +40,12 @@ SWIM_EXTERN const char *swim_errmsg(void);
  */
 SWIM_EXTERN const char *swim_strerror(int err);
 
-// Subscriber callback notification event
+// Event types delivered to the registered callback
 typedef enum {
   SWIM_NODE_UP,      // Node joined or became active
   SWIM_NODE_SUSPECT, // Node is suspected of failing
-  SWIM_NODE_DOWN     // Node is declared dead
+  SWIM_NODE_DOWN,    // Node is declared dead
+  SWIM_FEED          // Feed has data; drain with swim_read_feed()
 } swim_event_t;
 
 typedef void (*swim_callback_t)(void *ctx, swim_event_t event,
@@ -61,6 +62,9 @@ typedef struct {
   uint64_t suspicion_timeout_ms;   // default 3000
   uint64_t seed_retry_interval_ms; // default 5000
   uint64_t dead_node_expiry_ms;    // default 6000
+
+  swim_callback_t callback;        // Event callback; NULL for no notifications
+  void *ctx;                       // Opaque context passed to callback
 } swim_start_opts_t;
 
 /**
@@ -154,27 +158,6 @@ SWIM_EXTERN int swim_leave(const char *name);
  */
 SWIM_EXTERN char *swim_peers(const char *name, bool include_dead, int *count);
 
-/**
- * Subscribe a callback to receive membership events from a named instance.
- *
- * @param name     The name of the instance (mandatory).
- * @param callback The subscriber callback function.
- * @param ctx      Opaque context passed back to callback.
- * @return 0 on success, -1 on failure.
- */
-SWIM_EXTERN int swim_subscribe(const char *name, swim_callback_t callback,
-                               void *ctx);
-
-/**
- * Deregister a membership event subscriber.
- *
- * @param name     The name of the instance (mandatory).
- * @param callback The registered callback function.
- * @param ctx      Opaque context.
- * @return 0 on success, -1 on failure.
- */
-SWIM_EXTERN int swim_unsubscribe(const char *name, swim_callback_t callback,
-                                 void *ctx);
 
 /**
  * Read the next event from the feed of the named instance, copying its strings

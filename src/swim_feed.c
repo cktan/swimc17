@@ -21,6 +21,7 @@
 #include "swim_feed.h"
 #include "swim_errno.h"
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -279,4 +280,11 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
   }
 
   return n;
+}
+
+bool swim_feed_empty(swim_feed_t *feed) {
+  pthread_mutex_lock(&feed->mutex);
+  bool empty = (feed->read_off == feed->write_off);
+  pthread_mutex_unlock(&feed->mutex);
+  return empty;
 }

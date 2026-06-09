@@ -75,12 +75,6 @@ static void suspect_key(char *buf, size_t n, const swim_node_id_t *id) {
   snprintf(buf, n, "suspect:%s:%u:%s", id->host, id->port, id->cookie);
 }
 
-// Structures for internal protocol use
-typedef struct {
-  swim_callback_t cb;
-  void *ctx;
-} swim_sub_t;
-
 // A membership change discovered inside a critical section. Callbacks are
 // never run at the point of discovery (that would invoke user code while
 // holding inst->mutex, deadlocking if the callback re-enters the API).
@@ -97,8 +91,8 @@ typedef struct {
 typedef struct {
   pending_notify_t *items;
   int count;
-  swim_sub_t subs[16];
-  int sub_count;
+  swim_callback_t cb;
+  void *ctx;
 } notify_batch_t;
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
@@ -169,10 +163,8 @@ struct swim_instance_t {
   relay_probe_t relays[32];
   int relay_count;
 
-  // Event subscribers. swim_subscribe returns SWIM_ERR_FULL when all 16 slots
-  // are occupied.
-  swim_sub_t subscribers[16];
-  int subscriber_count;
+  swim_callback_t callback;
+  void *ctx;
 
   // Notifications discovered under the lock, dispatched after unlocking.
   pending_notify_t *pending;
@@ -541,11 +533,8 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
   inst->pending_count = 0;
   inst->pending_capacity = 0;
 
-  batch->sub_count = inst->subscriber_count;
-  if (batch->sub_count > 0) {
-    memcpy(batch->subs, inst->subscribers,
-           batch->sub_count * sizeof(swim_sub_t));
-  }
+  batch->cb = inst->callback;
+  batch->ctx = inst->ctx;
 }
 
 // Deliver a batch to its subscribers. MUST be called with no locks held: the
@@ -553,11 +542,11 @@ static void take_notifications(swim_instance_t *inst, notify_batch_t *batch) {
 // copies), never the originating instance, so it is safe even if that instance
 // is being torn down concurrently. Consumes (frees) the batch.
 static void dispatch_notifications(notify_batch_t *batch) {
-  for (int i = 0; i < batch->count; i++) {
-    char node_str[350];
-    swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
-    for (int s = 0; s < batch->sub_count; s++) {
-      batch->subs[s].cb(batch->subs[s].ctx, batch->items[i].event, node_str);
+  if (batch->cb) {
+    for (int i = 0; i < batch->count; i++) {
+      char node_str[350];
+      swim_node_id_format(&batch->items[i].node, node_str, sizeof(node_str));
+      batch->cb(batch->ctx, batch->items[i].event, node_str);
     }
   }
   free(batch->items);
@@ -810,6 +799,8 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
       dispatch_notifications(&batch);
+      if (batch.cb && !swim_feed_empty(instance->feed))
+        batch.cb(batch.ctx, SWIM_FEED, NULL);
       exp += 100;
     }
 
@@ -831,6 +822,8 @@ static void *swim_protocol_loop(swim_instance_t *instance) {
       take_notifications(instance, &batch);
       pthread_mutex_unlock(&instance->mutex);
       dispatch_notifications(&batch);
+      if (batch.cb && !swim_feed_empty(instance->feed))
+        batch.cb(batch.ctx, SWIM_FEED, NULL);
     }
   }
   return NULL;
@@ -986,6 +979,9 @@ int swim_start(const swim_start_opts_t *opts) {
   // Initialize thread synchronization
   pthread_mutex_init(&inst->mutex, NULL);
   atomic_store_explicit(&inst->running, true, memory_order_relaxed);
+
+  inst->callback = opts->callback;
+  inst->ctx = opts->ctx;
 
   // Seed this instance's private PRNG. Mix in the instance pointer so
   // instances started in the same second diverge.
@@ -1147,59 +1143,6 @@ char *swim_peers(const char *name, bool include_dead, int *count) {
   return buf;
 }
 
-int swim_subscribe(const char *name, swim_callback_t callback, void *ctx) {
-  if (!name || name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
-  }
-  if (!callback) {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Invalid NULL callback in swim_subscribe");
-  }
-
-  swim_instance_t *inst = find_and_lock_instance(name);
-  if (!inst) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
-  }
-
-  if (inst->subscriber_count >= 16) {
-    pthread_mutex_unlock(&inst->mutex);
-    return swim_set_error(SWIM_ERR_FULL, "Maximum subscriber limit reached");
-  }
-
-  inst->subscribers[inst->subscriber_count].cb = callback;
-  inst->subscribers[inst->subscriber_count].ctx = ctx;
-  inst->subscriber_count++;
-
-  pthread_mutex_unlock(&inst->mutex);
-  return 0;
-}
-
-int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx) {
-  if (!name || name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
-  }
-  swim_instance_t *inst = find_and_lock_instance(name);
-  if (!inst) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
-  }
-
-  int idx = -1;
-  for (int i = 0; i < inst->subscriber_count; i++) {
-    if (inst->subscribers[i].cb == callback &&
-        inst->subscribers[i].ctx == ctx) {
-      idx = i;
-      break;
-    }
-  }
-
-  if (idx != -1) {
-    inst->subscribers[idx] = inst->subscribers[inst->subscriber_count - 1];
-    inst->subscriber_count--;
-  }
-
-  pthread_mutex_unlock(&inst->mutex);
-  return 0;
-}
 
 int swim_read_feed(const char *name, int bufsz, char *buf, int nptr,
                    char **ptr) {

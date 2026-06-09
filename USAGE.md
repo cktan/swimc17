@@ -248,63 +248,6 @@ Thread-safe.
 
 ---
 
-### `swim_subscribe`
-
-```c
-int swim_subscribe(const char *name, swim_callback_t callback, void *ctx);
-```
-
-Registers a subscriber callback function to receive
-membership events (joins, suspicions, and node failures).
-
-The `name` argument specifies the instance. It must be
-non-NULL and non-empty. `callback` is a function pointer of
-type `swim_callback_t`, and `ctx` is an opaque context
-pointer passed back to the callback.
-
-The callback prototype is defined as:
-```c
-typedef void (*swim_callback_t)(void *ctx, swim_event_t event, const char *node);
-```
-Where `event` is:
-- `SWIM_NODE_UP`: A new node has joined or suspect node revived.
-- `SWIM_NODE_SUSPECT`: A node missed a ping.
-- `SWIM_NODE_DOWN`: A node was declared dead or left.
-
-Returns `0` on success. On failure, returns `-1` and sets:
-- `SWIM_ERR_INVALID`: `name` is NULL or empty, or `callback`
-  is NULL.
-- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
-- `SWIM_ERR_FULL`: Maximum subscriber limit (16) reached.
-
-Acquires the instance mutex to register the callback.
-**Caution**: Callback functions are executed in the context
-of the background worker thread. Callbacks must be quick,
-non-blocking, and thread-safe.
-
----
-
-### `swim_unsubscribe`
-
-```c
-int swim_unsubscribe(const char *name, swim_callback_t callback, void *ctx);
-```
-
-Deregisters a previously registered subscriber callback.
-
-The `name` argument specifies the instance. It must be
-non-NULL and non-empty. `callback` is the callback function
-pointer to deregister, and `ctx` is the context pointer
-matching the subscription.
-
-Returns `0` on success. On failure, returns `-1` and sets:
-- `SWIM_ERR_INVALID`: `name` is NULL or empty.
-- `SWIM_ERR_BAD_STATE`: No instance found matching `name`.
-
-Acquires the instance lock, searches for a matching
-callback and context, swaps it with the last registered
-subscriber, and updates the count. Thread-safe.
-
 ---
 
 ### `swim_hint_alive`
@@ -436,6 +379,8 @@ Options are configured in the `swim_start_opts_t` struct:
 | `suspicion_timeout_ms` | `uint64_t` | `3000` | Suspect → dead delay |
 | `seed_retry_interval_ms` | `uint64_t` | `5000` | Retry interval if no peers |
 | `dead_node_expiry_ms` | `uint64_t` | `6000` | How long to keep dead entries |
+| `callback` | `swim_callback_t` | `NULL` | Event callback (optional) |
+| `ctx` | `void *` | `NULL` | Opaque context passed to callback |
 
 ### Tuning for cluster size
 

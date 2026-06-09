@@ -303,12 +303,12 @@ free(p);
 
 ### Event subscription
 
-Membership changes are delivered through a registered
-callback:
+A single callback is registered at start time via
+`swim_start_opts_t`:
 
 ```c
-swim_subscribe("my_cluster", callback, ctx);   // register
-swim_unsubscribe("my_cluster", callback, ctx); // deregister
+opts.callback = my_callback;
+opts.ctx      = my_ctx;
 ```
 
 The callback has the signature:
@@ -318,11 +318,17 @@ void callback(void *ctx, swim_event_t event,
               const char *node);
 ```
 
-The opaque `ctx` pointer is passed back unchanged on every
-invocation. The callback is invoked from the protocol loop
-when a membership change is adopted, so it must be cheap and
-non-blocking; offload any heavy work to another thread.
-`unsubscribe` removes the matching `(callback, ctx)` pair.
+`event` is one of:
+
+- `SWIM_NODE_UP` / `SWIM_NODE_SUSPECT` / `SWIM_NODE_DOWN`:
+  membership transition; `node` is the affected peer string.
+- `SWIM_FEED`: the telemetry feed has records; `node` is
+  NULL. The callback should drain with `swim_read_feed()`
+  until it returns 0.
+
+The callback is invoked from the protocol loop with no locks
+held, so it may re-enter the public API. It must be
+non-blocking; offload heavy work to another thread.
 
 ### Liveness hint
 

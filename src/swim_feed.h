@@ -52,4 +52,12 @@ SWIM_EXTERN int swim_feed_put(swim_feed_t *feed, int n, ...);
 SWIM_EXTERN int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
                               char **ptr);
 
+/**
+ * Return true if the feed has no unread records.
+ *
+ * @param feed The feed instance.
+ * @return true if empty, false if records are available.
+ */
+SWIM_EXTERN bool swim_feed_empty(swim_feed_t *feed);
+
 #endif /* SWIM_FEED_H */
