@@ -252,8 +252,6 @@ int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
     return 0;
   }
 
-  // make a copy so we can qsort()
-  // TODO: is there any harm in just sorting in place?
   gossip_entry_t *temp = malloc(n * sizeof(gossip_entry_t));
   if (!temp) {
     return swim_set_error(SWIM_ERR_NOMEM,
