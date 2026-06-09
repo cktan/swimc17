@@ -149,7 +149,7 @@ static int decode_node_id(swim_node_id_t *id, const uint8_t *p,
   return (int)(p - start);
 }
 
-// Encode a membership event: [node_id] [status (1B)] [incarnation (8B)].
+// Encode a membership update: [node_id] [status (1B)] [incarnation (8B)].
 // Returns bytes written, or -1 if buffer is too small (no error set — callers
 // use -1 as a stopping signal when packing gossip into a packet).
 int swim_encode_membership(const swim_member_t *m, uint8_t *p, uint8_t *q) {
@@ -308,7 +308,7 @@ int swim_decode_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
     }
     n = decode_membership(&msg->gossip[count], p, end);
     if (n < 0) {
-      return swim_set_error(SWIM_ERR_INVALID, "Failed to decode gossip event");
+      return swim_set_error(SWIM_ERR_INVALID, "Failed to decode gossip update");
     }
     p += n;
     count++;

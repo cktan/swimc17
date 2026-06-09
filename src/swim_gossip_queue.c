@@ -1,9 +1,9 @@
 /*
  * swim_gossip_queue.c — Gossip dissemination priority queue.
  *
- * Tracks pending membership events to be piggybacked on
- * outgoing messages. Events are keyed by node ID; a new
- * event supersedes an existing one when its incarnation is
+ * Tracks pending membership updates to be piggybacked on
+ * outgoing messages. Updates are keyed by node ID; a new
+ * update supersedes an existing one when its incarnation is
  * higher, or when the incarnation is equal but its priority
  * is higher (DEAD > SUSPECT > ALIVE). Each entry carries a
  * transmit count; entries are pruned after being packed
@@ -12,9 +12,9 @@
  *
  * The queue is a dynamically-grown flat array. There is no
  * heap data structure: qsort is called on the array before
- * every pack_ex, sorting by (priority, transmit_count,
+ * every pack, sorting by (priority, transmit_count,
  * node_id). This is simple and fast enough for the small
- * queue sizes typical in SWIM (bounded by MTU / event size).
+ * queue sizes typical in SWIM (bounded by MTU / update size).
  */
 #include "swim_gossip_queue.h"
 #include "swim_errno.h"
@@ -23,7 +23,7 @@
 
 typedef struct gossip_entry_t gossip_entry_t;
 struct gossip_entry_t {
-  swim_member_t event;
+  swim_member_t update;
   uint32_t transmit_count;
   uint32_t multiplier;
 };
@@ -53,8 +53,8 @@ static int compare_entries(const void *a, const void *b) {
   const gossip_entry_t *eb = (const gossip_entry_t *)b;
 
   // 1. Priority (lower value is higher priority: DEAD=0, SUSPECT=1, ALIVE=2)
-  int pa = get_priority(ea->event.status);
-  int pb = get_priority(eb->event.status);
+  int pa = get_priority(ea->update.status);
+  int pb = get_priority(eb->update.status);
   if (pa != pb) {
     return (pa < pb) ? -1 : 1;
   }
@@ -65,7 +65,7 @@ static int compare_entries(const void *a, const void *b) {
   }
 
   // 3. Stable tie-breaker: Node ID comparison
-  return swim_node_id_compare(&ea->event.id, &eb->event.id);
+  return swim_node_id_compare(&ea->update.id, &eb->update.id);
 }
 
 // Integer-only ceil(log2(n)) limit multiplier helper
@@ -105,14 +105,14 @@ void swim_gossip_queue_destroy(swim_gossip_queue_t *q) {
 
 static int find_entry(const swim_gossip_queue_t *q, const swim_node_id_t *id) {
   for (int i = 0; i < q->count; i++) {
-    if (swim_node_id_compare(&q->entries[i].event.id, id) == 0) {
+    if (swim_node_id_compare(&q->entries[i].update.id, id) == 0) {
       return i;
     }
   }
   return -1;
 }
 
-// Enqueue a gossip event. Supersession rules: higher incarnation wins; on
+// Enqueue a membership update. Supersession rules: higher incarnation wins; on
 // equal incarnations, higher priority (DEAD > SUSPECT > ALIVE) wins.
 int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
                               const swim_node_id_t *id, uint64_t incarnation,
@@ -124,7 +124,7 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 
   int idx = find_entry(q, id);
   if (idx == -1) {
-    // Brand new event, insert at end
+    // Brand new update, insert at end
     if (q->count == q->capacity) {
       int new_capacity = q->capacity == 0 ? 8 : q->capacity * 2;
       gossip_entry_t *new_entries =
@@ -138,10 +138,10 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
     }
 
     gossip_entry_t *entry = &q->entries[q->count];
-    entry->event.id = *id;
-    entry->event.status = status;
-    entry->event.incarnation = incarnation;
-    entry->event.dead_at = 0;
+    entry->update.id = *id;
+    entry->update.status = status;
+    entry->update.incarnation = incarnation;
+    entry->update.dead_at = 0;
     entry->transmit_count = 0;
     entry->multiplier = multiplier;
     q->count++;
@@ -150,18 +150,18 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 
   // Existing entry found: apply supersession rules
   gossip_entry_t *existing = &q->entries[idx];
-  if (incarnation > existing->event.incarnation) {
-    existing->event.status = status;
-    existing->event.incarnation = incarnation;
+  if (incarnation > existing->update.incarnation) {
+    existing->update.status = status;
+    existing->update.incarnation = incarnation;
     existing->transmit_count = 0;
     existing->multiplier = multiplier;
-  } else if (incarnation == existing->event.incarnation) {
+  } else if (incarnation == existing->update.incarnation) {
     int incoming_prio = get_priority(status);
-    int existing_prio = get_priority(existing->event.status);
+    int existing_prio = get_priority(existing->update.status);
     if (incoming_prio <
         existing_prio) { // Lower priority value is higher priority: DEAD=0 >
                          // SUSPECT=1 > ALIVE=2
-      existing->event.status = status;
+      existing->update.status = status;
       existing->transmit_count = 0;
       if (multiplier > existing->multiplier) {
         existing->multiplier = multiplier;
@@ -173,7 +173,7 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
   return 0;
 }
 
-// Pack events into [p, q) in wire format. Writes as many events as fit.
+// Pack updates into [p, q) in wire format. Writes as many updates as fit.
 // Returns bytes written, or -1 on error.
 int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
                               uint8_t *p, uint8_t *q) {
@@ -188,8 +188,8 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
 
   uint8_t *start = p;
 
-  // Sort entries to establish priority order (DEAD > SUSPECT > ALIVE) and
-  // lowest transmit count
+  // Sort before packing, not on insert: transmit_count (part of the sort key)
+  // is incremented during this loop, so the order is stale after every pack.
   qsort(queue->entries, queue->count, sizeof(gossip_entry_t), compare_entries);
 
   bool keep[queue->count];
@@ -197,14 +197,14 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
 
   uint32_t limit = get_transmit_limit(cluster_size);
 
-  // First loop: pack members until the buffer budget or event cap is exhausted
+  // First loop: pack updates until the buffer budget or update cap is exhausted
   int packed = 0;
   for (int i = 0; i < queue->count; i++) {
     if (packed >= SWIM_MAX_EVENTS)
       break;
     gossip_entry_t *entry = &queue->entries[i];
 
-    int n = swim_encode_membership(&entry->event, p, q);
+    int n = swim_encode_membership(&entry->update, p, q);
     if (n < 0) {
       // Out of buffer space: stop packing
       break;
@@ -233,16 +233,16 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
   return (int)(p - start);
 }
 
-// Return the number of events currently in the gossip queue.
+// Return the number of updates currently in the gossip queue.
 int swim_gossip_queue_size(const swim_gossip_queue_t *q) {
   return q ? q->count : 0;
 }
 
-// Copy up to max_len queued events (in priority order) into out_events.
+// Copy up to max_len queued updates (in priority order) into out_updates.
 // For testing and debugging. Returns count copied, or -1 on error.
 int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
-                           swim_member_t *out_events, int max_len) {
-  if (!q || !out_events || max_len < 0) {
+                           swim_member_t *out_updates, int max_len) {
+  if (!q || !out_updates || max_len < 0) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid arguments to swim_gossip_queue_peek");
   }
@@ -262,7 +262,7 @@ int swim_gossip_queue_peek(const swim_gossip_queue_t *q,
 
   int copied = 0;
   for (int i = 0; i < n && copied < max_len; i++) {
-    out_events[copied] = temp[i].event;
+    out_updates[copied] = temp[i].update;
     copied++;
   }
 
