@@ -228,6 +228,7 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
     }
   }
 
+  assert(write_idx <= queue->count);
   queue->count = write_idx;
 
   return (int)(p - start);
