@@ -10,8 +10,8 @@
  * write `return swim_set_error(...)` as a one-liner without
  * a separate return statement.
  */
-#include "swim.h"
 #include "swim_errno.h"
+#include "swim.h"
 
 #include <stdarg.h>
 #include <stdio.h>

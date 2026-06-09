@@ -1,8 +1,8 @@
 #ifndef SWIM_GOSSIP_QUEUE_H
 #define SWIM_GOSSIP_QUEUE_H
 
-#include "swim_membership.h"
 #include "swim.h"
+#include "swim_membership.h"
 
 #define REFUTATION_MULTIPLIER 2
 
@@ -52,8 +52,8 @@ SWIM_EXTERN int swim_gossip_queue_enqueue(swim_gossip_queue_t *q,
  * @return The number of bytes written on success, or -1 on error.
  */
 SWIM_EXTERN int swim_gossip_queue_pack(swim_gossip_queue_t *queue,
-                                          uint32_t cluster_size, uint8_t *p,
-                                          uint8_t *q);
+                                       uint32_t cluster_size, uint8_t *p,
+                                       uint8_t *q);
 
 /**
  * Return the number of updates currently in the gossip queue.

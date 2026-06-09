@@ -122,7 +122,8 @@ int swim_feed_put(swim_feed_t *feed, int n, ...) {
       if (feed->head == feed->tail) {
         // No pages left to sacrifice (empty or only tail remains).
         pthread_mutex_unlock(&feed->mutex);
-        return swim_set_error(SWIM_ERR_NOMEM, "Out of memory allocating feed page");
+        return swim_set_error(SWIM_ERR_NOMEM,
+                              "Out of memory allocating feed page");
       }
       feed_page_t *old_head = feed->head;
       feed->head = old_head->next;
@@ -173,7 +174,7 @@ int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms) {
   } else {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec  += (time_t)(timeout_ms / 1000);
+    ts.tv_sec += (time_t)(timeout_ms / 1000);
     ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
     if (ts.tv_nsec >= 1000000000L) {
       ts.tv_sec++;
@@ -229,8 +230,8 @@ int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
       valid = 0;
       break;
     }
-    char *nul_pos = memchr(feed->head->data + scan_off, '\0',
-                           feed->head->top - scan_off);
+    char *nul_pos =
+        memchr(feed->head->data + scan_off, '\0', feed->head->top - scan_off);
     if (!nul_pos) {
       valid = 0;
       break;

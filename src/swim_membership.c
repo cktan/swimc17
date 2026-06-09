@@ -127,8 +127,8 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
   if (find_node(m, id, &idx)) {
     swim_member_t *member = &m->members[idx];
 
-    // Higher incarnation always wins; at equal incarnation, DEAD > SUSPECT > ALIVE.
-    // Node is already known, apply precedence rules:
+    // Higher incarnation always wins; at equal incarnation, DEAD > SUSPECT >
+    // ALIVE. Node is already known, apply precedence rules:
     if (member->status == SWIM_STATUS_DEAD) {
       // DEAD is terminal for a given incarnation. Revive only if inc is
       // strictly higher and the incoming status is ALIVE.

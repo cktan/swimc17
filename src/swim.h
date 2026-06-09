@@ -19,8 +19,8 @@
 #define SWIM_ERR_BAD_STATE 5
 
 // Feed record limits (enforced at write time)
-#define SWIM_FEED_MAX_RECORD_SIZE 1024  // max string-payload bytes per record
-#define SWIM_FEED_MAX_ELEMENTS    10    // max strings per record
+#define SWIM_FEED_MAX_RECORD_SIZE 1024 // max string-payload bytes per record
+#define SWIM_FEED_MAX_ELEMENTS 10      // max strings per record
 
 // Pass as timeout_ms to swim_feed_wait to block without a deadline.
 #define SWIM_WAIT_FOREVER UINT64_MAX
@@ -112,8 +112,8 @@ SWIM_EXTERN int swim_feed_put(swim_feed_t *feed, int n, ...);
  * @return number of strings (>= 1) on success, 0 if the feed is
  *         empty, or -1 on error (sets swim_errno).
  */
-SWIM_EXTERN int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf,
-                              int nptr, char **ptr);
+SWIM_EXTERN int swim_feed_get(swim_feed_t *feed, int bufsz, char *buf, int nptr,
+                              char **ptr);
 
 /**
  * Return true if the feed has no unread records.
@@ -142,9 +142,10 @@ SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
 // --- Instance lifecycle ---
 
 typedef struct {
-  const char *self;                // "host:port" or "host:port/cookie" (mandatory)
-  const char *name;                // Unique instance name (mandatory)
-  const char **seeds;              // NULL-terminated list of seed strings ("host:port/cookie")
+  const char *self; // "host:port" or "host:port/cookie" (mandatory)
+  const char *name; // Unique instance name (mandatory)
+  const char *
+      *seeds; // NULL-terminated list of seed strings ("host:port/cookie")
 
   uint64_t protocol_period_ms;     // default 1000
   uint64_t ping_timeout_ms;        // default 200

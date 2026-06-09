@@ -176,7 +176,8 @@ TEST_CASE("swim_feed: multi-page lifecycle") {
   read_n(5 * rpp);
   CHECK(read_and_check(feed, {}) == 0);
 
-  // Grow to 2 pages: 4 records fill the recycled tail page, 1 starts a new page.
+  // Grow to 2 pages: 4 records fill the recycled tail page, 1 starts a new
+  // page.
   write_n(rpp + 1);
 
   // Drain all the way again.

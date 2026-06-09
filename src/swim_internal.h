@@ -1,8 +1,8 @@
 #ifndef SWIM_PROTOCOL_INTERNAL_H
 #define SWIM_PROTOCOL_INTERNAL_H
 
-#include "swim_membership.h"
 #include "swim.h"
+#include "swim_membership.h"
 
 /*
  * Internal/QA-only interface. Not part of the public API exposed in

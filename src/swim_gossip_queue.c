@@ -17,8 +17,8 @@
  * queue sizes typical in SWIM (bounded by MTU / update size).
  */
 #include "swim_gossip_queue.h"
-#include "swim_errno.h"
 #include "swim_codec.h"
+#include "swim_errno.h"
 #include <stdlib.h>
 
 typedef struct gossip_entry_t gossip_entry_t;
@@ -34,7 +34,6 @@ struct swim_gossip_queue_t {
   int count;
   int capacity;
 };
-
 
 // Convert status to priority value: DEAD (0) > SUSPECT (1) > ALIVE (2)
 static inline int get_priority(swim_status_t status) {
@@ -176,7 +175,7 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 // Pack updates into [p, q) in wire format. Writes as many updates as fit.
 // Returns bytes written, or -1 on error.
 int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
-                              uint8_t *p, uint8_t *q) {
+                           uint8_t *p, uint8_t *q) {
   if (!queue || !p || q < p) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid arguments to swim_gossip_queue_pack");

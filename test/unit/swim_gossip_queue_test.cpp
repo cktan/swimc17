@@ -114,22 +114,26 @@ TEST_CASE("gossip_queue: transmit count priority tie-breaker") {
 
   // Pack with a budget that only fits one event (24 bytes).
   char buf[50];
-  int packed_bytes = swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 30);
+  int packed_bytes =
+      swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 30);
   REQUIRE(packed_bytes == 24);
 
   // The packed event is idA because of stable tie-breaker
   swim_member_t peek[2];
   int peek_count = swim_gossip_queue_peek(q, peek, 2);
   REQUIRE(peek_count == 2);
-  // idB should now be first because it has transmit_count 0, whereas idA has transmit_count 1
+  // idB should now be first because it has transmit_count 0, whereas idA has
+  // transmit_count 1
   CHECK(swim_node_id_compare(&peek[0].id, &idB) == 0);
   CHECK(swim_node_id_compare(&peek[1].id, &idA) == 0);
 
   // Pack again with a budget that only fits one event.
-  packed_bytes = swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 30);
+  packed_bytes =
+      swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 30);
   REQUIRE(packed_bytes == 24);
 
-  // Now both idA and idB have transmit_count 1. So tie-breaker node ID comparison puts idA first again
+  // Now both idA and idB have transmit_count 1. So tie-breaker node ID
+  // comparison puts idA first again
   peek_count = swim_gossip_queue_peek(q, peek, 2);
   REQUIRE(peek_count == 2);
   CHECK(swim_node_id_compare(&peek[0].id, &idA) == 0);
@@ -157,10 +161,13 @@ TEST_CASE("gossip_queue: event size limit packing budget") {
   // 24 * 2 = 48 bytes (fits)
   // 24 * 3 = 72 bytes (exceeds)
   // So it should pack exactly 2 events.
-  int packed_bytes = swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 60);
+  int packed_bytes =
+      swim_gossip_queue_pack(q, 5, (uint8_t *)buf, (uint8_t *)buf + 60);
   CHECK(packed_bytes == 48);
 
-  CHECK(swim_gossip_queue_size(q) == 3); // Since transmit count hasn't reached limit, all 3 are still in queue
+  CHECK(
+      swim_gossip_queue_size(q) ==
+      3); // Since transmit count hasn't reached limit, all 3 are still in queue
 
   swim_gossip_queue_destroy(q);
 }
@@ -178,13 +185,15 @@ TEST_CASE("gossip_queue: transmit limit pruning") {
 
   char buf[100];
   for (int i = 0; i < 5; i++) {
-    int packed_bytes = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
+    int packed_bytes =
+        swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
     REQUIRE(packed_bytes == 24);
     CHECK(swim_gossip_queue_size(q) == 1); // Not yet pruned
   }
 
   // 6th pack reaches the transmit limit of 6
-  int packed_bytes = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
+  int packed_bytes =
+      swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
   REQUIRE(packed_bytes == 24);
   CHECK(swim_gossip_queue_size(q) == 0); // Pruned from the queue!
 
@@ -204,13 +213,15 @@ TEST_CASE("gossip_queue: transmit limit pruning with multiplier") {
 
   char buf[100];
   for (int i = 0; i < 11; i++) {
-    int packed_bytes = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
+    int packed_bytes =
+        swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
     REQUIRE(packed_bytes == 24);
     CHECK(swim_gossip_queue_size(q) == 1); // Not yet pruned
   }
 
   // 12th pack reaches the total limit of 12
-  int packed_bytes = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
+  int packed_bytes =
+      swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 100);
   REQUIRE(packed_bytes == 24);
   CHECK(swim_gossip_queue_size(q) == 0); // Pruned!
 
@@ -223,7 +234,8 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack basic encoding") {
 
   // 1. Pack empty queue
   char buf[512];
-  int rc = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + sizeof(buf));
+  int rc = swim_gossip_queue_pack(q, 3, (uint8_t *)buf,
+                                  (uint8_t *)buf + sizeof(buf));
   CHECK(rc == 0);
 
   // 2. Add a member
@@ -232,7 +244,8 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack basic encoding") {
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 42, 1) == 0);
 
   memset(buf, 0, sizeof(buf));
-  rc = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + sizeof(buf));
+  rc = swim_gossip_queue_pack(q, 3, (uint8_t *)buf,
+                              (uint8_t *)buf + sizeof(buf));
   CHECK(rc == 31);
 
   // Verify the layout (member list, no count prefix):
@@ -284,8 +297,10 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack budget limits") {
   REQUIRE(q != nullptr);
 
   swim_node_id_t id1, id2;
-  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") == 0); // length of event: 15 + 9 + 7 = 31 bytes
-  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002/cookie2") == 0); // length of event: 31 bytes
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/cookie1") ==
+          0); // length of event: 15 + 9 + 7 = 31 bytes
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002/cookie2") ==
+          0); // length of event: 31 bytes
 
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 10, 1) == 0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id2, 10, 1) == 0);
@@ -294,9 +309,9 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack budget limits") {
   int rc = swim_gossip_queue_pack(q, 3, (uint8_t *)buf, (uint8_t *)buf + 50);
   CHECK(rc == 31); // Only one event packed, consuming 31 bytes
 
-  // Remaining queue should have size 2 (since the one packed hasn't reached limit, and the other wasn't packed)
+  // Remaining queue should have size 2 (since the one packed hasn't reached
+  // limit, and the other wasn't packed)
   CHECK(swim_gossip_queue_size(q) == 2);
 
   swim_gossip_queue_destroy(q);
 }
-

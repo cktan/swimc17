@@ -25,8 +25,8 @@
  */
 #define _GNU_SOURCE
 #include "swim.h"
-#include "swim_errno.h"
 #include "swim_codec.h"
+#include "swim_errno.h"
 #include "swim_gossip_queue.h"
 #include "swim_internal.h"
 #include "swim_timer.h"
@@ -226,7 +226,8 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
     if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
                        probe_timer_cb, inst, NULL) != 0) {
       if (inst->feed)
-        swim_feed_put(inst->feed, 2, "warning", "probe timer failed to re-arm: probing stopped");
+        swim_feed_put(inst->feed, 2, "warning",
+                      "probe timer failed to re-arm: probing stopped");
     }
     return;
   }
@@ -286,10 +287,10 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
                      probe_timer_cb, inst, NULL) != 0) {
     if (inst->feed)
-      swim_feed_put(inst->feed, 2, "warning", "probe timer failed to re-arm: probing stopped");
+      swim_feed_put(inst->feed, 2, "warning",
+                    "probe timer failed to re-arm: probing stopped");
   }
 }
-
 
 // Fires when a suspected node has not refuted suspicion within
 // suspicion_timeout_ms. Declares it dead and enqueues a gossip event.
@@ -326,7 +327,8 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       swim_member_t *helpers = malloc(active_count * sizeof(swim_member_t));
       if (!helpers) {
         if (inst->feed)
-          swim_feed_put(inst->feed, 2, "warning", "indirect probe skipped: out of memory");
+          swim_feed_put(inst->feed, 2, "warning",
+                        "indirect probe skipped: out of memory");
       } else {
         int count = swim_membership_list(inst->membership, helpers,
                                          active_count, false);
@@ -377,7 +379,8 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
       if (!suspect_param) {
         if (inst->feed)
-          swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: out of memory");
+          swim_feed_put(inst->feed, 2, "warning",
+                        "suspicion timer not armed: out of memory");
       } else {
         *suspect_param = target;
         char alarm_name[384];
@@ -387,7 +390,8 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
                            suspect_param) != 0) {
           free(suspect_param);
           if (inst->feed)
-            swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: timer add failed");
+            swim_feed_put(inst->feed, 2, "warning",
+                          "suspicion timer not armed: timer add failed");
         }
       }
     }
@@ -421,7 +425,9 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   if (swim_timer_add(inst->timer, inst->seed_retry_interval_ms / 100,
                      "seed_retry", seed_retry_timer_cb, inst, NULL) != 0) {
     if (inst->feed)
-      swim_feed_put(inst->feed, 2, "warning", "seed retry timer failed to re-arm: seed discovery stopped");
+      swim_feed_put(
+          inst->feed, 2, "warning",
+          "seed retry timer failed to re-arm: seed discovery stopped");
   }
 }
 
@@ -435,13 +441,14 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
   swim_gossip_queue_t *q_to_pass =
       (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
   int len = swim_pack_message(type, sender, seq, peer, q_to_pass,
-                                swim_membership_count(inst->membership), buf,
-                                sizeof(buf));
+                              swim_membership_count(inst->membership), buf,
+                              sizeof(buf));
   if (len > 0) {
     swim_udp_send(inst->udp, dest, buf, len);
   } else {
     char node_str[350];
-    if (inst->feed && swim_node_id_format(dest, node_str, sizeof(node_str)) == 0) {
+    if (inst->feed &&
+        swim_node_id_format(dest, node_str, sizeof(node_str)) == 0) {
       char warn_msg[512];
       snprintf(warn_msg, sizeof(warn_msg), "message dropped to %s", node_str);
       swim_feed_put(inst->feed, 2, "warning", warn_msg);
@@ -570,12 +577,13 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         } else if (ev->status == SWIM_STATUS_SUSPECT) {
           queue_notification(inst, "suspect", &ev->id);
 
-          // Heap-allocate the ID; the suspicion callback takes ownership and frees it.
-          // Start suspicion timer
+          // Heap-allocate the ID; the suspicion callback takes ownership and
+          // frees it. Start suspicion timer
           swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
           if (!suspect_param) {
             if (inst->feed)
-              swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: out of memory");
+              swim_feed_put(inst->feed, 2, "warning",
+                            "suspicion timer not armed: out of memory");
           } else {
             *suspect_param = ev->id;
             char alarm_name[384];
@@ -585,7 +593,8 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
                                suspect_param) != 0) {
               free(suspect_param);
               if (inst->feed)
-                swim_feed_put(inst->feed, 2, "warning", "suspicion timer not armed: timer add failed");
+                swim_feed_put(inst->feed, 2, "warning",
+                              "suspicion timer not armed: timer add failed");
             }
           }
         } else if (ev->status == SWIM_STATUS_ALIVE) {
@@ -772,24 +781,25 @@ swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms) {
     uint64_t T = (uint64_t)((double)detect_ms / (1.4 + logn));
 
     if (T > 0) {
-      opts.protocol_period_ms     = T;
-      opts.ping_timeout_ms        = T / 5;
-      opts.ping_req_fanout        = 3;  // SWIM paper default; independent of N and T
-      opts.suspicion_timeout_ms   = (uint64_t)(logn * (double)T);
-      opts.dead_node_expiry_ms    = 2 * opts.suspicion_timeout_ms;
-      opts.seed_retry_interval_ms = 5 * T;  // retry unreachable seeds every 5 periods
+      opts.protocol_period_ms = T;
+      opts.ping_timeout_ms = T / 5;
+      opts.ping_req_fanout = 3; // SWIM paper default; independent of N and T
+      opts.suspicion_timeout_ms = (uint64_t)(logn * (double)T);
+      opts.dead_node_expiry_ms = 2 * opts.suspicion_timeout_ms;
+      opts.seed_retry_interval_ms =
+          5 * T; // retry unreachable seeds every 5 periods
       return opts;
     }
   }
 
   // Inputs are degenerate (n <= 1, detect_ms == 0, or T rounded to 0).
   // Return the same defaults swim_start() applies for zero-initialized fields.
-  opts.protocol_period_ms     = 1000;
-  opts.ping_timeout_ms        = 200;
-  opts.ping_req_fanout        = 3;
-  opts.suspicion_timeout_ms   = 3000;
+  opts.protocol_period_ms = 1000;
+  opts.ping_timeout_ms = 200;
+  opts.ping_req_fanout = 3;
+  opts.suspicion_timeout_ms = 3000;
   opts.seed_retry_interval_ms = 5000;
-  opts.dead_node_expiry_ms    = 6000;
+  opts.dead_node_expiry_ms = 6000;
   return opts;
 }
 
@@ -876,7 +886,8 @@ int swim_start(const swim_start_opts_t *opts) {
   if (opts->seeds) {
     // Count how many seeds
     int n = 0;
-    while (opts->seeds[n]) n++;
+    while (opts->seeds[n])
+      n++;
     if (n > 0) {
       // Alloc array and fill
       inst->seeds = malloc(n * sizeof(swim_node_id_t));
@@ -1053,7 +1064,6 @@ char *swim_peers(const char *name, bool include_dead, int *count) {
   pthread_mutex_unlock(&inst->mutex);
   return buf;
 }
-
 
 int swim_hint_alive(const char *name, const char *peer) {
   if (!name || name[0] == '\0') {

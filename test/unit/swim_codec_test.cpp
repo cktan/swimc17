@@ -1,10 +1,10 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_codec.h"
-#include "swim_gossip_queue.h"
 #include "swim.h"
+#include "swim_codec.h"
 #include "swim_errno.h"
+#include "swim_gossip_queue.h"
 }
 
 #include <cstring>
@@ -15,7 +15,8 @@ TEST_CASE("codec: ping/ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/my_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 420, nullptr, nullptr,
+                                  0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
@@ -35,7 +36,8 @@ TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
   REQUIRE(swim_node_id_parse(&peer, "[::1]:9002/target_cookie") == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 1001, &peer,
+                                  nullptr, 0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
@@ -62,12 +64,15 @@ TEST_CASE("codec: full message roundtrip with events") {
   REQUIRE(swim_node_id_parse(&id2, "192.168.0.12:82/c2") == 0);
   REQUIRE(swim_node_id_parse(&id3, "192.168.0.13:83/c3") == 0);
 
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 123456789ULL, 1) == 0);
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, &id2, 55ULL, 1) == 0);
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id1, 123456789ULL,
+                                    1) == 0);
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, &id2, 55ULL, 1) ==
+          0);
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_DEAD, &id3, 999ULL, 1) == 0);
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int enc_len = swim_pack_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_ACK, &sender, 99999, nullptr, q, 3,
+                                  buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   swim_message_t decoded;
@@ -80,7 +85,8 @@ TEST_CASE("codec: full message roundtrip with events") {
   CHECK(decoded.gossip_count == 3);
   CHECK(swim_node_id_compare(&decoded.sender, &sender) == 0);
 
-  // Since qsort sorts them by priority (DEAD (0) > SUSPECT (1) > ALIVE (2)), the events order will be:
+  // Since qsort sorts them by priority (DEAD (0) > SUSPECT (1) > ALIVE (2)),
+  // the events order will be:
   // 1. DEAD (id3)
   // 2. SUSPECT (id2)
   // 3. ALIVE (id1)
@@ -104,7 +110,8 @@ TEST_CASE("codec: error validation and bounds checking") {
   REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001") == 0);
 
   uint8_t buf[256];
-  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr, 0, buf, sizeof(buf));
+  int enc_len = swim_pack_message(SWIM_MSG_PING, &sender, 500, nullptr, nullptr,
+                                  0, buf, sizeof(buf));
   REQUIRE(enc_len > 0);
 
   // 1. Buffer too small for decode
@@ -129,7 +136,6 @@ TEST_CASE("codec: error validation and bounds checking") {
   // Restore clean errno state so other test cases are not affected
   swim_set_error(SWIM_OK, nullptr);
 }
-
 
 TEST_CASE("codec: swim_pack_membership") {
   swim_member_t member;
@@ -163,4 +169,3 @@ TEST_CASE("codec: swim_pack_membership") {
   rc = swim_pack_membership(&member, buf, buf + 32);
   CHECK(rc == -1);
 }
-

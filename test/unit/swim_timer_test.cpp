@@ -2,8 +2,8 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_timer.h"
 #include "swim_errno.h"
+#include "swim_timer.h"
 }
 
 #include <cstdint>

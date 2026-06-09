@@ -30,27 +30,31 @@
 #include <string.h>
 
 static int pack_int8(uint8_t val, uint8_t *p, uint8_t *q) {
-  if (p + 1 > q) return -1;
+  if (p + 1 > q)
+    return -1;
   *p = val;
   return 1;
 }
 
 static int pack_int16(uint16_t val, uint8_t *p, uint8_t *q) {
-  if (p + 2 > q) return -1;
+  if (p + 2 > q)
+    return -1;
   uint16_t net_val = htons(val);
   memcpy(p, &net_val, 2);
   return 2;
 }
 
 static int pack_int32(uint32_t val, uint8_t *p, uint8_t *q) {
-  if (p + 4 > q) return -1;
+  if (p + 4 > q)
+    return -1;
   uint32_t net_val = htonl(val);
   memcpy(p, &net_val, 4);
   return 4;
 }
 
 static int pack_int64(uint64_t val, uint8_t *p, uint8_t *q) {
-  if (p + 8 > q) return -1;
+  if (p + 8 > q)
+    return -1;
   uint64_t net_val = htobe64(val);
   memcpy(p, &net_val, 8);
   return 8;
@@ -58,7 +62,8 @@ static int pack_int64(uint64_t val, uint8_t *p, uint8_t *q) {
 
 static int pack_string(const char *str, uint8_t *p, uint8_t *q) {
   size_t len = strlen(str);
-  if (p + 2 + len > q) return -1;
+  if (p + 2 + len > q)
+    return -1;
   uint16_t net_len = htons((uint16_t)len);
   memcpy(p, &net_len, 2);
   memcpy(p + 2, str, len);
@@ -66,13 +71,15 @@ static int pack_string(const char *str, uint8_t *p, uint8_t *q) {
 }
 
 static int unpack_int8(uint8_t *val, const uint8_t *p, const uint8_t *q) {
-  if (p + 1 > q) return -1;
+  if (p + 1 > q)
+    return -1;
   *val = *p;
   return 1;
 }
 
 static int unpack_int16(uint16_t *val, const uint8_t *p, const uint8_t *q) {
-  if (p + 2 > q) return -1;
+  if (p + 2 > q)
+    return -1;
   uint16_t net_val;
   memcpy(&net_val, p, 2);
   *val = ntohs(net_val);
@@ -80,7 +87,8 @@ static int unpack_int16(uint16_t *val, const uint8_t *p, const uint8_t *q) {
 }
 
 static int unpack_int32(uint32_t *val, const uint8_t *p, const uint8_t *q) {
-  if (p + 4 > q) return -1;
+  if (p + 4 > q)
+    return -1;
   uint32_t net_val;
   memcpy(&net_val, p, 4);
   *val = ntohl(net_val);
@@ -88,7 +96,8 @@ static int unpack_int32(uint32_t *val, const uint8_t *p, const uint8_t *q) {
 }
 
 static int unpack_int64(uint64_t *val, const uint8_t *p, const uint8_t *q) {
-  if (p + 8 > q) return -1;
+  if (p + 8 > q)
+    return -1;
   uint64_t net_val;
   memcpy(&net_val, p, 8);
   *val = be64toh(net_val);
@@ -97,12 +106,15 @@ static int unpack_int64(uint64_t *val, const uint8_t *p, const uint8_t *q) {
 
 static int unpack_string(char *str, size_t max_len, const uint8_t *p,
                          const uint8_t *q) {
-  if (p + 2 > q) return -1;
+  if (p + 2 > q)
+    return -1;
   uint16_t net_len;
   memcpy(&net_len, p, 2);
   size_t len = ntohs(net_len);
-  if (p + 2 + len > q) return -1;
-  if (len >= max_len) return -1;
+  if (p + 2 + len > q)
+    return -1;
+  if (len >= max_len)
+    return -1;
   memcpy(str, p + 2, len);
   str[len] = '\0';
   return (int)(2 + len);
@@ -115,35 +127,41 @@ static int pack_node_id(const swim_node_id_t *id, uint8_t *p, uint8_t *q) {
   int n;
 
   n = pack_string(id->host, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
   n = pack_int16(id->port, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
   n = pack_string(id->cookie, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   return (int)(p - start);
 }
 
 static int unpack_node_id(swim_node_id_t *id, const uint8_t *p,
-                           const uint8_t *q) {
+                          const uint8_t *q) {
   const uint8_t *start = p;
   int n;
 
   n = unpack_string(id->host, sizeof(id->host), p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   uint16_t port;
   n = unpack_int16(&port, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   id->port = port;
   p += n;
 
   n = unpack_string(id->cookie, sizeof(id->cookie), p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   return (int)(p - start);
@@ -161,37 +179,43 @@ int swim_pack_membership(const swim_member_t *m, uint8_t *p, uint8_t *q) {
   int n;
 
   n = pack_node_id(&m->id, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   n = pack_int8((uint8_t)m->status, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   n = pack_int64(m->incarnation, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   return (int)(p - start);
 }
 
 static int unpack_membership(swim_member_t *m, const uint8_t *p,
-                              const uint8_t *q) {
+                             const uint8_t *q) {
   const uint8_t *start = p;
   int n;
 
   n = unpack_node_id(&m->id, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   uint8_t status;
   n = unpack_int8(&status, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   m->status = (swim_status_t)status;
   p += n;
 
   n = unpack_int64(&m->incarnation, p, q);
-  if (n < 0) return -1;
+  if (n < 0)
+    return -1;
   p += n;
 
   m->dead_at = 0;
@@ -199,10 +223,9 @@ static int unpack_membership(swim_member_t *m, const uint8_t *p,
   return (int)(p - start);
 }
 
-int swim_pack_message(uint8_t type, const swim_node_id_t *sender,
-                        uint32_t seq, const swim_node_id_t *peer,
-                        struct swim_gossip_queue_t *q, uint32_t active_members,
-                        uint8_t *buf, int bufsz) {
+int swim_pack_message(uint8_t type, const swim_node_id_t *sender, uint32_t seq,
+                      const swim_node_id_t *peer, struct swim_gossip_queue_t *q,
+                      uint32_t active_members, uint8_t *buf, int bufsz) {
   if (!sender || !buf || bufsz <= 0) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid arguments to swim_pack_message");

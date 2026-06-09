@@ -1,10 +1,10 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_codec.h"
-#include "swim_gossip_queue.h"
 #include "swim.h"
+#include "swim_codec.h"
 #include "swim_errno.h"
+#include "swim_gossip_queue.h"
 #include "swim_internal.h"
 #include "swim_udp.h"
 }
@@ -90,7 +90,7 @@ TEST_CASE("protocol: single node startup and leave") {
 
 TEST_CASE("protocol: multi-node auto-discovery") {
   // Node 1 setup (seed: Node 2)
-  const char *seeds1[] = { "127.0.0.1:20102/c2", nullptr };
+  const char *seeds1[] = {"127.0.0.1:20102/c2", nullptr};
   swim_start_opts_t opts1;
   memset(&opts1, 0, sizeof(opts1));
   opts1.self = "127.0.0.1:20101/c1";
@@ -101,7 +101,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   opts1.seed_retry_interval_ms = 400;
 
   // Node 2 setup (seed: Node 3)
-  const char *seeds2[] = { "127.0.0.1:20103/c3", nullptr };
+  const char *seeds2[] = {"127.0.0.1:20103/c3", nullptr};
   swim_start_opts_t opts2;
   memset(&opts2, 0, sizeof(opts2));
   opts2.self = "127.0.0.1:20102/c2";
@@ -112,7 +112,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   opts2.seed_retry_interval_ms = 400;
 
   // Node 3 setup (seed: Node 1)
-  const char *seeds3[] = { "127.0.0.1:20101/c1", nullptr };
+  const char *seeds3[] = {"127.0.0.1:20101/c1", nullptr};
   swim_start_opts_t opts3;
   memset(&opts3, 0, sizeof(opts3));
   opts3.self = "127.0.0.1:20103/c3";
@@ -130,15 +130,21 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   usleep(1500000);
 
   // Check Node 1 membership
-  int count1; char *p1 = swim_peers("n1", false, &count1); free(p1);
+  int count1;
+  char *p1 = swim_peers("n1", false, &count1);
+  free(p1);
   CHECK(count1 >= 2); // should have discovered Node 2 and Node 3
 
   // Check Node 2 membership
-  int count2; char *p2 = swim_peers("n2", false, &count2); free(p2);
+  int count2;
+  char *p2 = swim_peers("n2", false, &count2);
+  free(p2);
   CHECK(count2 >= 2);
 
   // Check Node 3 membership
-  int count3; char *p3 = swim_peers("n3", false, &count3); free(p3);
+  int count3;
+  char *p3 = swim_peers("n3", false, &count3);
+  free(p3);
   CHECK(count3 >= 2);
 
   // Tear down all
@@ -178,7 +184,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   // Construct PING packet from mock
   uint8_t buf[256];
   int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                                buf, sizeof(buf));
+                              buf, sizeof(buf));
   REQUIRE(len > 0);
 
   // Send packet to node
@@ -276,7 +282,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
     uint8_t buf[256];
     int len = swim_pack_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
-                                  nullptr, 0, buf, sizeof(buf));
+                                nullptr, 0, buf, sizeof(buf));
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
   };
@@ -456,7 +462,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
 
     uint8_t send_buf[1024];
     int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
-                                  test_q, 1, send_buf, sizeof(send_buf));
+                                test_q, 1, send_buf, sizeof(send_buf));
     swim_gossip_queue_destroy(test_q);
     REQUIRE(len > 0);
     REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
@@ -511,7 +517,7 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
 
   uint8_t buf[2048];
   int bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
-                                  swim_membership_count(m), buf, sizeof(buf));
+                                swim_membership_count(m), buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
@@ -529,8 +535,8 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   CHECK(swim_node_id_compare(&msg.gossip[0].id, &gossip_node) == 0);
 
   // Check error handling with buffer too small
-  int err_bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer,
-                                      q, swim_membership_count(m), buf, 10);
+  int err_bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
+                                    swim_membership_count(m), buf, 10);
   CHECK(err_bytes == -1);
 
   swim_membership_destroy(m);
@@ -556,7 +562,7 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   uint8_t buf[2048];
   // Pass NULL gossip queue
   int bytes = swim_pack_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr,
-                                  nullptr, 0, buf, sizeof(buf));
+                                nullptr, 0, buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
   swim_message_t msg;
@@ -603,7 +609,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
 
   uint8_t buf[256];
   int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                                buf, sizeof(buf));
+                              buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
 
@@ -633,7 +639,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   swim_feed_t *feed_a = swim_feed_create();
   REQUIRE(feed_a != nullptr);
 
-  const char *seedsA[] = { "127.0.0.1:20512/b1", nullptr };
+  const char *seedsA[] = {"127.0.0.1:20512/b1", nullptr};
   swim_start_opts_t a;
   memset(&a, 0, sizeof(a));
   a.self = "127.0.0.1:20511/a1";
@@ -644,7 +650,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   a.seed_retry_interval_ms = 200;
   a.feed = feed_a;
 
-  const char *seedsB[] = { "127.0.0.1:20511/a1", nullptr };
+  const char *seedsB[] = {"127.0.0.1:20511/a1", nullptr};
   swim_start_opts_t b;
   memset(&b, 0, sizeof(b));
   b.self = "127.0.0.1:20512/b1";
@@ -695,7 +701,7 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
 
   uint8_t buf[256];
   int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                                buf, sizeof(buf));
+                              buf, sizeof(buf));
   REQUIRE(len > 0);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
 

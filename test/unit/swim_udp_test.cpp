@@ -1,8 +1,8 @@
 #include "doctest.h"
 
 extern "C" {
-#include "swim_udp.h"
 #include "swim_errno.h"
+#include "swim_udp.h"
 }
 
 #include <cstring>

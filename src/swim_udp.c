@@ -173,9 +173,12 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
   int eagain_retries = 0;
   for (;;) {
     n = sendto(u->fd, buf, size, 0, (struct sockaddr *)&ss, ss_len);
-    if (n >= 0) break;
-    if (errno == EINTR) continue;
-    if ((errno == EAGAIN || errno == EWOULDBLOCK) && eagain_retries++ < 1) continue;
+    if (n >= 0)
+      break;
+    if (errno == EINTR)
+      continue;
+    if ((errno == EAGAIN || errno == EWOULDBLOCK) && eagain_retries++ < 1)
+      continue;
     break;
   }
   if (n < 0) {
