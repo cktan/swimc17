@@ -170,3 +170,150 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   // Cleanup
   swim_feed_destroy(feed);
 }
+
+// ---------------------------------------------------------------------------
+// 2. 64-node network: partition and heal
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: partition and heal") {
+  // TODO: Implement partition of 64-node cluster into two groups
+  // and heal.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence (each node sees 63 peers).
+  // 3. Partition: set 100% outbound loss on ports 5001-5032 to
+  //    block the left half from reaching the right, and vice versa.
+  // 4. Assert each half sees only its own 31 peers.
+  // 5. Clear all packet loss and verify full convergence.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 3. 64-node network: 4-way partition and gradual heal
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: 4-way partition and gradual heal") {
+  // TODO: Implement 4-way partition (four groups of 16) and staged
+  // healing.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Partition into four groups of 16.
+  // 4. Assert each group sees 15 peers.
+  // 5. Heal groups A+B and C+D; verify each merged half sees 31.
+  // 6. Fully heal and verify all 64 nodes see 63 peers.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 4. 64-node network: asymmetric partition (1 vs 63)
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: asymmetric partition (1 vs 63)") {
+  // TODO: Implement asymmetric partition isolating a single node.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Isolate node_1: 100% loss on port 5001 in both directions.
+  // 4. Assert node_1 sees 0 peers; the 63-node majority eventually
+  //    marks node_1 dead.
+  // 5. Heal and verify full convergence.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 5. 64-node network: 30% packet loss stress
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: 30% packet loss stress") {
+  // TODO: Stress test with sustained 30% packet loss on all nodes.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Apply 30% outbound loss on all 64 ports.
+  // 4. Hold for several detection periods and assert the cluster
+  //    remains converged (no false deaths).
+  // 5. Clear loss and verify cluster is still fully converged.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 6. 64-node network: churn stress (restarting nodes)
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: churn stress (restarting nodes)") {
+  // TODO: Kill and restart a rolling subset of nodes repeatedly.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Kill nodes 50-60 simultaneously.
+  // 4. Wait for the surviving nodes to detect the deaths.
+  // 5. Restart nodes 50-60 seeded to surviving nodes.
+  // 6. Verify full convergence at 64.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 7. 64-node network: half-cluster immediate restart
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: half-cluster immediate restart") {
+  // TODO: Kill and immediately restart 32 nodes before death
+  // detection fires.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Kill nodes 1-32.
+  // 4. Immediately restart nodes 1-32 seeded to nodes 33-64.
+  // 5. Verify full convergence at 64.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 8. 64-node network: half-cluster staged revival
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: half-cluster staged revival") {
+  // TODO: Kill 32 nodes, wait for death detection, then restart.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. Kill nodes 1-32.
+  // 4. Wait for nodes 33-64 to mark nodes 1-32 dead.
+  // 5. Restart nodes 1-32 seeded to nodes 33-64.
+  // 6. Verify full convergence at 64.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 9. 64-node network: rolling upgrade simulation
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: rolling upgrade simulation") {
+  // TODO: Simulate a rolling restart in batches of 8.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Verify full convergence.
+  // 3. For each batch of 8 nodes: leave and restart with a fresh
+  //    cookie (simulating a new version). Wait for the batch to
+  //    rejoin before moving to the next.
+  // 4. Verify full convergence at 64 after all 8 batches.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 10. 64-node network: high latency jitter and delay stress
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: high latency jitter and delay stress") {
+  // TODO: Verify convergence under heterogeneous simulated latency.
+  // Steps:
+  // 1. Start all 64 nodes with node_1 as seed.
+  // 2. Apply random per-node packet-loss bursts (0-20%) to simulate
+  //    jitter without causing permanent failures.
+  // 3. Verify the cluster converges and stays converged.
+  REQUIRE(true);
+}
+
+// ---------------------------------------------------------------------------
+// 11. 64-node network: bootstrap storm simulation
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: bootstrap storm simulation") {
+  // TODO: All 63 nodes join simultaneously against a single seed.
+  // Steps:
+  // 1. Start node_1 as the sole seed.
+  // 2. Start nodes 2-64 all at once, each seeded only to node_1.
+  // 3. Verify full convergence at 64 within a generous timeout.
+  REQUIRE(true);
+}
