@@ -6,6 +6,7 @@ extern "C" {
 }
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -591,8 +592,39 @@ TEST_CASE("scale: rolling upgrade simulation") {
 // 4. Verify the cluster remains at 63 peers throughout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: high latency jitter and delay stress") {
-  // TODO
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts_lossy();
+    opts.self = "127.0.0.1:5001/";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts_lossy();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Apply random 0-20% packet loss per node to simulate jitter
+  srand(42);
+  for (int i = 1; i <= 64; i++)
+    swim_udp_set_packet_loss(5000 + i, rand() % 21);
+
+  // Cluster should remain stable (no false deaths) under jitter
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
+
+  swim_clear_udp_loss();
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 }
 
 // ---------------------------------------------------------------------------
@@ -604,6 +636,26 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 // 3. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: bootstrap storm simulation") {
-  // TODO
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
