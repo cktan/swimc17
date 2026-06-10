@@ -78,6 +78,19 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 
 // ---------------------------------------------------------------------------
 // 1. 64-node network: staged startup, failure detection, and pause/unpause
+//
+// Steps:
+// 1. Start node_1 as seed with a telemetry feed attached.
+// 2. Start nodes 2-64, all seeded to node_1.
+// 3. Wait for full convergence: every node sees 63 peers.
+// 4. Kill node_7 (graceful leave); confirm feed reports it down.
+// 5. Pause node_14 (100% outbound packet loss); confirm feed
+//    reports it down after the suspicion timeout expires.
+// 6. Unpause node_14: clear packet loss, leave, and restart it
+//    with all 62 surviving nodes as seeds so it rejoins in one
+//    round. Confirm feed reports node_14 up.
+// 7. Wait for all 63 surviving nodes to stabilise at 62 peers.
+// 8. Gracefully leave node_14; confirm feed reports it down.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   reset_cluster();
