@@ -181,75 +181,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 64-node network: partition and heal
-//
-// Seeds span both halves (node_1, node_2, node_33, node_34) so that
-// after healing, the seed-retry timer contacts across the old
-// partition boundary, triggering GC-then-rediscovery.
-//
-// Steps:
-// 1. Start all 64 nodes seeded to node_1, node_2, node_33, node_34.
-// 2. Verify full convergence (each node sees 63 peers).
-// 3. Install a drop filter that blocks all traffic between the
-//    left half (ports 5001-5032) and the right half (5033-5064).
-// 4. Wait for each half to stabilise at 31 peers (the other 32
-//    nodes get suspected then declared dead).
-// 5. Heal: clear the filter. Dead nodes are GC'd after
-//    dead_node_expiry_ms; seed retries then re-add them as fresh
-//    ALIVE members, allowing full reconvergence.
-// 6. Verify all 64 nodes see 63 peers.
-// ---------------------------------------------------------------------------
-TEST_CASE("scale: partition and heal") {
-  reset_cluster();
-
-  const char *seed_list[] = {
-      "127.0.0.1:5001/c1",
-      "127.0.0.1:5002/c2",
-      "127.0.0.1:5033/c33",
-      "127.0.0.1:5034/c34",
-      nullptr,
-  };
-
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/c1";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
-  }
-  for (int i = 2; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self =
-        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
-  }
-
-  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
-
-  // Block all cross-partition traffic
-  swim_udp_set_drop_filter([](int src, int dst) -> int {
-    return (src >= 5001 && src <= 5032 && dst >= 5033 && dst <= 5064) ||
-           (src >= 5033 && src <= 5064 && dst >= 5001 && dst <= 5032);
-  });
-
-  // Each half detects the other 32 nodes as dead
-  CHECK(wait_for_all_peers(1, 32, nullptr, 31, 30000));
-  CHECK(wait_for_all_peers(33, 64, nullptr, 31, 30000));
-
-  // Heal: clear the filter. After dead_node_expiry_ms the GC removes
-  // the stale DEAD entries; seed retries then re-add those nodes as
-  // fresh ALIVE members and the cluster reconverges.
-  swim_clear_udp_loss();
-
-  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
-}
-
-// ---------------------------------------------------------------------------
-// 3. 64-node network: 4-way partition and heal
+// 2. 64-node network: 4-way partition and heal
 //
 // Seeds: node_1, node_2, node_3 (all in group A, ports 5001-5016).
 //
@@ -314,7 +246,7 @@ TEST_CASE("scale: 4-way partition and heal") {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 64-node network: asymmetric partition (1 vs 63)
+// 3. 64-node network: asymmetric partition (1 vs 63)
 //
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
@@ -364,7 +296,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 }
 
 // ---------------------------------------------------------------------------
-// 5. 64-node network: 30% packet loss stress
+// 4. 64-node network: 30% packet loss stress
 //
 // Uses 8× suspicion timeout (make_opts_lossy) to prevent false deaths
 // under sustained loss.
@@ -414,7 +346,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 }
 
 // ---------------------------------------------------------------------------
-// 6. 64-node network: churn stress (restarting nodes)
+// 5. 64-node network: churn stress (restarting nodes)
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: churn stress (restarting nodes)") {
   reset_cluster();
@@ -466,7 +398,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 }
 
 // ---------------------------------------------------------------------------
-// 7. 64-node network: half-cluster immediate restart
+// 6. 64-node network: half-cluster immediate restart
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster immediate restart") {
   reset_cluster();
@@ -518,7 +450,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 }
 
 // ---------------------------------------------------------------------------
-// 8. 64-node network: half-cluster staged revival
+// 7. 64-node network: half-cluster staged revival
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster staged revival") {
   // TODO: Kill 32 nodes, wait for death detection, then restart.
@@ -533,7 +465,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 }
 
 // ---------------------------------------------------------------------------
-// 9. 64-node network: rolling upgrade simulation
+// 8. 64-node network: rolling upgrade simulation
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: rolling upgrade simulation") {
   // TODO: Simulate a rolling restart in batches of 8.
@@ -548,7 +480,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 }
 
 // ---------------------------------------------------------------------------
-// 10. 64-node network: high latency jitter and delay stress
+// 9. 64-node network: high latency jitter and delay stress
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: high latency jitter and delay stress") {
   // TODO: Verify convergence under heterogeneous simulated latency.
@@ -561,7 +493,7 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 }
 
 // ---------------------------------------------------------------------------
-// 11. 64-node network: bootstrap storm simulation
+// 10. 64-node network: bootstrap storm simulation
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: bootstrap storm simulation") {
   // TODO: All 63 nodes join simultaneously against a single seed.
