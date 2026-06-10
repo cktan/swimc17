@@ -65,7 +65,17 @@ SWIM_EXTERN int swim_udp_fd(const swim_udp_t *u);
 SWIM_EXTERN void swim_udp_set_packet_loss(int port, int pct);
 
 /**
- * Clear all packet loss settings. Debug builds only.
+ * Install a drop filter. Called before each send with (src_port,
+ * dst_port); return non-zero to drop the packet. Replaces any
+ * previously installed filter. Pass NULL to remove. Debug builds
+ * only.
+ */
+typedef int (*swim_udp_drop_fn)(int src_port, int dst_port);
+SWIM_EXTERN void swim_udp_set_drop_filter(swim_udp_drop_fn fn);
+
+/**
+ * Clear all packet loss settings and the drop filter. Debug builds
+ * only.
  */
 SWIM_EXTERN void swim_clear_udp_loss(void);
 #endif

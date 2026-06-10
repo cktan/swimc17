@@ -173,18 +173,82 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 
 // ---------------------------------------------------------------------------
 // 2. 64-node network: partition and heal
+//
+// Steps:
+// 1. Start all 64 nodes with node_1 as seed.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Install a drop filter that blocks all traffic between the
+//    left half (ports 5001-5032) and the right half (5033-5064).
+// 4. Wait for each half to stabilise at 31 peers (the other 32
+//    nodes get suspected then declared dead).
+// 5. Heal: clear the filter, leave nodes 33-64, and restart them
+//    seeded to nodes 1-32. After the restart each restarted node
+//    carries a fresh incarnation that supersedes the DEAD record,
+//    allowing full reconvergence.
+// 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: partition and heal") {
-  // TODO: Implement partition of 64-node cluster into two groups
-  // and heal.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence (each node sees 63 peers).
-  // 3. Partition: set 100% outbound loss on ports 5001-5032 to
-  //    block the left half from reaching the right, and vice versa.
-  // 4. Assert each half sees only its own 31 peers.
-  // 5. Clear all packet loss and verify full convergence.
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, 0, 0, 63, 30000));
+
+  // Block all cross-partition traffic
+  swim_udp_set_drop_filter([](int src, int dst) -> int {
+    return (src >= 5001 && src <= 5032 && dst >= 5033 && dst <= 5064) ||
+           (src >= 5033 && src <= 5064 && dst >= 5001 && dst <= 5032);
+  });
+
+  // Each half detects the other 32 nodes as dead
+  CHECK(wait_for_all_peers(1, 32, 0, 0, 31, 30000));
+  CHECK(wait_for_all_peers(33, 64, 0, 0, 31, 30000));
+
+  // Heal: clear partition, restart the right half seeded to the left.
+  // Fresh incarnations supersede the DEAD records on nodes 1-32.
+  swim_clear_udp_loss();
+  for (int i = 33; i <= 64; i++)
+    swim_leave(("node_" + std::to_string(i)).c_str());
+
+  std::vector<std::string> seed_strs;
+  std::vector<const char *> seed_ptrs;
+  for (int i = 1; i <= 32; i++)
+    seed_strs.push_back("127.0.0.1:" + std::to_string(5000 + i) + "/c" +
+                        std::to_string(i));
+  for (auto &s : seed_strs)
+    seed_ptrs.push_back(s.c_str());
+  seed_ptrs.push_back(nullptr);
+
+  for (int i = 33; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_ptrs.data();
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, 0, 0, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------

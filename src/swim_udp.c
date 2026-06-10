@@ -40,13 +40,19 @@ struct swim_udp_t {
 
 #ifndef NDEBUG
 static int g_loss[65536];
+static swim_udp_drop_fn g_drop_filter = NULL;
 
 void swim_udp_set_packet_loss(int port, int pct) {
   if (port >= 0 && port < 65536)
     g_loss[port] = pct < 0 ? 0 : pct > 100 ? 100 : pct;
 }
 
-void swim_clear_udp_loss(void) { memset(g_loss, 0, sizeof(g_loss)); }
+void swim_udp_set_drop_filter(swim_udp_drop_fn fn) { g_drop_filter = fn; }
+
+void swim_clear_udp_loss(void) {
+  memset(g_loss, 0, sizeof(g_loss));
+  g_drop_filter = NULL;
+}
 #endif
 
 // Create and bind a non-blocking UDP socket (IPv4 or IPv6). Returns NULL on
@@ -141,6 +147,8 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
 
 #ifndef NDEBUG
   if (g_loss[u->port] > 0 && (rand() % 100) < g_loss[u->port])
+    return 0;
+  if (g_drop_filter && g_drop_filter(u->port, dest->port))
     return 0;
 #endif
 
