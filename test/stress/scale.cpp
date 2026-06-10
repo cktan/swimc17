@@ -89,6 +89,8 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 // ---------------------------------------------------------------------------
 // 1. 64-node network: staged startup, failure detection, and pause/unpause
 //
+// Time: ~9s
+//
 // Steps:
 // 1. Start node_1 as seed with a telemetry feed attached.
 // 2. Start nodes 2-64, all seeded to node_1.
@@ -102,7 +104,7 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 // 7. Wait for all 63 surviving nodes to stabilise at 62 peers.
 // 8. Gracefully leave node_14; confirm feed reports it down.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: staged startup, failure detection, pause/unpause") { // ~9s
+TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   reset_cluster();
 
   swim_feed_t *feed = swim_feed_create();
@@ -184,6 +186,8 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") { // ~9s
 //
 // Seeds: node_1, node_2, node_3 (all in group A, ports 5001-5016).
 //
+// Time: ~31s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1, node_2, node_3.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -195,7 +199,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") { // ~9s
 // 4. Assert each group stabilises at 15 peers.
 // 5. Heal: clear all filters and verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: 4-way partition and heal") { // ~31s
+TEST_CASE("scale: 4-way partition and heal") {
   reset_cluster();
 
   const char *seed_list[] = {
@@ -246,6 +250,8 @@ TEST_CASE("scale: 4-way partition and heal") { // ~31s
 // ---------------------------------------------------------------------------
 // 3. 64-node network: asymmetric partition (1 vs 63)
 //
+// Time: ~16s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -256,7 +262,7 @@ TEST_CASE("scale: 4-way partition and heal") { // ~31s
 //    and rejoins; the cluster reconverges.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: asymmetric partition (1 vs 63)") { // ~16s
+TEST_CASE("scale: asymmetric partition (1 vs 63)") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -298,6 +304,8 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") { // ~16s
 // Uses 8× suspicion timeout (make_opts_lossy) to prevent false deaths
 // under sustained loss.
 //
+// Time: ~6s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1 with lossy opts.
 // 2. Verify initial convergence (each node sees 63 peers).
@@ -305,7 +313,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") { // ~16s
 // 4. Assert the cluster remains at 63 peers (no false deaths).
 // 5. Clear loss and verify cluster is still fully converged.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: 30% packet loss stress") { // ~6s
+TEST_CASE("scale: 30% packet loss stress") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -344,6 +352,8 @@ TEST_CASE("scale: 30% packet loss stress") { // ~6s
 // ---------------------------------------------------------------------------
 // 5. 64-node network: churn stress (restarting nodes)
 //
+// Time: ~41s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -352,7 +362,7 @@ TEST_CASE("scale: 30% packet loss stress") { // ~6s
 // 5. Restart nodes 50-60 seeded to a surviving node.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: churn stress (restarting nodes)") { // ~41s
+TEST_CASE("scale: churn stress (restarting nodes)") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -406,6 +416,8 @@ TEST_CASE("scale: churn stress (restarting nodes)") { // ~41s
 // incarnation-number override path: survivors accept the fresh
 // ALIVE messages over their stale DEAD entries.
 //
+// Time: ~10s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -414,7 +426,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") { // ~41s
 //    nodes 33-64.
 // 5. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: half-cluster immediate restart") { // ~10s
+TEST_CASE("scale: half-cluster immediate restart") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -465,6 +477,8 @@ TEST_CASE("scale: half-cluster immediate restart") { // ~10s
 // ---------------------------------------------------------------------------
 // 7. 64-node network: half-cluster staged revival
 //
+// Time: ~12s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -474,7 +488,7 @@ TEST_CASE("scale: half-cluster immediate restart") { // ~10s
 // 5. Restart nodes 1-32 seeded to surviving nodes 33-64.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: half-cluster staged revival") { // ~12s
+TEST_CASE("scale: half-cluster staged revival") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -523,6 +537,8 @@ TEST_CASE("scale: half-cluster staged revival") { // ~12s
 // ---------------------------------------------------------------------------
 // 8. 64-node network: rolling upgrade simulation
 //
+// Time: ~31s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
@@ -530,7 +546,7 @@ TEST_CASE("scale: half-cluster staged revival") { // ~12s
 //    them, and wait for full convergence before the next batch.
 // 4. Verify all 64 nodes see 63 peers after all 8 batches.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: rolling upgrade simulation") { // ~31s
+TEST_CASE("scale: rolling upgrade simulation") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -584,6 +600,8 @@ TEST_CASE("scale: rolling upgrade simulation") { // ~31s
 // ---------------------------------------------------------------------------
 // 9. 64-node network: high latency jitter and delay stress
 //
+// Time: ~6s
+//
 // Steps:
 // 1. Start all 64 nodes seeded to node_1 with lossy opts.
 // 2. Verify initial convergence (each node sees 63 peers).
@@ -591,7 +609,7 @@ TEST_CASE("scale: rolling upgrade simulation") { // ~31s
 //    simulate jitter without triggering false deaths.
 // 4. Verify the cluster remains at 63 peers throughout.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: high latency jitter and delay stress") { // ~6s
+TEST_CASE("scale: high latency jitter and delay stress") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -630,12 +648,14 @@ TEST_CASE("scale: high latency jitter and delay stress") { // ~6s
 // ---------------------------------------------------------------------------
 // 10. 64-node network: bootstrap storm simulation
 //
+// Time: ~6s
+//
 // Steps:
 // 1. Start node_1 as the sole seed.
 // 2. Start nodes 2-64 all at once, each seeded only to node_1.
 // 3. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: bootstrap storm simulation") { // ~6s
+TEST_CASE("scale: bootstrap storm simulation") {
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
