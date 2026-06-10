@@ -7,6 +7,7 @@ extern "C" {
 
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,16 +23,17 @@ static void reset_cluster() {
 // Detection latency target ~4s. Used for all tests.
 static swim_start_opts_t make_opts() { return swim_opts_for(64, 4000); }
 
-// Poll until all nodes in [from,to] (skipping skip1 and skip2, 0 = no skip)
+// Poll until all nodes in [from,to] (skipping any i where skip(i) is true)
 // see exactly `expected` peers. Returns true on success, false on timeout.
-static bool wait_for_all_peers(int from, int to, int skip1, int skip2,
+static bool wait_for_all_peers(int from, int to,
+                               std::function<bool(int)> skip,
                                int expected, int timeout_ms) {
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   while (std::chrono::steady_clock::now() < deadline) {
     bool all_ok = true;
     for (int i = from; i <= to && all_ok; i++) {
-      if (i == skip1 || i == skip2)
+      if (skip && skip(i))
         continue;
       std::string name = "node_" + std::to_string(i);
       int cnt = 0;
@@ -123,7 +125,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   }
 
   // Wait for full convergence: every node sees 63 peers
-  CHECK(wait_for_all_peers(1, 64, 0, 0, 63, 30000));
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Kill node_7 and wait for node_1's feed to report it dead
   REQUIRE(swim_leave("node_7") == 0);
@@ -161,7 +163,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   CHECK(drain_feed_for(feed, "up", ":5014", 10000));
 
   // All 63 surviving nodes (skip node_7) should stabilise at 62 peers each
-  CHECK(wait_for_all_peers(1, 64, 7, 0, 62, 60000));
+  CHECK(wait_for_all_peers(1, 64, [](int i) { return i == 7; }, 62, 60000));
 
   // Gracefully leave node_14 and verify detection via node_1's feed
   REQUIRE(swim_leave("node_14") == 0);
@@ -174,23 +176,32 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 // ---------------------------------------------------------------------------
 // 2. 64-node network: partition and heal
 //
+// Seeds span both halves (node_1, node_2, node_33, node_34) so that
+// after healing, the seed-retry timer contacts across the old
+// partition boundary, triggering GC-then-rediscovery.
+//
 // Steps:
-// 1. Start all 64 nodes with node_1 as seed.
+// 1. Start all 64 nodes seeded to node_1, node_2, node_33, node_34.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Install a drop filter that blocks all traffic between the
 //    left half (ports 5001-5032) and the right half (5033-5064).
 // 4. Wait for each half to stabilise at 31 peers (the other 32
 //    nodes get suspected then declared dead).
-// 5. Heal: clear the filter, leave nodes 33-64, and restart them
-//    seeded to nodes 1-32. After the restart each restarted node
-//    carries a fresh incarnation that supersedes the DEAD record,
-//    allowing full reconvergence.
+// 5. Heal: clear the filter. Dead nodes are GC'd after
+//    dead_node_expiry_ms; seed retries then re-add them as fresh
+//    ALIVE members, allowing full reconvergence.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: partition and heal") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+  const char *seed_list[] = {
+      "127.0.0.1:5001/c1",
+      "127.0.0.1:5002/c2",
+      "127.0.0.1:5033/c33",
+      "127.0.0.1:5034/c34",
+      nullptr,
+  };
 
   {
     swim_start_opts_t opts = make_opts();
@@ -210,7 +221,7 @@ TEST_CASE("scale: partition and heal") {
     REQUIRE(swim_start(&opts) == 0);
   }
 
-  CHECK(wait_for_all_peers(1, 64, 0, 0, 63, 30000));
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Block all cross-partition traffic
   swim_udp_set_drop_filter([](int src, int dst) -> int {
@@ -219,36 +230,15 @@ TEST_CASE("scale: partition and heal") {
   });
 
   // Each half detects the other 32 nodes as dead
-  CHECK(wait_for_all_peers(1, 32, 0, 0, 31, 30000));
-  CHECK(wait_for_all_peers(33, 64, 0, 0, 31, 30000));
+  CHECK(wait_for_all_peers(1, 32, nullptr, 31, 30000));
+  CHECK(wait_for_all_peers(33, 64, nullptr, 31, 30000));
 
-  // Heal: clear partition, restart the right half seeded to the left.
-  // Fresh incarnations supersede the DEAD records on nodes 1-32.
+  // Heal: clear the filter. After dead_node_expiry_ms the GC removes
+  // the stale DEAD entries; seed retries then re-add those nodes as
+  // fresh ALIVE members and the cluster reconverges.
   swim_clear_udp_loss();
-  for (int i = 33; i <= 64; i++)
-    swim_leave(("node_" + std::to_string(i)).c_str());
 
-  std::vector<std::string> seed_strs;
-  std::vector<const char *> seed_ptrs;
-  for (int i = 1; i <= 32; i++)
-    seed_strs.push_back("127.0.0.1:" + std::to_string(5000 + i) + "/c" +
-                        std::to_string(i));
-  for (auto &s : seed_strs)
-    seed_ptrs.push_back(s.c_str());
-  seed_ptrs.push_back(nullptr);
-
-  for (int i = 33; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self =
-        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_ptrs.data();
-    REQUIRE(swim_start(&opts) == 0);
-  }
-
-  CHECK(wait_for_all_peers(1, 64, 0, 0, 63, 60000));
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------
