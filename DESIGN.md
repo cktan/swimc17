@@ -38,19 +38,33 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
 
 ## 3. Node Identity
 
-- **Wire and API type:** plain 3-tuple `{"host", port, "cookie"}`
+- **Wire and API type:** address string
+  `"host:port/cookie"`
   - `host` is a string (IP address or hostname)
-  - `port` is an integer
-  - `cookie` is a string (user-defined opaque datum). It is optionally specified by the user, defaulting to `""`.
-- **Identity key:** the full `{"host", port, "cookie"}` tuple
+  - `port` is a decimal integer
+  - `cookie` is a string (user-defined opaque
+    datum). Optionally specified by the caller;
+    defaults to `""` (empty string).
+- **Identity key:** the full `host:port/cookie` string
 - **Assigned by:** caller
-- **Stability:** stable across restarts (same tuple, new incarnation number). A change in cookie signifies a different node instance even if host/port are reused.
+- **Stability:** stable across restarts (same
+  address string, new incarnation number). A
+  change in cookie signifies a different node
+  instance even if host/port are reused.
 
 ### Node Identification with Cookie
 
-While a node is reachable via its network location (`host` and `port`), the protocol incorporates a `cookie` into the node's strict identity (`{host, port, cookie}`). This cookie allows the application to distinguish between different instances, sessions, or restarts of a node running on the exact same host and port. 
+While a node is reachable via its network
+location (`host` and `port`), the protocol
+incorporates a `cookie` into the node's strict
+identity (`host:port/cookie`). This cookie allows
+the application to distinguish between different
+instances, sessions, or restarts of a node running
+on the exact same host and port.
 
-The cookie is optionally specified by the user during node startup or when defining seeds. If not explicitly provided, it defaults to the empty string `""`.
+The cookie is optionally specified by the caller
+during node startup or when defining seeds. If not
+explicitly provided, it defaults to `""`.
 
 ---
 
@@ -82,31 +96,31 @@ The cookie is optionally specified by the user during node startup or when defin
 
 ```
 # ping
-{ping, sender :: {host, port, cookie}, seq :: non_neg_integer,
+{ping, sender :: host:port/cookie, seq :: non_neg_integer,
        updates :: [update]}
 
 # ack
-{ack, sender :: {host, port, cookie}, seq :: non_neg_integer,
+{ack, sender :: host:port/cookie, seq :: non_neg_integer,
       updates :: [update]}
 
 # ping_req (A asks C to ping B)
-{ping_req, sender :: {host, port, cookie}, seq :: non_neg_integer,
-           target :: {host, port, cookie}, updates :: [update]}
+{ping_req, sender :: host:port/cookie, seq :: non_neg_integer,
+           target :: host:port/cookie, updates :: [update]}
 
 # forwarded ack (C tells A that B responded)
-{fwd_ack, sender :: {host, port, cookie}, seq :: non_neg_integer,
-          source :: {host, port, cookie}, updates :: [update]}
+{fwd_ack, sender :: host:port/cookie, seq :: non_neg_integer,
+          source :: host:port/cookie, updates :: [update]}
 
 # leave
-{leave, sender :: {host, port, cookie}, seq :: non_neg_integer}
+{leave, sender :: host:port/cookie, seq :: non_neg_integer}
 ```
 
 - **Update shape:**
 
 ```
-{alive,   {host, port, cookie}, incarnation :: non_neg_integer}
-{suspect, {host, port, cookie}, incarnation :: non_neg_integer}
-{dead,    {host, port, cookie}, incarnation :: non_neg_integer}
+{alive,   host:port/cookie, incarnation :: non_neg_integer}
+{suspect, host:port/cookie, incarnation :: non_neg_integer}
+{dead,    host:port/cookie, incarnation :: non_neg_integer}
 ```
 
 ---
@@ -433,17 +447,18 @@ data arrives rather than busy-polling.
 ### Events
 
 ```
-"node"    "up"      "host:port[:cookie]"   # a peer became alive
-"node"    "suspect" "host:port[:cookie]"   # a peer became suspect
-"node"    "down"    "host:port[:cookie]"   # a peer was declared dead
-"ping"    "rtt"     "host:port[:cookie]" "<ms>"  # direct probe round-trip
-"cluster" "size"    "<n>"                  # alive+suspect count, on change
-"warning" "message dropped to host:port[:cookie]"  # outbound drop
+"node"    "up"      "host:port/cookie"   # a peer became alive
+"node"    "suspect" "host:port/cookie"   # a peer became suspect
+"node"    "down"    "host:port/cookie"   # a peer was declared dead
+"ping"    "rtt"     "host:port/cookie" "<ms>"  # direct probe round-trip
+"cluster" "size"    "<n>"               # alive+suspect count, on change
+"warning" "message dropped to host:port/cookie"  # outbound drop
 ```
 
-- A node renders as `host:port[:cookie]`, with IPv6 hosts
-  bracketed (via `swim_node_id_format`). The cookie is carried
-  as its own record string, so no escaping is needed.
+- A node renders as `host:port/cookie`, with IPv6
+  hosts bracketed (via `swim_node_id_format`). The
+  cookie is carried as its own record string, so no
+  escaping is needed.
 - `ping rtt` is reported only for a clean **direct** probe
   round-trip (a direct ack to our ping); indirect/relayed
   resolutions produce no rtt event.
