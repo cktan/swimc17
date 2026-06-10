@@ -38,6 +38,17 @@ struct swim_udp_t {
   uint16_t port;
 };
 
+#ifndef NDEBUG
+static int g_loss[65536];
+
+void swim_udp_set_packet_loss(int port, int pct) {
+  if (port >= 0 && port < 65536)
+    g_loss[port] = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+}
+
+void swim_clear_udp_loss(void) { memset(g_loss, 0, sizeof(g_loss)); }
+#endif
+
 // Create and bind a non-blocking UDP socket (IPv4 or IPv6). Returns NULL on
 // failure.
 swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
@@ -127,6 +138,11 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
         SWIM_ERR_INVALID,
         "Invalid NULL or zero size arguments to swim_udp_send");
   }
+
+#ifndef NDEBUG
+  if (g_loss[u->port] > 0 && (rand() % 100) < g_loss[u->port])
+    return 0;
+#endif
 
   // Resolve the destination to a sockaddr. IP-literal hosts (the common case
   // here, since recv normalizes every peer to a numeric address) are built

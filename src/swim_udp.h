@@ -56,4 +56,18 @@ SWIM_EXTERN int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src,
  */
 SWIM_EXTERN int swim_udp_fd(const swim_udp_t *u);
 
+#ifndef NDEBUG
+/**
+ * Simulate packet loss on a UDP port. pct is clamped to 0..100.
+ * Each call to swim_udp_send on that port drops the packet with
+ * probability pct/100. Debug builds only.
+ */
+SWIM_EXTERN void swim_udp_set_packet_loss(int port, int pct);
+
+/**
+ * Clear all packet loss settings. Debug builds only.
+ */
+SWIM_EXTERN void swim_clear_udp_loss(void);
+#endif
+
 #endif // SWIM_UDP_H

@@ -148,14 +148,14 @@ struct swim_instance_t {
 };
 
 // Global named instance registry
-static swim_instance_t *g_instances[16] = {0};
+static swim_instance_t *g_instances[64] = {0};
 static pthread_mutex_t g_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static swim_instance_t *find_instance(const char *name) {
   if (!name || name[0] == '\0') {
     return NULL;
   }
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < 64; i++) {
     if (g_instances[i] && strcmp(g_instances[i]->name, name) == 0) {
       return g_instances[i];
     }
@@ -825,7 +825,7 @@ int swim_start(const swim_start_opts_t *opts) {
 
   // Find a free slot in g_instances
   int slot = -1;
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < 64; i++) {
     if (g_instances[i] == NULL) {
       slot = i;
       break;
@@ -978,7 +978,7 @@ int swim_leave(const char *name) {
   // swim_leave/lookup can no longer find this instance (it gets BAD_STATE).
   // After this point inst is private to this call and is torn down without
   // holding the global lock.
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < 64; i++) {
     if (g_instances[i] == inst) {
       g_instances[i] = NULL;
       break;
