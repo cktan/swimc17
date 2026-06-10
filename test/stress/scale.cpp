@@ -417,30 +417,104 @@ TEST_CASE("scale: 30% packet loss stress") {
 // 6. 64-node network: churn stress (restarting nodes)
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: churn stress (restarting nodes)") {
-  // TODO: Kill and restart a rolling subset of nodes repeatedly.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Kill nodes 50-60 simultaneously.
-  // 4. Wait for the surviving nodes to detect the deaths.
-  // 5. Restart nodes 50-60 seeded to surviving nodes.
-  // 6. Verify full convergence at 64.
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Kill nodes 50-60 simultaneously
+  for (int i = 50; i <= 60; i++)
+    swim_leave(("node_" + std::to_string(i)).c_str());
+
+  // Wait for the surviving 53 nodes to detect the 11 deaths
+  CHECK(wait_for_all_peers(1, 64, [](int i) { return i >= 50 && i <= 60; },
+                           52, 30000));
+
+  // Restart nodes 50-60, seeded to a surviving node
+  const char *restart_seeds[] = {"127.0.0.1:5061/c61", nullptr};
+  for (int i = 50; i <= 60; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = restart_seeds;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 }
 
 // ---------------------------------------------------------------------------
 // 7. 64-node network: half-cluster immediate restart
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster immediate restart") {
-  // TODO: Kill and immediately restart 32 nodes before death
-  // detection fires.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Kill nodes 1-32.
-  // 4. Immediately restart nodes 1-32 seeded to nodes 33-64.
-  // 5. Verify full convergence at 64.
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Kill nodes 1-32 simultaneously (including the seed)
+  for (int i = 1; i <= 32; i++)
+    swim_leave(("node_" + std::to_string(i)).c_str());
+
+  // Immediately restart nodes 1-32 seeded to surviving nodes 33-64.
+  // Restarting increments the incarnation number, so surviving nodes
+  // will accept the new ALIVE messages over the old dead entries.
+  const char *restart_seeds[] = {"127.0.0.1:5033/c33", nullptr};
+  for (int i = 1; i <= 32; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = restart_seeds;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  // Allow time for old incarnation entries to be GC'd and the full
+  // cluster to reconverge to 64 nodes.
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------
