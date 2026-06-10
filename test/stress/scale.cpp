@@ -347,6 +347,14 @@ TEST_CASE("scale: 30% packet loss stress") {
 
 // ---------------------------------------------------------------------------
 // 5. 64-node network: churn stress (restarting nodes)
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Kill nodes 50-60 simultaneously (graceful leave).
+// 4. Wait for the 53 survivors to stabilise at 52 peers.
+// 5. Restart nodes 50-60 seeded to a surviving node.
+// 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: churn stress (restarting nodes)") {
   reset_cluster();
@@ -399,6 +407,18 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 
 // ---------------------------------------------------------------------------
 // 6. 64-node network: half-cluster immediate restart
+//
+// Restarting without waiting for death detection exercises the
+// incarnation-number override path: survivors accept the fresh
+// ALIVE messages over their stale DEAD entries.
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Kill nodes 1-32 simultaneously (including the seed).
+// 4. Immediately restart nodes 1-32 seeded to surviving
+//    nodes 33-64.
+// 5. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster immediate restart") {
   reset_cluster();
@@ -451,55 +471,61 @@ TEST_CASE("scale: half-cluster immediate restart") {
 
 // ---------------------------------------------------------------------------
 // 7. 64-node network: half-cluster staged revival
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Kill nodes 1-32.
+// 4. Wait for nodes 33-64 to mark nodes 1-32 dead
+//    (each survivor stabilises at 31 peers).
+// 5. Restart nodes 1-32 seeded to surviving nodes 33-64.
+// 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster staged revival") {
-  // TODO: Kill 32 nodes, wait for death detection, then restart.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Kill nodes 1-32.
-  // 4. Wait for nodes 33-64 to mark nodes 1-32 dead.
-  // 5. Restart nodes 1-32 seeded to nodes 33-64.
-  // 6. Verify full convergence at 64.
+  // TODO
   REQUIRE(true);
 }
 
 // ---------------------------------------------------------------------------
 // 8. 64-node network: rolling upgrade simulation
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. For each batch of 8 nodes: leave and restart with a
+//    fresh cookie (simulating a new version); wait for the
+//    batch to rejoin before moving to the next.
+// 4. Verify all 64 nodes see 63 peers after all 8 batches.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: rolling upgrade simulation") {
-  // TODO: Simulate a rolling restart in batches of 8.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. For each batch of 8 nodes: leave and restart with a fresh
-  //    cookie (simulating a new version). Wait for the batch to
-  //    rejoin before moving to the next.
-  // 4. Verify full convergence at 64 after all 8 batches.
+  // TODO
   REQUIRE(true);
 }
 
 // ---------------------------------------------------------------------------
 // 9. 64-node network: high latency jitter and delay stress
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1 with lossy opts.
+// 2. Verify initial convergence (each node sees 63 peers).
+// 3. Apply random per-node packet-loss bursts (0-20%) to
+//    simulate jitter without triggering false deaths.
+// 4. Verify the cluster remains at 63 peers throughout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: high latency jitter and delay stress") {
-  // TODO: Verify convergence under heterogeneous simulated latency.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Apply random per-node packet-loss bursts (0-20%) to simulate
-  //    jitter without causing permanent failures.
-  // 3. Verify the cluster converges and stays converged.
+  // TODO
   REQUIRE(true);
 }
 
 // ---------------------------------------------------------------------------
 // 10. 64-node network: bootstrap storm simulation
+//
+// Steps:
+// 1. Start node_1 as the sole seed.
+// 2. Start nodes 2-64 all at once, each seeded only to node_1.
+// 3. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: bootstrap storm simulation") {
-  // TODO: All 63 nodes join simultaneously against a single seed.
-  // Steps:
-  // 1. Start node_1 as the sole seed.
-  // 2. Start nodes 2-64 all at once, each seeded only to node_1.
-  // 3. Verify full convergence at 64 within a generous timeout.
+  // TODO
   REQUIRE(true);
 }
