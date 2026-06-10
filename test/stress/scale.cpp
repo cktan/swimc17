@@ -122,8 +122,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   // Start nodes 2-64, all seeded to node_1
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -215,8 +214,7 @@ TEST_CASE("scale: 4-way partition and heal") {
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -271,8 +269,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -321,8 +318,7 @@ TEST_CASE("scale: 30% packet loss stress") {
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts_lossy();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -369,8 +365,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -385,15 +380,14 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     swim_leave(("node_" + std::to_string(i)).c_str());
 
   // Wait for the surviving 53 nodes to detect the 11 deaths
-  CHECK(wait_for_all_peers(1, 64, [](int i) { return i >= 50 && i <= 60; },
-                           52, 30000));
+  CHECK(wait_for_all_peers(
+      1, 64, [](int i) { return i >= 50 && i <= 60; }, 52, 30000));
 
   // Restart nodes 50-60, seeded to a surviving node
   const char *restart_seeds[] = {"127.0.0.1:5061/", nullptr};
   for (int i = 50; i <= 60; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -433,8 +427,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
-    std::string self =
-      "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
@@ -481,8 +474,49 @@ TEST_CASE("scale: half-cluster immediate restart") {
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster staged revival") {
-  // TODO
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Kill nodes 1-32
+  for (int i = 1; i <= 32; i++)
+    swim_leave(("node_" + std::to_string(i)).c_str());
+
+  // Wait for the surviving half to detect the 32 deaths
+  CHECK(wait_for_all_peers(33, 64, nullptr, 31, 30000));
+
+  // Restart nodes 1-32 seeded to the surviving half
+  const char *restart_seeds[] = {"127.0.0.1:5033/", nullptr};
+  for (int i = 1; i <= 32; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = restart_seeds;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------
@@ -491,14 +525,59 @@ TEST_CASE("scale: half-cluster staged revival") {
 // Steps:
 // 1. Start all 64 nodes seeded to node_1.
 // 2. Verify full convergence (each node sees 63 peers).
-// 3. For each batch of 8 nodes: leave and restart with a
-//    fresh cookie (simulating a new version); wait for the
-//    batch to rejoin before moving to the next.
+// 3. For each of 8 batches of 8 nodes: leave all 8, restart
+//    them, and wait for full convergence before the next batch.
 // 4. Verify all 64 nodes see 63 peers after all 8 batches.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: rolling upgrade simulation") {
-  // TODO
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  for (int batch = 0; batch < 8; batch++) {
+    int start = batch * 8 + 1;
+    int end = start + 7;
+
+    for (int i = start; i <= end; i++)
+      swim_leave(("node_" + std::to_string(i)).c_str());
+
+    // Seed to node_33 for batches 1-4, node_1 for batches 5-8.
+    int seed_node = (start <= 32) ? 33 : 1;
+    std::string seed_addr =
+        "127.0.0.1:" + std::to_string(5000 + seed_node) + "/";
+    const char *restart_seeds[] = {seed_addr.c_str(), nullptr};
+
+    for (int i = start; i <= end; i++) {
+      std::string name = "node_" + std::to_string(i);
+      std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+      swim_start_opts_t opts = make_opts();
+      opts.self = self.c_str();
+      opts.name = name.c_str();
+      opts.seeds = restart_seeds;
+      REQUIRE(swim_start(&opts) == 0);
+    }
+
+    CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
+  }
 }
 
 // ---------------------------------------------------------------------------
