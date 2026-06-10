@@ -102,7 +102,7 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 // 7. Wait for all 63 surviving nodes to stabilise at 62 peers.
 // 8. Gracefully leave node_14; confirm feed reports it down.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
+TEST_CASE("scale: staged startup, failure detection, pause/unpause") { // ~9s
   reset_cluster();
 
   swim_feed_t *feed = swim_feed_create();
@@ -195,7 +195,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 // 4. Assert each group stabilises at 15 peers.
 // 5. Heal: clear all filters and verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: 4-way partition and heal") {
+TEST_CASE("scale: 4-way partition and heal") { // ~31s
   reset_cluster();
 
   const char *seed_list[] = {
@@ -256,7 +256,7 @@ TEST_CASE("scale: 4-way partition and heal") {
 //    and rejoins; the cluster reconverges.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: asymmetric partition (1 vs 63)") {
+TEST_CASE("scale: asymmetric partition (1 vs 63)") { // ~16s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -305,7 +305,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 // 4. Assert the cluster remains at 63 peers (no false deaths).
 // 5. Clear loss and verify cluster is still fully converged.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: 30% packet loss stress") {
+TEST_CASE("scale: 30% packet loss stress") { // ~6s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -352,7 +352,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 // 5. Restart nodes 50-60 seeded to a surviving node.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: churn stress (restarting nodes)") {
+TEST_CASE("scale: churn stress (restarting nodes)") { // ~41s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -414,7 +414,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 //    nodes 33-64.
 // 5. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: half-cluster immediate restart") {
+TEST_CASE("scale: half-cluster immediate restart") { // ~10s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -474,7 +474,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 // 5. Restart nodes 1-32 seeded to surviving nodes 33-64.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: half-cluster staged revival") {
+TEST_CASE("scale: half-cluster staged revival") { // ~12s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -530,7 +530,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 //    them, and wait for full convergence before the next batch.
 // 4. Verify all 64 nodes see 63 peers after all 8 batches.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: rolling upgrade simulation") {
+TEST_CASE("scale: rolling upgrade simulation") { // ~31s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -591,7 +591,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 //    simulate jitter without triggering false deaths.
 // 4. Verify the cluster remains at 63 peers throughout.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: high latency jitter and delay stress") {
+TEST_CASE("scale: high latency jitter and delay stress") { // ~6s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
@@ -635,7 +635,7 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 // 2. Start nodes 2-64 all at once, each seeded only to node_1.
 // 3. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: bootstrap storm simulation") {
+TEST_CASE("scale: bootstrap storm simulation") { // ~6s
   reset_cluster();
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
