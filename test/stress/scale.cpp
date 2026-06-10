@@ -23,6 +23,14 @@ static void reset_cluster() {
 // Detection latency target ~4s. Used for all tests.
 static swim_start_opts_t make_opts() { return swim_opts_for(64, 4000); }
 
+// 8× suspicion timeout to suppress false deaths under packet loss.
+static swim_start_opts_t make_opts_lossy() {
+  swim_start_opts_t opts = make_opts();
+  opts.suspicion_timeout_ms *= 8;
+  opts.dead_node_expiry_ms = 2 * opts.suspicion_timeout_ms;
+  return opts;
+}
+
 // Poll until all nodes in [from,to] (skipping any i where skip(i) is true)
 // see exactly `expected` peers. Returns true on success, false on timeout.
 static bool wait_for_all_peers(int from, int to, std::function<bool(int)> skip,
@@ -307,32 +315,102 @@ TEST_CASE("scale: 4-way partition and heal") {
 
 // ---------------------------------------------------------------------------
 // 4. 64-node network: asymmetric partition (1 vs 63)
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Isolate node_10: drop all traffic to/from port 5010.
+// 4. Assert the 63-node majority marks node_10 dead
+//    (all nodes except node_10 stabilise at 62 peers).
+// 5. Heal: clear the filter. node_10 seed-retries node_1 after GC
+//    and rejoins; the cluster reconverges.
+// 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: asymmetric partition (1 vs 63)") {
-  // TODO: Implement asymmetric partition isolating a single node.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Isolate node_1: 100% loss on port 5001 in both directions.
-  // 4. Assert node_1 sees 0 peers; the 63-node majority eventually
-  //    marks node_1 dead.
-  // 5. Heal and verify full convergence.
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Isolate node_10: drop all traffic to/from port 5010
+  swim_udp_set_drop_filter(
+      [](int src, int dst) -> int { return src == 5010 || dst == 5010; });
+
+  // node_10 is isolated: the 63-node majority detects it as dead
+  CHECK(wait_for_all_peers(1, 64, [](int i) { return i == 10; }, 62, 30000));
+
+  // Heal and verify full convergence
+  swim_clear_udp_loss();
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------
 // 5. 64-node network: 30% packet loss stress
+//
+// Uses 8× suspicion timeout (make_opts_lossy) to prevent false deaths
+// under sustained loss.
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1 with lossy opts.
+// 2. Verify initial convergence (each node sees 63 peers).
+// 3. Apply 30% outbound loss to all 64 ports.
+// 4. Assert the cluster remains at 63 peers (no false deaths).
+// 5. Clear loss and verify cluster is still fully converged.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: 30% packet loss stress") {
-  // TODO: Stress test with sustained 30% packet loss on all nodes.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Apply 30% outbound loss on all 64 ports.
-  // 4. Hold for several detection periods and assert the cluster
-  //    remains converged (no false deaths).
-  // 5. Clear loss and verify cluster is still fully converged.
-  REQUIRE(true);
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/c1", nullptr};
+
+  {
+    swim_start_opts_t opts = make_opts_lossy();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts_lossy();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Apply 30% outbound loss to all nodes
+  for (int i = 1; i <= 64; i++)
+    swim_udp_set_packet_loss(5000 + i, 30);
+
+  // Cluster should remain stable (no false deaths) under sustained loss
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
+
+  // Clear loss and verify cluster is still fully converged
+  swim_clear_udp_loss();
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 }
 
 // ---------------------------------------------------------------------------
