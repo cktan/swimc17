@@ -25,8 +25,7 @@ static swim_start_opts_t make_opts() { return swim_opts_for(64, 4000); }
 
 // Poll until all nodes in [from,to] (skipping any i where skip(i) is true)
 // see exactly `expected` peers. Returns true on success, false on timeout.
-static bool wait_for_all_peers(int from, int to,
-                               std::function<bool(int)> skip,
+static bool wait_for_all_peers(int from, int to, std::function<bool(int)> skip,
                                int expected, int timeout_ms) {
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
@@ -242,19 +241,68 @@ TEST_CASE("scale: partition and heal") {
 }
 
 // ---------------------------------------------------------------------------
-// 3. 64-node network: 4-way partition and gradual heal
+// 3. 64-node network: 4-way partition and heal
+//
+// Seeds: node_1, node_2, node_3 (all in group A, ports 5001-5016).
+//
+// Steps:
+// 1. Start all 64 nodes seeded to node_1, node_2, node_3.
+// 2. Verify full convergence (each node sees 63 peers).
+// 3. Partition into four groups of 16:
+//    A: nodes  1-16 (ports 5001-5016)
+//    B: nodes 17-32 (ports 5017-5032)
+//    C: nodes 33-48 (ports 5033-5048)
+//    D: nodes 49-64 (ports 5049-5064)
+// 4. Assert each group stabilises at 15 peers.
+// 5. Heal: clear all filters and verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
-TEST_CASE("scale: 4-way partition and gradual heal") {
-  // TODO: Implement 4-way partition (four groups of 16) and staged
-  // healing.
-  // Steps:
-  // 1. Start all 64 nodes with node_1 as seed.
-  // 2. Verify full convergence.
-  // 3. Partition into four groups of 16.
-  // 4. Assert each group sees 15 peers.
-  // 5. Heal groups A+B and C+D; verify each merged half sees 31.
-  // 6. Fully heal and verify all 64 nodes see 63 peers.
-  REQUIRE(true);
+TEST_CASE("scale: 4-way partition and heal") {
+  reset_cluster();
+
+  const char *seed_list[] = {
+      "127.0.0.1:5001/c1",
+      "127.0.0.1:5002/c2",
+      "127.0.0.1:5003/c3",
+      nullptr,
+  };
+
+  // node_1 starts with no seeds; nodes 2-64 seed to node_1/2/3
+  {
+    swim_start_opts_t opts = make_opts();
+    opts.self = "127.0.0.1:5001/c1";
+    opts.name = "node_1";
+    opts.seeds = nullptr;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+  for (int i = 2; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/c" + std::to_string(i);
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    REQUIRE(swim_start(&opts) == 0);
+  }
+
+  // Step 2: verify full convergence
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+
+  // Step 3: partition into four groups of 16.
+  // group(port) = (port - 5001) / 16 → 0=A, 1=B, 2=C, 3=D
+  swim_udp_set_drop_filter([](int src, int dst) -> int {
+    return (src - 5001) / 16 != (dst - 5001) / 16;
+  });
+
+  // Step 4: each group stabilises at 15 peers
+  CHECK(wait_for_all_peers(1, 16, nullptr, 15, 30000));
+  CHECK(wait_for_all_peers(17, 32, nullptr, 15, 30000));
+  CHECK(wait_for_all_peers(33, 48, nullptr, 15, 30000));
+  CHECK(wait_for_all_peers(49, 64, nullptr, 15, 30000));
+
+  // Step 5: heal and verify full convergence
+  swim_clear_udp_loss();
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------

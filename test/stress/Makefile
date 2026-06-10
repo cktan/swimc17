@@ -47,7 +47,7 @@ swim_feed.o: ../../src/swim_feed.c
 -include $(OBJ:.o=.d)
 
 test: stress_test
-	./stress_test
+	./stress_test --duration
 
 clean:
 	rm -f *.o *.d stress_test

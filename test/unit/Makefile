@@ -70,7 +70,7 @@ swim_feed.o: ../../src/swim_feed.c
 -include $(OBJ:%.o=%.d)
 
 test: unit_test
-	./unit_test
+	./unit_test --duration
 
 clean:
 	rm -f *.o *.d unit_test
