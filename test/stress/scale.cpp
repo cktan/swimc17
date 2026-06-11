@@ -16,17 +16,6 @@ extern "C" {
 // Handle table indexed by node number (1-based; slot 0 unused).
 static swim_t *g_nodes[65] = {};
 
-// Leave all live nodes and clear network state.
-static void reset_cluster() {
-  for (int i = 1; i <= 64; i++) {
-    if (g_nodes[i]) {
-      swim_leave(g_nodes[i]);
-      g_nodes[i] = nullptr;
-    }
-  }
-  swim_clear_udp_loss();
-}
-
 // swim_opts_for(64, 4000) → T≈540ms, ping_timeout≈108ms (1 tick minimum).
 // Detection latency target ~4s. Used for all tests.
 static swim_start_opts_t make_opts() { return swim_opts_for(64, 4000); }
@@ -39,7 +28,16 @@ static swim_start_opts_t make_opts_lossy() {
   return opts;
 }
 
-static void start_cluster(swim_start_opts_t opts, swim_feed_t *feed = nullptr) {
+// Leave all live nodes, clear network state, then start a fresh 64-node
+// cluster.
+static void reset_cluster(swim_start_opts_t opts, swim_feed_t *feed = nullptr) {
+  for (int i = 1; i <= 64; i++) {
+    if (g_nodes[i]) {
+      swim_leave(g_nodes[i]);
+      g_nodes[i] = nullptr;
+    }
+  }
+  swim_clear_udp_loss();
   const char *seed_list[] = {"127.0.0.1:5001/", "127.0.0.1:5002/",
                              "127.0.0.1:5003/", "127.0.0.1:5004/", nullptr};
   for (int i = 1; i <= 64; i++) {
@@ -113,9 +111,7 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 // Verifies that all 64 nodes start and converge.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: cluster setup") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 }
@@ -139,12 +135,10 @@ TEST_CASE("scale: cluster setup") {
 // 8. Gracefully leave node_14; confirm feed reports it down.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
-  reset_cluster();
-
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  start_cluster(make_opts(), feed);
+  reset_cluster(make_opts(), feed);
 
   // Wait for full convergence: every node sees 63 peers
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -216,9 +210,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 // 5. Heal: clear all filters and verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: 4-way partition and heal") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   // Step 2: verify full convergence
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -256,9 +248,7 @@ TEST_CASE("scale: 4-way partition and heal") {
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: asymmetric partition (1 vs 63)") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -290,9 +280,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 // 5. Clear loss and verify cluster is still fully converged.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: 30% packet loss stress") {
-  reset_cluster();
-
-  start_cluster(make_opts_lossy());
+  reset_cluster(make_opts_lossy());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -322,9 +310,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: churn stress (restarting nodes)") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -372,9 +358,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 // 5. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster immediate restart") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -420,9 +404,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: half-cluster staged revival") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -464,9 +446,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 // 4. Verify all 64 nodes see 63 peers after all 8 batches.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: rolling upgrade simulation") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -513,9 +493,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 // 4. Verify the cluster remains at 63 peers throughout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: high latency jitter and delay stress") {
-  reset_cluster();
-
-  start_cluster(make_opts_lossy());
+  reset_cluster(make_opts_lossy());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -542,9 +520,7 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 // 3. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: bootstrap storm simulation") {
-  reset_cluster();
-
-  start_cluster(make_opts());
+  reset_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
