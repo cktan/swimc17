@@ -74,16 +74,16 @@ TEST_CASE("protocol: single node startup and leave") {
   opts.self = "127.0.0.1:20001";
   opts.name = "single_node";
 
-  int rc = swim_start(&opts);
-  REQUIRE(rc == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   // Query members (should be empty because self is not in the list)
   int count;
-  char *p = swim_peers("single_node", true, &count);
+  char *p = swim_peers(inst, true, &count);
   CHECK(count == 0);
   free(p);
 
-  rc = swim_leave("single_node");
+  int rc = swim_leave(inst);
   CHECK(rc == 0);
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -122,35 +122,38 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   opts3.ping_timeout_ms = 100;
   opts3.seed_retry_interval_ms = 400;
 
-  REQUIRE(swim_start(&opts1) == 0);
-  REQUIRE(swim_start(&opts2) == 0);
-  REQUIRE(swim_start(&opts3) == 0);
+  swim_t *n1 = swim_start(&opts1);
+  swim_t *n2 = swim_start(&opts2);
+  swim_t *n3 = swim_start(&opts3);
+  REQUIRE(n1 != nullptr);
+  REQUIRE(n2 != nullptr);
+  REQUIRE(n3 != nullptr);
 
   // Wait for periodic probes and seed discovery to execute (approx 1.5 seconds)
   usleep(1500000);
 
   // Check Node 1 membership
   int count1;
-  char *p1 = swim_peers("n1", false, &count1);
+  char *p1 = swim_peers(n1, false, &count1);
   free(p1);
   CHECK(count1 >= 2); // should have discovered Node 2 and Node 3
 
   // Check Node 2 membership
   int count2;
-  char *p2 = swim_peers("n2", false, &count2);
+  char *p2 = swim_peers(n2, false, &count2);
   free(p2);
   CHECK(count2 >= 2);
 
   // Check Node 3 membership
   int count3;
-  char *p3 = swim_peers("n3", false, &count3);
+  char *p3 = swim_peers(n3, false, &count3);
   free(p3);
   CHECK(count3 >= 2);
 
   // Tear down all
-  CHECK(swim_leave("n1") == 0);
-  CHECK(swim_leave("n2") == 0);
-  CHECK(swim_leave("n3") == 0);
+  CHECK(swim_leave(n1) == 0);
+  CHECK(swim_leave(n2) == 0);
+  CHECK(swim_leave(n3) == 0);
   swim_set_error(SWIM_OK, nullptr);
 }
 
@@ -175,7 +178,8 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   opts.suspicion_timeout_ms = 600;
   opts.feed = feed;
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   // Simulate a join from a mock node by sending a raw PING packet to opts.port
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20202);
@@ -196,7 +200,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 
   // Verify Node 1 discovered mock node
   swim_member_t members[5];
-  int count = swim_members("failure_node", members, 5, false);
+  int count = swim_members(inst, members, 5, false);
   REQUIRE(count == 1);
   CHECK(swim_node_id_compare(&members[0].id, &mock_id) == 0);
   CHECK(members[0].status == SWIM_STATUS_ALIVE);
@@ -215,7 +219,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   usleep(700000);
 
   // Verify node is SUSPECT
-  count = swim_members("failure_node", members, 5, false);
+  count = swim_members(inst, members, 5, false);
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_SUSPECT);
 
@@ -223,11 +227,11 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   CHECK(obs_contains("node suspect 127.0.0.1:20202/mock"));
 
   // Provide a liveness hint to revive the suspected node
-  rc = swim_hint_alive("failure_node", "127.0.0.1:20202/mock");
+  rc = swim_hint_alive(inst, "127.0.0.1:20202/mock");
   CHECK(rc == 0);
 
   // Verify it is ALIVE again
-  count = swim_members("failure_node", members, 5, false);
+  count = swim_members(inst, members, 5, false);
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_ALIVE);
 
@@ -239,18 +243,18 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   usleep(1500000);
 
   // Verify it is DEAD (not in active list since include_dead = false)
-  count = swim_members("failure_node", members, 5, false);
+  count = swim_members(inst, members, 5, false);
   CHECK(count == 0);
 
   // Check with include_dead = true
-  count = swim_members("failure_node", members, 5, true);
+  count = swim_members(inst, members, 5, true);
   REQUIRE(count == 1);
   CHECK(members[0].status == SWIM_STATUS_DEAD);
 
   poll_feed_events(feed);
   CHECK(obs_contains("node down 127.0.0.1:20202/mock"));
 
-  swim_leave("failure_node");
+  swim_leave(inst);
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -272,7 +276,8 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   opts.protocol_period_ms = 1000; // keep the node's own probing out of the way
   opts.ping_timeout_ms = 100;     // relay entries expire after ~1 tick
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   swim_udp_t *requester = swim_udp_create("127.0.0.1", 20302);
   REQUIRE(requester != nullptr);
@@ -328,23 +333,23 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   swim_udp_destroy(requester);
   swim_udp_destroy(target);
-  swim_leave("relay_node");
+  swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }
 
-// Regression for H3 lifetime: swim_hint_alive must not touch the instance after
-// releasing its locks, so it can race swim_leave (which frees the instance)
-// without a use-after-free. Hammer hint_alive from several threads while the
-// main thread leaves. Meaningful under ASan/TSan.
+// Regression for H3 lifetime: concurrent swim_hint_alive calls while the
+// instance is live must not race with internal state. Hammer hint_alive from
+// several threads while the main thread is active, then join before leaving.
+// Meaningful under ASan/TSan.
 static std::atomic<bool> g_race_stop{false};
 struct RaceArg {
-  const char *name;
+  swim_t *inst;
   const char *peer;
 };
 static void *hint_spammer(void *a) {
   RaceArg *r = (RaceArg *)a;
   while (!g_race_stop.load()) {
-    swim_hint_alive(r->name, r->peer);
+    swim_hint_alive(r->inst, r->peer);
   }
   return nullptr;
 }
@@ -358,10 +363,11 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
   opts.protocol_period_ms = 100;
   opts.ping_timeout_ms = 50;
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   RaceArg arg;
-  arg.name = "h3_race";
+  arg.inst = inst;
   arg.peer = "127.0.0.1:20404/p";
 
   g_race_stop = false;
@@ -370,27 +376,26 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
     REQUIRE(pthread_create(&th[i], nullptr, hint_spammer, &arg) == 0);
   }
 
-  usleep(100000); // let the spammers spin against the live instance
-  CHECK(swim_leave("h3_race") == 0);
+  usleep(100000); // let the spammers hammer the live instance
   g_race_stop = true;
   for (int i = 0; i < 4; i++) {
     pthread_join(th[i], nullptr);
   }
+  CHECK(swim_leave(inst) == 0);
   swim_set_error(SWIM_OK, nullptr);
 }
 
 // Regression for M2: concurrent swim_leave on the same instance must be
-// memory-safe. The registry slot is cleared while g_instances_mutex is held,
-// before the join, so exactly one caller tears the instance down (returns 0)
-// and the rest get BAD_STATE instead of double-joining/double-freeing.
-// Meaningful under ASan/TSan.
+// memory-safe. An atomic CAS on inst->leaving ensures exactly one caller
+// tears the instance down (returns 0) and the rest get BAD_STATE without
+// double-joining or double-freeing. Meaningful under ASan/TSan.
 struct LeaveArg {
-  const char *name;
+  swim_t *inst;
   std::atomic<int> *successes;
 };
 static void *leave_racer(void *a) {
   LeaveArg *r = (LeaveArg *)a;
-  if (swim_leave(r->name) == 0) {
+  if (swim_leave(r->inst) == 0) {
     r->successes->fetch_add(1);
   }
   return nullptr;
@@ -402,11 +407,12 @@ TEST_CASE("protocol: concurrent swim_leave is memory-safe (M2)") {
   opts.self = "127.0.0.1:20402/c1";
   opts.name = "m2_race";
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   std::atomic<int> successes{0};
   LeaveArg arg;
-  arg.name = "m2_race";
+  arg.inst = inst;
   arg.successes = &successes;
 
   pthread_t th[4];
@@ -419,8 +425,6 @@ TEST_CASE("protocol: concurrent swim_leave is memory-safe (M2)") {
 
   // Exactly one thread tore the instance down; the others saw BAD_STATE.
   CHECK(successes.load() == 1);
-  // The instance is gone now.
-  CHECK(swim_leave("m2_race") != 0);
   swim_set_error(SWIM_OK, nullptr);
 }
 
@@ -436,7 +440,8 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   opts.protocol_period_ms = 10000; // slow
   opts.ping_timeout_ms = 1000;
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
@@ -493,7 +498,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   }
 
   swim_udp_destroy(mock_udp);
-  swim_leave("m1_budget");
+  swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }
 
@@ -602,7 +607,8 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   opts.protocol_period_ms = 200;
   opts.feed = feed;
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
@@ -627,7 +633,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   poll_feed_events(feed);
   CHECK(obs_size() == 0);
 
-  swim_leave("obs_node");
+  swim_leave(inst);
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -660,8 +666,10 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   b.ping_timeout_ms = 100;
   b.seed_retry_interval_ms = 200;
 
-  REQUIRE(swim_start(&a) == 0);
-  REQUIRE(swim_start(&b) == 0);
+  swim_t *na = swim_start(&a);
+  swim_t *nb = swim_start(&b);
+  REQUIRE(na != nullptr);
+  REQUIRE(nb != nullptr);
 
   // Let the nodes discover each other and run several probe cycles, so A sends
   // a direct ping to B and B acks it.
@@ -670,8 +678,8 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 
   CHECK(obs_contains("ping rtt 127.0.0.1:20512"));
 
-  CHECK(swim_leave("rtt_a") == 0);
-  CHECK(swim_leave("rtt_b") == 0);
+  CHECK(swim_leave(na) == 0);
+  CHECK(swim_leave(nb) == 0);
   swim_feed_destroy(feed_a);
   swim_set_error(SWIM_OK, nullptr);
 }
@@ -694,7 +702,8 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   opts.protocol_period_ms = 200;
   opts.feed = feed;
 
-  REQUIRE(swim_start(&opts) == 0);
+  swim_t *inst = swim_start(&opts);
+  REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20602);
   REQUIRE(mock_udp != nullptr);
@@ -711,7 +720,7 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   CHECK(obs_contains("node up 127.0.0.1:20602/mock"));
 
   swim_udp_destroy(mock_udp);
-  swim_leave("feed_test");
+  swim_leave(inst);
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }

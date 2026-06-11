@@ -6,19 +6,14 @@
  * suspicion timers, dead-node GC, and membership event
  * dissemination via the gossip queue.
  *
- * Up to 16 named instances are registered in a global
- * array (g_instances) protected by g_instances_mutex.
- * Each instance runs a background thread that calls
- * swim_timer_tick() every 100 ms and processes
- * incoming UDP packets.
+ * swim_start() allocates a swim_t and returns an opaque
+ * handle. Each instance owns its own timer and runs a
+ * background protocol thread. swim_leave() tears down
+ * the instance and frees the handle.
  *
- * Locking: g_instances_mutex is used only to look up (or
- * register/remove) an instance. find_and_lock_instance()
- * acquires inst->mutex while holding g_instances_mutex —
- * preventing a concurrent swim_leave() from removing the
- * instance between lookup and lock — then immediately
- * releases g_instances_mutex so the global lock is not
- * held during the actual work.
+ * Locking: inst->mutex guards all mutable instance state.
+ * swim_leave() uses an atomic_bool (leaving) to ensure
+ * only one concurrent caller performs teardown.
  *
  * Telemetry is written directly to the caller-supplied
  * swim_feed_t (optional; NULL disables telemetry).
@@ -95,9 +90,7 @@ typedef struct {
   uint64_t expiry_tick;
 } relay_probe_t;
 
-typedef struct swim_instance_t swim_instance_t;
-
-struct swim_instance_t {
+struct swim_t {
   char name[64];
   swim_udp_t *udp;
   swim_timer_t *timer;
@@ -112,6 +105,7 @@ struct swim_instance_t {
   pthread_t thread;
   pthread_mutex_t mutex;
   atomic_bool running;
+  atomic_bool leaving;
 
   uint64_t protocol_period_ms;
   uint64_t ping_timeout_ms;
@@ -147,34 +141,7 @@ struct swim_instance_t {
   uint64_t current_tick;
 };
 
-// Global named instance registry
-static swim_instance_t *g_instances[64] = {0};
-static pthread_mutex_t g_instances_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static swim_instance_t *find_instance(const char *name) {
-  if (!name || name[0] == '\0') {
-    return NULL;
-  }
-  for (int i = 0; i < 64; i++) {
-    if (g_instances[i] && strcmp(g_instances[i]->name, name) == 0) {
-      return g_instances[i];
-    }
-  }
-  return NULL;
-}
-
-/* Lock g_instances_mutex, find the instance, lock inst->mutex, release
- * g_instances_mutex, and return inst.  Returns NULL (nothing held) when
- * the instance does not exist. */
-static swim_instance_t *find_and_lock_instance(const char *name) {
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
-  if (inst) {
-    pthread_mutex_lock(&inst->mutex);
-  }
-  pthread_mutex_unlock(&g_instances_mutex);
-  return inst;
-}
+typedef swim_t swim_instance_t;
 
 // Forward declarations
 static void *swim_protocol_thread_entry(void *arg);
@@ -807,44 +774,24 @@ swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms) {
   return opts;
 }
 
-int swim_start(const swim_start_opts_t *opts) {
+swim_t *swim_start(const swim_start_opts_t *opts) {
   if (!opts || !opts->self || !opts->name || opts->name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID,
-                          "Invalid start options: self and name are mandatory");
+    swim_set_error(SWIM_ERR_INVALID,
+                   "Invalid start options: self and name are mandatory");
+    return NULL;
   }
 
   // Extract self_id
   swim_node_id_t self_id;
   if (swim_node_id_parse(&self_id, opts->self)) {
-    return -1;
-  }
-
-  pthread_mutex_lock(&g_instances_mutex);
-
-  // Look for existing named instance
-  if (find_instance(opts->name) != NULL) {
-    pthread_mutex_unlock(&g_instances_mutex);
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance already exists");
-  }
-
-  // Find a free slot in g_instances
-  int slot = -1;
-  for (int i = 0; i < 64; i++) {
-    if (g_instances[i] == NULL) {
-      slot = i;
-      break;
-    }
-  }
-  if (slot == -1) {
-    pthread_mutex_unlock(&g_instances_mutex);
-    return swim_set_error(SWIM_ERR_FULL, "Maximum active instances exceeded");
+    return NULL;
   }
 
   // Allocate an instance
   swim_instance_t *inst = calloc(1, sizeof(*inst));
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
-    return swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_instance_t");
+    swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_instance_t");
+    return NULL;
   }
 
   // Populate configuration
@@ -913,6 +860,7 @@ int swim_start(const swim_start_opts_t *opts) {
   // Initialize thread synchronization
   pthread_mutex_init(&inst->mutex, NULL);
   atomic_store_explicit(&inst->running, true, memory_order_relaxed);
+  atomic_store_explicit(&inst->leaving, false, memory_order_relaxed);
 
   // Seed this instance's private PRNG. Mix in the instance pointer so
   // instances started in the same second diverge.
@@ -947,10 +895,7 @@ int swim_start(const swim_start_opts_t *opts) {
     goto error_cleanup;
   }
 
-  g_instances[slot] = inst;
-
-  pthread_mutex_unlock(&g_instances_mutex);
-  return 0;
+  return inst;
 
 error_cleanup:
   if (inst->udp)
@@ -963,37 +908,26 @@ error_cleanup:
     swim_gossip_queue_destroy(inst->gossip_queue);
   free(inst->seeds);
   free(inst);
-  pthread_mutex_unlock(&g_instances_mutex);
-  return -1;
+  return NULL;
 }
 
-int swim_leave(const char *name) {
-  if (!name || name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
-  }
-  pthread_mutex_lock(&g_instances_mutex);
-  swim_instance_t *inst = find_instance(name);
+int swim_leave(swim_t *inst) {
   if (!inst) {
-    pthread_mutex_unlock(&g_instances_mutex);
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
+    return swim_set_error(SWIM_ERR_INVALID, "NULL instance");
   }
 
-  // Remove from the registry before releasing the lock so a racing
-  // swim_leave/lookup can no longer find this instance (it gets BAD_STATE).
-  // After this point inst is private to this call and is torn down without
-  // holding the global lock.
-  for (int i = 0; i < 64; i++) {
-    if (g_instances[i] == inst) {
-      g_instances[i] = NULL;
-      break;
-    }
+  // Claim exclusive ownership of teardown. Only one concurrent caller proceeds;
+  // the rest get BAD_STATE.
+  bool expected = false;
+  if (!atomic_compare_exchange_strong_explicit(&inst->leaving, &expected, true,
+                                               memory_order_acq_rel,
+                                               memory_order_acquire)) {
+    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance already leaving");
   }
 
-  // Stop the protocol task. running is atomic, so the worker's unlocked
-  // read in swim_protocol_loop sees this store without a data race.
+  // Stop the protocol thread. running is atomic so the worker's unlocked read
+  // in swim_protocol_loop sees this store without a data race.
   atomic_store_explicit(&inst->running, false, memory_order_relaxed);
-
-  pthread_mutex_unlock(&g_instances_mutex);
 
   // Join background thread
   pthread_join(inst->thread, NULL);
@@ -1038,40 +972,32 @@ int swim_leave(const char *name) {
   return 0;
 }
 
-int swim_members(const char *name, swim_member_t *out_list, int max_len,
+int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
                  bool include_dead) {
-  if (!name || name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
-  }
-  swim_instance_t *inst = find_and_lock_instance(name);
   if (!inst) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
+    return swim_set_error(SWIM_ERR_INVALID, "NULL instance");
   }
-
+  pthread_mutex_lock(&inst->mutex);
   int ret =
       swim_membership_list(inst->membership, out_list, max_len, include_dead);
   pthread_mutex_unlock(&inst->mutex);
   return ret;
 }
 
-char *swim_peers(const char *name, bool include_dead, int *count) {
-  if (!name || name[0] == '\0' || !count) {
+char *swim_peers(swim_t *inst, bool include_dead, int *count) {
+  if (!inst || !count) {
     swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_peers");
     return NULL;
   }
-  swim_instance_t *inst = find_and_lock_instance(name);
-  if (!inst) {
-    swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
-    return NULL;
-  }
+  pthread_mutex_lock(&inst->mutex);
   char *buf = swim_membership_peers(inst->membership, include_dead, count);
   pthread_mutex_unlock(&inst->mutex);
   return buf;
 }
 
-int swim_hint_alive(const char *name, const char *peer) {
-  if (!name || name[0] == '\0') {
-    return swim_set_error(SWIM_ERR_INVALID, "Instance name is mandatory");
+int swim_hint_alive(swim_t *inst, const char *peer) {
+  if (!inst) {
+    return swim_set_error(SWIM_ERR_INVALID, "NULL instance");
   }
   if (!peer) {
     return swim_set_error(SWIM_ERR_INVALID,
@@ -1081,10 +1007,7 @@ int swim_hint_alive(const char *name, const char *peer) {
   if (swim_node_id_parse(&peer_id, peer) != 0)
     return -1;
 
-  swim_instance_t *inst = find_and_lock_instance(name);
-  if (!inst) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance not found");
-  }
+  pthread_mutex_lock(&inst->mutex);
 
   const swim_member_t *m = swim_membership_get(inst->membership, &peer_id);
   if (m) {

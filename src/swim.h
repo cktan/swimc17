@@ -141,6 +141,8 @@ SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
 
 // --- Instance lifecycle ---
 
+typedef struct swim_t swim_t;
+
 typedef struct {
   const char *self; // "host:port" or "host:port/cookie" (mandatory)
   const char *name; // Unique instance name (mandatory)
@@ -221,19 +223,19 @@ SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
  * loop; the thread exits when swim_leave() is called. Returns once
  * the thread is running.
  *
- * @param opts Startup options (opts->name is mandatory).
- * @return 0 on success, -1 on failure.
+ * @param opts Startup options (opts->self and opts->name are mandatory).
+ * @return Opaque instance handle on success, NULL on failure.
  */
-SWIM_EXTERN int swim_start(const swim_start_opts_t *opts);
+SWIM_EXTERN swim_t *swim_start(const swim_start_opts_t *opts);
 
 /**
- * Stop a named instance, perform a graceful leave (notify peers),
- * and free resources.
+ * Stop an instance, perform a graceful leave (notify peers),
+ * and free resources. The handle is invalid after this call.
  *
- * @param name The name of the instance (mandatory).
+ * @param inst The instance handle returned by swim_start.
  * @return 0 on success, -1 on failure.
  */
-SWIM_EXTERN int swim_leave(const char *name);
+SWIM_EXTERN int swim_leave(swim_t *inst);
 
 /**
  * Return the current peer list as a packed string buffer.
@@ -241,21 +243,21 @@ SWIM_EXTERN int swim_leave(const char *name);
  * the *count strings are packed consecutively, each NUL-terminated.
  * Caller must free() the returned pointer.
  *
- * @param name         The name of the instance (mandatory).
+ * @param inst         The instance handle returned by swim_start.
  * @param include_dead Whether to include dead/quarantined peers.
  * @param count        Set to the number of peers on success.
  * @return Packed string buffer, or NULL on error.
  */
-SWIM_EXTERN char *swim_peers(const char *name, bool include_dead, int *count);
+SWIM_EXTERN char *swim_peers(swim_t *inst, bool include_dead, int *count);
 
 /**
  * Feed out-of-band reachability signal to cancel suspicion and
  * revive a node.
  *
- * @param name The name of the instance (mandatory).
+ * @param inst The instance handle returned by swim_start.
  * @param peer The node ID of the peer.
  * @return 0 on success, -1 on failure.
  */
-SWIM_EXTERN int swim_hint_alive(const char *name, const char *peer);
+SWIM_EXTERN int swim_hint_alive(swim_t *inst, const char *peer);
 
 #endif // SWIM_H

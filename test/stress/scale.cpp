@@ -13,10 +13,17 @@ extern "C" {
 #include <thread>
 #include <vector>
 
-// Call before each test. Leaves all nodes and clears packet loss state.
+// Handle table indexed by node number (1-based; slot 0 unused).
+static swim_t *g_nodes[65] = {};
+
+// Leave all live nodes and clear network state.
 static void reset_cluster() {
-  for (int i = 1; i <= 64; i++)
-    swim_leave(("node_" + std::to_string(i)).c_str());
+  for (int i = 1; i <= 64; i++) {
+    if (g_nodes[i]) {
+      swim_leave(g_nodes[i]);
+      g_nodes[i] = nullptr;
+    }
+  }
   swim_clear_udp_loss();
 }
 
@@ -43,9 +50,8 @@ static bool wait_for_all_peers(int from, int to, std::function<bool(int)> skip,
     for (int i = from; i <= to && all_ok; i++) {
       if (skip && skip(i))
         continue;
-      std::string name = "node_" + std::to_string(i);
       int cnt = 0;
-      char *p = swim_peers(name.c_str(), false, &cnt);
+      char *p = swim_peers(g_nodes[i], false, &cnt);
       free(p);
       if (cnt != expected)
         all_ok = false;
@@ -119,7 +125,8 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
     opts.name = "node_1";
     opts.seeds = nullptr;
     opts.feed = feed;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
 
   // Start nodes 2-64, all seeded to node_1
@@ -130,14 +137,16 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   // Wait for full convergence: every node sees 63 peers
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Kill node_7 and wait for node_1's feed to report it dead
-  REQUIRE(swim_leave("node_7") == 0);
+  REQUIRE(swim_leave(g_nodes[7]) == 0);
+  g_nodes[7] = nullptr;
   CHECK(drain_feed_for(feed, "down", ":5007", 10000));
 
   // Pause node_14 (100% outbound loss) and wait for death detection
@@ -148,7 +157,8 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   // as seeds. When membership is empty the seed retry timer pings all seeds
   // at once, so node_14 discovers the full cluster in a single round.
   swim_udp_set_packet_loss(5014, 0);
-  swim_leave("node_14");
+  swim_leave(g_nodes[14]);
+  g_nodes[14] = nullptr;
   {
     std::vector<std::string> seed_strs;
     std::vector<const char *> seed_ptrs;
@@ -161,12 +171,12 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
       seed_ptrs.push_back(s.c_str());
     seed_ptrs.push_back(nullptr);
 
-    std::string self = "127.0.0.1:5014/";
     swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
+    opts.self = "127.0.0.1:5014/";
     opts.name = "node_14";
     opts.seeds = seed_ptrs.data();
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[14] = swim_start(&opts);
+    REQUIRE(g_nodes[14] != nullptr);
   }
   CHECK(drain_feed_for(feed, "up", ":5014", 10000));
 
@@ -174,7 +184,8 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   CHECK(wait_for_all_peers(1, 64, [](int i) { return i == 7; }, 62, 60000));
 
   // Gracefully leave node_14 and verify detection via node_1's feed
-  REQUIRE(swim_leave("node_14") == 0);
+  REQUIRE(swim_leave(g_nodes[14]) == 0);
+  g_nodes[14] = nullptr;
   CHECK(drain_feed_for(feed, "down", ":5014", 10000));
 
   // Cleanup
@@ -215,7 +226,8 @@ TEST_CASE("scale: 4-way partition and heal") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -224,7 +236,8 @@ TEST_CASE("scale: 4-way partition and heal") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   // Step 2: verify full convergence
@@ -272,7 +285,8 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -281,7 +295,8 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -323,7 +338,8 @@ TEST_CASE("scale: 30% packet loss stress") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -332,7 +348,8 @@ TEST_CASE("scale: 30% packet loss stress") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -372,7 +389,8 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -381,14 +399,17 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Kill nodes 50-60 simultaneously
-  for (int i = 50; i <= 60; i++)
-    swim_leave(("node_" + std::to_string(i)).c_str());
+  for (int i = 50; i <= 60; i++) {
+    swim_leave(g_nodes[i]);
+    g_nodes[i] = nullptr;
+  }
 
   // Wait for the surviving 53 nodes to detect the 11 deaths
   CHECK(wait_for_all_peers(
@@ -403,7 +424,8 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = restart_seeds;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -436,7 +458,8 @@ TEST_CASE("scale: half-cluster immediate restart") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -445,14 +468,17 @@ TEST_CASE("scale: half-cluster immediate restart") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Kill nodes 1-32 simultaneously (including the seed)
-  for (int i = 1; i <= 32; i++)
-    swim_leave(("node_" + std::to_string(i)).c_str());
+  for (int i = 1; i <= 32; i++) {
+    swim_leave(g_nodes[i]);
+    g_nodes[i] = nullptr;
+  }
 
   // Immediately restart nodes 1-32 seeded to surviving nodes 33-64.
   // Restarting increments the incarnation number, so surviving nodes
@@ -466,7 +492,8 @@ TEST_CASE("scale: half-cluster immediate restart") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = restart_seeds;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   // Allow time for old incarnation entries to be GC'd and the full
@@ -498,7 +525,8 @@ TEST_CASE("scale: half-cluster staged revival") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -507,14 +535,17 @@ TEST_CASE("scale: half-cluster staged revival") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
   // Kill nodes 1-32
-  for (int i = 1; i <= 32; i++)
-    swim_leave(("node_" + std::to_string(i)).c_str());
+  for (int i = 1; i <= 32; i++) {
+    swim_leave(g_nodes[i]);
+    g_nodes[i] = nullptr;
+  }
 
   // Wait for the surviving half to detect the 32 deaths
   CHECK(wait_for_all_peers(33, 64, nullptr, 31, 30000));
@@ -528,7 +559,8 @@ TEST_CASE("scale: half-cluster staged revival") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = restart_seeds;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
@@ -556,7 +588,8 @@ TEST_CASE("scale: rolling upgrade simulation") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -565,7 +598,8 @@ TEST_CASE("scale: rolling upgrade simulation") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -574,8 +608,10 @@ TEST_CASE("scale: rolling upgrade simulation") {
     int start = batch * 8 + 1;
     int end = start + 7;
 
-    for (int i = start; i <= end; i++)
-      swim_leave(("node_" + std::to_string(i)).c_str());
+    for (int i = start; i <= end; i++) {
+      swim_leave(g_nodes[i]);
+      g_nodes[i] = nullptr;
+    }
 
     // Seed to node_33 for batches 1-4, node_1 for batches 5-8.
     int seed_node = (start <= 32) ? 33 : 1;
@@ -590,7 +626,8 @@ TEST_CASE("scale: rolling upgrade simulation") {
       opts.self = self.c_str();
       opts.name = name.c_str();
       opts.seeds = restart_seeds;
-      REQUIRE(swim_start(&opts) == 0);
+      g_nodes[i] = swim_start(&opts);
+      REQUIRE(g_nodes[i] != nullptr);
     }
 
     CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
@@ -619,7 +656,8 @@ TEST_CASE("scale: high latency jitter and delay stress") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -628,7 +666,8 @@ TEST_CASE("scale: high latency jitter and delay stress") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -665,7 +704,8 @@ TEST_CASE("scale: bootstrap storm simulation") {
     opts.self = "127.0.0.1:5001/";
     opts.name = "node_1";
     opts.seeds = nullptr;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[1] = swim_start(&opts);
+    REQUIRE(g_nodes[1] != nullptr);
   }
   for (int i = 2; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
@@ -674,7 +714,8 @@ TEST_CASE("scale: bootstrap storm simulation") {
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
-    REQUIRE(swim_start(&opts) == 0);
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
   }
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
