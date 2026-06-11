@@ -39,6 +39,21 @@ static swim_start_opts_t make_opts_lossy() {
   return opts;
 }
 
+static void start_cluster(swim_start_opts_t opts, swim_feed_t *feed = nullptr) {
+  const char *seed_list[] = {"127.0.0.1:5001/", "127.0.0.1:5002/",
+                             "127.0.0.1:5003/", "127.0.0.1:5004/", nullptr};
+  for (int i = 1; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    opts.feed = (i == 1) ? feed : nullptr;
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
+  }
+}
+
 // Poll until all nodes in [from,to] (skipping any i where skip(i) is true)
 // see exactly `expected` peers. Returns true on success, false on timeout.
 static bool wait_for_all_peers(int from, int to, std::function<bool(int)> skip,
@@ -100,18 +115,7 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 TEST_CASE("scale: cluster setup") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 }
@@ -140,20 +144,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    if (i == 1)
-      opts.feed = feed;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts(), feed);
 
   // Wait for full convergence: every node sees 63 peers
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -209,12 +200,12 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 // ---------------------------------------------------------------------------
 // 2. 64-node network: 4-way partition and heal
 //
-// Seeds: node_1, node_2, node_3 (all in group A, ports 5001-5016).
+// Seeds: nodes 1-4 (ports 5001-5004).
 //
 // Time: ~31s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1, node_2, node_3.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Partition into four groups of 16:
 //    A: nodes  1-16 (ports 5001-5016)
@@ -227,23 +218,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 TEST_CASE("scale: 4-way partition and heal") {
   reset_cluster();
 
-  const char *seed_list[] = {
-      "127.0.0.1:5001/",
-      "127.0.0.1:5002/",
-      "127.0.0.1:5003/",
-      nullptr,
-  };
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   // Step 2: verify full convergence
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
@@ -283,18 +258,7 @@ TEST_CASE("scale: 4-way partition and heal") {
 TEST_CASE("scale: asymmetric partition (1 vs 63)") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -328,18 +292,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 TEST_CASE("scale: 30% packet loss stress") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts_lossy();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts_lossy());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -371,18 +324,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 TEST_CASE("scale: churn stress (restarting nodes)") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -432,18 +374,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 TEST_CASE("scale: half-cluster immediate restart") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -491,18 +422,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 TEST_CASE("scale: half-cluster staged revival") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -546,18 +466,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 TEST_CASE("scale: rolling upgrade simulation") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -606,18 +515,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 TEST_CASE("scale: high latency jitter and delay stress") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts_lossy();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts_lossy());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
 
@@ -646,18 +544,7 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 TEST_CASE("scale: bootstrap storm simulation") {
   reset_cluster();
 
-  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
-
-  for (int i = 1; i <= 64; i++) {
-    std::string name = "node_" + std::to_string(i);
-    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
-    swim_start_opts_t opts = make_opts();
-    opts.self = self.c_str();
-    opts.name = name.c_str();
-    opts.seeds = seed_list;
-    g_nodes[i] = swim_start(&opts);
-    REQUIRE(g_nodes[i] != nullptr);
-  }
+  start_cluster(make_opts());
 
   CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
