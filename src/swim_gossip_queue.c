@@ -7,7 +7,7 @@
  * higher, or when the incarnation is equal but its priority
  * is higher (DEAD > SUSPECT > ALIVE). Each entry carries a
  * transmit count; entries are pruned after being packed
- * ceil(log2(N)) * 3 * multiplier times, where N is the
+ * ceil(log2(N+1)) * 3 * multiplier times, where N is the
  * current cluster size.
  *
  * The queue is a dynamically-grown flat array. There is no

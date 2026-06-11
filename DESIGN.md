@@ -298,19 +298,17 @@ swim_start_opts_t opts = {
   .seed_retry_interval_ms = 5000,
   .dead_node_expiry_ms   = 6000
 };
-swim_start(&opts);
+swim_t *inst = swim_start(&opts);
 ```
 
-Except for `swim_start`, which takes a `swim_start_opts_t`
-struct pointer containing the unique instance name, all
-public functions take a mandatory `name` argument to target
-a specific instance. The name cannot be `NULL` or empty.
+All instance functions take the opaque `swim_t *` handle
+returned by `swim_start`.
 
 ### Querying membership
 
 ```c
 int count;
-char *p = swim_peers("my_cluster", false, &count);
+char *p = swim_peers(inst, false, &count);
 // iterate: char *s = p; for (int i = 0; i < count; i++) { ...; s += strlen(s)+1; }
 free(p);
 ```
@@ -337,7 +335,7 @@ for (;;) {
     }
 }
 
-swim_leave("my_cluster");
+swim_leave(inst);
 swim_feed_destroy(feed);
 ```
 
@@ -350,7 +348,7 @@ telemetry.
 ### Liveness hint
 
 ```c
-swim_hint_alive("my_cluster", "10.0.0.2:7772");
+swim_hint_alive(inst, "10.0.0.2:7772");
 ```
 
 Feeds out-of-band evidence that `peer` is alive into the
@@ -389,7 +387,7 @@ caller.
 ### Graceful leave
 
 ```c
-swim_leave("my_cluster");
+swim_leave(inst);
 ```
 
 1. Increments own incarnation number.
@@ -425,7 +423,7 @@ swim_feed_t *feed = swim_feed_create();
 opts.feed = feed;
 swim_start(&opts);
 // ... run ...
-swim_leave("my_cluster");
+swim_leave(inst);
 swim_feed_destroy(feed);
 ```
 

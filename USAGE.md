@@ -61,9 +61,9 @@ int main() {
     const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
     opts.seeds = seeds;
 
-    if (swim_start(&opts) != 0) {
-        fprintf(stderr, "Failed to start SWIM: %s\n",
-                swim_errmsg());
+    swim_t *inst = swim_start(&opts);
+    if (!inst) {
+        fprintf(stderr, "Failed to start SWIM: %s\n", swim_errmsg());
         return 1;
     }
 
@@ -80,7 +80,7 @@ int main() {
         }
     }
 
-    swim_leave("my_cluster");
+    swim_leave(inst);
 
     swim_feed_wakeall(feed);
     // join any reader threads here
@@ -191,9 +191,8 @@ swim_feed_destroy(feed);
 
 ## API Reference
 
-All instance functions accept a `name` argument to
-identify the named instance. `name` must be non-NULL and
-non-empty; passing otherwise returns `SWIM_ERR_INVALID`.
+All instance functions accept a `swim_t *inst` handle
+returned by `swim_start`.
 
 ---
 
@@ -249,7 +248,7 @@ swim_start(&opts);
 ### `swim_start`
 
 ```c
-int swim_start(const swim_start_opts_t *opts);
+swim_t *swim_start(const swim_start_opts_t *opts);
 ```
 
 Starts the background protocol worker thread and
@@ -259,8 +258,8 @@ registers a new named cluster membership instance.
 `opts->feed` is optional; pass `NULL` to disable
 telemetry.
 
-Returns `0` on success. On failure, returns `-1` and
-sets `swim_errno` to:
+Returns an opaque `swim_t *` handle on success, or
+`NULL` on failure. On failure, sets `swim_errno` to:
 - `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->self` /
   `opts->name` are empty or invalid.
 - `SWIM_ERR_BAD_STATE`: An instance with the same name
@@ -275,18 +274,15 @@ Thread-safe.
 ### `swim_leave`
 
 ```c
-int swim_leave(const char *name);
+int swim_leave(swim_t *inst);
 ```
 
 Performs a graceful leave, stops the background thread,
 and deallocates all associated resources. Does not
-destroy the caller's feed.
+destroy the caller's feed. The handle is invalid after
+this call.
 
-Returns `0` on success. On failure, returns `-1` and
-sets `swim_errno` to:
-- `SWIM_ERR_INVALID`: `name` is NULL or empty.
-- `SWIM_ERR_BAD_STATE`: No instance found matching
-  `name`.
+Returns `0` on success, `-1` on failure.
 
 Thread-safe.
 
@@ -295,7 +291,7 @@ Thread-safe.
 ### `swim_peers`
 
 ```c
-char *swim_peers(const char *name, bool include_dead,
+char *swim_peers(swim_t *inst, bool include_dead,
                  int *count);
 ```
 
@@ -311,10 +307,7 @@ only.
 
 Returns a valid pointer (with `*count` set) on success,
 or `NULL` on error:
-- `SWIM_ERR_INVALID`: `name` or `count` is NULL, or
-  `name` is empty.
-- `SWIM_ERR_BAD_STATE`: No instance found matching
-  `name`.
+- `SWIM_ERR_INVALID`: `inst` or `count` is NULL.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
 Thread-safe.
@@ -324,7 +317,7 @@ Thread-safe.
 ### `swim_hint_alive`
 
 ```c
-int swim_hint_alive(const char *name, const char *peer);
+int swim_hint_alive(swim_t *inst, const char *peer);
 ```
 
 Feeds an out-of-band reachability signal into the
@@ -335,10 +328,10 @@ string identifying the target node.
 
 Returns `0` on success. On failure, returns `-1` and
 sets `swim_errno` to:
-- `SWIM_ERR_INVALID`: `name` is NULL or empty, or
-  `peer` is NULL.
-- `SWIM_ERR_BAD_STATE`: No instance found matching
-  `name`.
+- `SWIM_ERR_INVALID`: `inst` is NULL, or `peer` is
+  NULL.
+- `SWIM_ERR_BAD_STATE`: `inst` is not a valid running
+  instance.
 
 Thread-safe.
 
@@ -460,11 +453,11 @@ swim_start_opts_t opts_b = {
     .feed = feed_b
 };
 
-swim_start(&opts_a);
-swim_start(&opts_b);
+swim_t *inst_a = swim_start(&opts_a);
+swim_t *inst_b = swim_start(&opts_b);
 
 int count;
-char *p = swim_peers("cluster_a", false, &count);
+char *p = swim_peers(inst_a, false, &count);
 // iterate p...
 free(p);
 ```

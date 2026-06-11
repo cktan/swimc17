@@ -129,8 +129,9 @@ struct swim_t {
   // The single outstanding liveness probe (direct or indirect) per SWIM round.
   pending_probe_t pending_probe;
 
-  // In-flight PING-REQ relays: indirect probes sent to helpers when a direct
-  // probe times out. Capped at 32; entries are removed on ACK or timeout.
+  // In-flight PING-REQ relays: probes we perform as a helper on behalf of
+  // another node's failure detector. Capped at 32; entries are removed on
+  // ACK or timeout.
   relay_probe_t relays[32];
   int relay_count;
 
@@ -397,8 +398,6 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
           "seed retry timer failed to re-arm: seed discovery stopped");
   }
 }
-
-// Helper functions moved above
 
 // Helper to send messages
 static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
