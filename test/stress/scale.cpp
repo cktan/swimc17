@@ -93,6 +93,30 @@ static bool drain_feed_for(swim_feed_t *feed, const char *f1, const char *f2,
 }
 
 // ---------------------------------------------------------------------------
+// 0. 64-node cluster setup smoke test
+//
+// Verifies that all 64 nodes start and converge.
+// ---------------------------------------------------------------------------
+TEST_CASE("scale: cluster setup") {
+  reset_cluster();
+
+  const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
+
+  for (int i = 1; i <= 64; i++) {
+    std::string name = "node_" + std::to_string(i);
+    std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
+    swim_start_opts_t opts = make_opts();
+    opts.self = self.c_str();
+    opts.name = name.c_str();
+    opts.seeds = seed_list;
+    g_nodes[i] = swim_start(&opts);
+    REQUIRE(g_nodes[i] != nullptr);
+  }
+
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+}
+
+// ---------------------------------------------------------------------------
 // 1. 64-node network: staged startup, failure detection, and pause/unpause
 //
 // Time: ~9s
@@ -118,25 +142,15 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  // Start node_1 as seed with telemetry feed attached
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    opts.feed = feed;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-
-  // Start nodes 2-64, all seeded to node_1
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
     opts.self = self.c_str();
     opts.name = name.c_str();
     opts.seeds = seed_list;
+    if (i == 1)
+      opts.feed = feed;
     g_nodes[i] = swim_start(&opts);
     REQUIRE(g_nodes[i] != nullptr);
   }
@@ -220,16 +234,7 @@ TEST_CASE("scale: 4-way partition and heal") {
       nullptr,
   };
 
-  // node_1 starts with no seeds; nodes 2-64 seed to node_1/2/3
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -280,15 +285,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -333,15 +330,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts_lossy();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts_lossy();
@@ -384,15 +373,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -453,15 +434,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -520,15 +493,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -583,15 +548,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
@@ -651,15 +608,7 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts_lossy();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts_lossy();
@@ -699,15 +648,7 @@ TEST_CASE("scale: bootstrap storm simulation") {
 
   const char *seed_list[] = {"127.0.0.1:5001/", nullptr};
 
-  {
-    swim_start_opts_t opts = make_opts();
-    opts.self = "127.0.0.1:5001/";
-    opts.name = "node_1";
-    opts.seeds = nullptr;
-    g_nodes[1] = swim_start(&opts);
-    REQUIRE(g_nodes[1] != nullptr);
-  }
-  for (int i = 2; i <= 64; i++) {
+  for (int i = 1; i <= 64; i++) {
     std::string name = "node_" + std::to_string(i);
     std::string self = "127.0.0.1:" + std::to_string(5000 + i) + "/";
     swim_start_opts_t opts = make_opts();
