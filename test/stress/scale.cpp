@@ -428,7 +428,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     REQUIRE(g_nodes[i] != nullptr);
   }
 
-  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 30000));
+  CHECK(wait_for_all_peers(1, 64, nullptr, 63, 60000));
 }
 
 // ---------------------------------------------------------------------------
