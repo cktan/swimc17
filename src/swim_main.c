@@ -539,173 +539,177 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
   return swim_unpack_message(buf, len, msg);
 }
 
-// Packet receiver and protocol handler
+// Packet receiver and protocol handler — drains all pending packets.
 static void swim_protocol_handle_incoming(swim_instance_t *inst) {
   swim_node_id_t src;
   swim_message_t msg;
   int rc;
 
-  if (recv_message(inst, &src, &msg) != 0)
-    return;
+  while (recv_message(inst, &src, &msg) == 0) {
 
-  // Since UDP recv doesn't contain the cookie, populate it from the decoded
-  // message sender ID
-  strcpy(src.cookie, msg.sender.cookie);
+    // Since UDP recv doesn't contain the cookie, populate it from the decoded
+    // message sender ID
+    strcpy(src.cookie, msg.sender.cookie);
 
-  // Apply gossip rules for incoming sender status first
-  update_node_alive(inst, &msg.sender);
+    // Apply gossip rules for incoming sender status first
+    update_node_alive(inst, &msg.sender);
 
-  // 1. Process Piggybacked Gossip Events
-  for (int i = 0; i < msg.gossip_count; i++) {
-    const swim_member_t *ev = &msg.gossip[i];
+    // 1. Process Piggybacked Gossip Events
+    for (int i = 0; i < msg.gossip_count; i++) {
+      const swim_member_t *ev = &msg.gossip[i];
 
-    // Exclude self-events from direct updates (dealt with via refutation below)
-    if (swim_node_id_compare(&ev->id, &inst->self_id) != 0) {
-      rc =
-          swim_membership_apply_event(inst->membership, ev->status, &ev->id,
-                                      ev->incarnation, get_monotonic_time_ms());
-      if (rc == 0) {
-        swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, &ev->id,
-                                  ev->incarnation, 1);
+      // Exclude self-events from direct updates (dealt with via refutation
+      // below)
+      if (swim_node_id_compare(&ev->id, &inst->self_id) != 0) {
+        rc = swim_membership_apply_event(inst->membership, ev->status, &ev->id,
+                                         ev->incarnation,
+                                         get_monotonic_time_ms());
+        if (rc == 0) {
+          swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, &ev->id,
+                                    ev->incarnation, 1);
 
-        if (ev->status == SWIM_STATUS_DEAD) {
-          queue_notification(inst, "down", &ev->id);
-          // Cancel suspicion timer if any
-          char alarm_name[384];
-          suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
-          swim_timer_cancel(inst->timer, alarm_name);
-        } else if (ev->status == SWIM_STATUS_SUSPECT) {
-          queue_notification(inst, "suspect", &ev->id);
-
-          // Heap-allocate the ID; the suspicion callback takes ownership and
-          // frees it. Start suspicion timer
-          swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
-          if (!suspect_param) {
-            if (inst->feed)
-              swim_feed_put(inst->feed, 2, "warning",
-                            "suspicion timer not armed: out of memory");
-          } else {
-            *suspect_param = ev->id;
+          if (ev->status == SWIM_STATUS_DEAD) {
+            queue_notification(inst, "down", &ev->id);
+            // Cancel suspicion timer if any
             char alarm_name[384];
             suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
-            if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
-                               alarm_name, suspicion_timer_cb, inst,
-                               suspect_param) != 0) {
-              free(suspect_param);
+            swim_timer_cancel(inst->timer, alarm_name);
+          } else if (ev->status == SWIM_STATUS_SUSPECT) {
+            queue_notification(inst, "suspect", &ev->id);
+
+            // Heap-allocate the ID; the suspicion callback takes ownership and
+            // frees it. Start suspicion timer
+            swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
+            if (!suspect_param) {
               if (inst->feed)
                 swim_feed_put(inst->feed, 2, "warning",
-                              "suspicion timer not armed: timer add failed");
+                              "suspicion timer not armed: out of memory");
+            } else {
+              *suspect_param = ev->id;
+              char alarm_name[384];
+              suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
+              if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
+                                 alarm_name, suspicion_timer_cb, inst,
+                                 suspect_param) != 0) {
+                free(suspect_param);
+                if (inst->feed)
+                  swim_feed_put(inst->feed, 2, "warning",
+                                "suspicion timer not armed: timer add failed");
+              }
             }
+          } else if (ev->status == SWIM_STATUS_ALIVE) {
+            queue_notification(inst, "up", &ev->id);
+            // Cancel suspicion timer
+            char alarm_name[384];
+            suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
+            swim_timer_cancel(inst->timer, alarm_name);
           }
-        } else if (ev->status == SWIM_STATUS_ALIVE) {
-          queue_notification(inst, "up", &ev->id);
-          // Cancel suspicion timer
-          char alarm_name[384];
-          suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
-          swim_timer_cancel(inst->timer, alarm_name);
         }
-      }
-    } else {
-      // Rumor about ourselves! Self-refutation logic
-      if (ev->status == SWIM_STATUS_SUSPECT || ev->status == SWIM_STATUS_DEAD) {
-        if (ev->incarnation >= inst->incarnation) {
-          inst->incarnation = ev->incarnation + 1;
-          swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
-                                    &inst->self_id, inst->incarnation,
-                                    REFUTATION_MULTIPLIER);
+      } else {
+        // Rumor about ourselves! Self-refutation logic
+        if (ev->status == SWIM_STATUS_SUSPECT ||
+            ev->status == SWIM_STATUS_DEAD) {
+          if (ev->incarnation >= inst->incarnation) {
+            inst->incarnation = ev->incarnation + 1;
+            swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
+                                      &inst->self_id, inst->incarnation,
+                                      REFUTATION_MULTIPLIER);
+          }
         }
       }
     }
-  }
 
-  // 2. Dispatch message by type
-  switch (msg.type) {
-  case SWIM_MSG_PING:
-    send_ack(inst, &msg.sender, msg.seq);
-    break;
+    // 2. Dispatch message by type
+    switch (msg.type) {
+    case SWIM_MSG_PING:
+      send_ack(inst, &msg.sender, msg.seq);
+      break;
 
-  case SWIM_MSG_ACK:
-    if (inst->pending_probe.state != PROBE_NONE &&
-        swim_node_id_compare(&msg.sender, &inst->pending_probe.target) == 0 &&
-        msg.seq == inst->pending_probe.seq) {
-      // Report RTT only for a clean direct round-trip.
-      if (inst->pending_probe.state == PROBE_DIRECT && inst->feed) {
-        uint64_t rtt = get_monotonic_time_ms() - inst->pending_probe.sent_ms;
-        char node_str[350];
-        if (swim_node_id_format(&msg.sender, node_str, sizeof(node_str)) == 0) {
-          char rtt_str[32];
-          snprintf(rtt_str, sizeof(rtt_str), "%llu", (unsigned long long)rtt);
-          swim_feed_put(inst->feed, 4, "ping", "rtt", node_str, rtt_str);
+    case SWIM_MSG_ACK:
+      if (inst->pending_probe.state != PROBE_NONE &&
+          swim_node_id_compare(&msg.sender, &inst->pending_probe.target) == 0 &&
+          msg.seq == inst->pending_probe.seq) {
+        // Report RTT only for a clean direct round-trip.
+        if (inst->pending_probe.state == PROBE_DIRECT && inst->feed) {
+          uint64_t rtt = get_monotonic_time_ms() - inst->pending_probe.sent_ms;
+          char node_str[350];
+          if (swim_node_id_format(&msg.sender, node_str, sizeof(node_str)) ==
+              0) {
+            char rtt_str[32];
+            snprintf(rtt_str, sizeof(rtt_str), "%llu", (unsigned long long)rtt);
+            swim_feed_put(inst->feed, 4, "ping", "rtt", node_str, rtt_str);
+          }
+        }
+        inst->pending_probe.state = PROBE_NONE;
+        swim_timer_cancel(inst->timer, "probe_timeout");
+      }
+      // Process potential helper relays
+      for (int i = 0; i < inst->relay_count; i++) {
+        if (swim_node_id_compare(&msg.sender, &inst->relays[i].target) == 0 &&
+            msg.seq == inst->relays[i].seq &&
+            inst->current_tick < inst->relays[i].expiry_tick) {
+          send_fwd_ack(inst, &inst->relays[i].requester, &msg.sender, msg.seq);
+
+          // Clear entry
+          inst->relays[i] = inst->relays[inst->relay_count - 1];
+          inst->relay_count--;
+          i--;
         }
       }
-      inst->pending_probe.state = PROBE_NONE;
-      swim_timer_cancel(inst->timer, "probe_timeout");
-    }
-    // Process potential helper relays
-    for (int i = 0; i < inst->relay_count; i++) {
-      if (swim_node_id_compare(&msg.sender, &inst->relays[i].target) == 0 &&
-          msg.seq == inst->relays[i].seq &&
-          inst->current_tick < inst->relays[i].expiry_tick) {
-        send_fwd_ack(inst, &inst->relays[i].requester, &msg.sender, msg.seq);
+      break;
 
-        // Clear entry
-        inst->relays[i] = inst->relays[inst->relay_count - 1];
-        inst->relay_count--;
-        i--;
+    case SWIM_MSG_PING_REQ:
+      // We act as a helper relay: ping msg.peer on behalf of msg.sender
+      relay_gc(inst);
+      /* 32-slot cap. Practical risk is low: with ping_req_fanout=3 and
+       * short-lived entries (removed on ack or timeout), hitting 32
+       * concurrent relays requires tens of simultaneous failed probes. */
+      if (inst->relay_count < 32) {
+        relay_probe_t *r = &inst->relays[inst->relay_count++];
+        r->requester = msg.sender;
+        r->target = msg.peer;
+        r->seq = msg.seq;
+        r->expiry_tick = inst->current_tick + (inst->ping_timeout_ms / 100);
+
+        send_ping(inst, &msg.peer, msg.seq);
       }
-    }
-    break;
+      break;
 
-  case SWIM_MSG_PING_REQ:
-    // We act as a helper relay: ping msg.peer on behalf of msg.sender
-    relay_gc(inst);
-    /* 32-slot cap. Practical risk is low: with ping_req_fanout=3 and
-     * short-lived entries (removed on ack or timeout), hitting 32
-     * concurrent relays requires tens of simultaneous failed probes. */
-    if (inst->relay_count < 32) {
-      relay_probe_t *r = &inst->relays[inst->relay_count++];
-      r->requester = msg.sender;
-      r->target = msg.peer;
-      r->seq = msg.seq;
-      r->expiry_tick = inst->current_tick + (inst->ping_timeout_ms / 100);
+    case SWIM_MSG_FWD_ACK:
+      // Relayed ack received via helper
+      if (inst->pending_probe.state != PROBE_NONE &&
+          swim_node_id_compare(&msg.peer, &inst->pending_probe.target) == 0 &&
+          msg.seq == inst->pending_probe.seq) {
+        inst->pending_probe.state = PROBE_NONE;
+        swim_timer_cancel(inst->timer, "probe_timeout");
+      }
+      break;
 
-      send_ping(inst, &msg.peer, msg.seq);
+    case SWIM_MSG_LEAVE: {
+      // Graceful leave notification: transition the sender node to DEAD.
+      uint64_t inc = 0;
+      const swim_member_t *m_info =
+          swim_membership_get(inst->membership, &msg.sender);
+      if (m_info) {
+        inc = m_info->incarnation + 1;
+      } else {
+        inc = get_now_ms();
+      }
+      rc = swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD,
+                                       &msg.sender, inc,
+                                       get_monotonic_time_ms());
+      if (rc == 0) {
+        swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_DEAD,
+                                  &msg.sender, inc, 1);
+        queue_notification(inst, "down", &msg.sender);
+        char alarm_name[384];
+        suspect_key(alarm_name, sizeof(alarm_name), &msg.sender);
+        swim_timer_cancel(inst->timer, alarm_name);
+      }
+      break;
     }
-    break;
-
-  case SWIM_MSG_FWD_ACK:
-    // Relayed ack received via helper
-    if (inst->pending_probe.state != PROBE_NONE &&
-        swim_node_id_compare(&msg.peer, &inst->pending_probe.target) == 0 &&
-        msg.seq == inst->pending_probe.seq) {
-      inst->pending_probe.state = PROBE_NONE;
-      swim_timer_cancel(inst->timer, "probe_timeout");
-    }
-    break;
-
-  case SWIM_MSG_LEAVE: {
-    // Graceful leave notification: transition the sender node to DEAD.
-    uint64_t inc = 0;
-    const swim_member_t *m_info =
-        swim_membership_get(inst->membership, &msg.sender);
-    if (m_info) {
-      inc = m_info->incarnation + 1;
-    } else {
-      inc = get_now_ms();
-    }
-    rc = swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD,
-                                     &msg.sender, inc, get_monotonic_time_ms());
-    if (rc == 0) {
-      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_DEAD,
-                                &msg.sender, inc, 1);
-      queue_notification(inst, "down", &msg.sender);
-      char alarm_name[384];
-      suspect_key(alarm_name, sizeof(alarm_name), &msg.sender);
-      swim_timer_cancel(inst->timer, alarm_name);
-    }
-    break;
-  }
-  }
+    } // end switch
+  } // end while
 }
 
 // Background event loop thread
