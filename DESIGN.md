@@ -568,3 +568,83 @@ with pure random selection.
 - Lifeguard / local health multiplier
 - Pluggable public transport API
 - Polyglot wire compatibility
+
+
+## 16. Error Codes
+
+| Code | Meaning |
+|------|---------|
+| `SWIM_OK` | No error |
+| `SWIM_ERR_NOMEM` | Out of memory |
+| `SWIM_ERR_INVALID` | Invalid argument or malformed packet |
+| `SWIM_ERR_FULL` | Gossip queue or feed full |
+| `SWIM_ERR_TIMEOUT` | Operation timed out (e.g., `swim_feed_wait`) |
+| `SWIM_ERR_BAD_STATE` | Object in an illegal state |
+
+## 17. Resource Usage
+
+- **Membership list** – starts with 16 entries, doubles on growth. For 1000 nodes the list is ~340 KB. No hard cap.
+- **Feed** – 4 KB pages; each record ≤ `SWIM_FEED_MAX_RECORD_SIZE` (1024 B) plus a 4‑byte length header.
+- **Packet size** – maximum 1400 bytes (`SWIM_MAX_PACKET_SIZE`). Larger payloads cause `SWIM_ERR_INVALID`.
+- **Memory overhead** – each node contributes at most a few kilobytes (membership entry + feed page).
+
+## 18. Node Identity Limits
+
+- Cookie length is limited to `SWIM_NODE_ID_MAX_COOKIE` (64 bytes). Empty cookie is allowed.
+
+## 19. Thread‑Safety
+
+All public functions are thread‑safe **except** the feed API:
+- `swim_feed_create`, `swim_feed_destroy`, `swim_feed_put`, `swim_feed_get`, `swim_feed_wait`, `swim_feed_wakeall`, `swim_feed_empty` can be called concurrently from multiple threads because they internally protect the data structures with a mutex.
+- The library itself does not perform any global locking; each `swim_t` instance owns its own mutex.
+## 20. Protocol Limits
+
+| Constant | Description |
+|----------|-------------|
+| `SWIM_MAX_PACKET_SIZE` | Maximum UDP payload size (1400 bytes). |
+| `SWIM_MAX_EVENTS` | Maximum gossip updates that can be decoded from a packet. |
+| `SWIM_FEED_MAX_RECORD_SIZE` | Maximum size of a telemetry record (1024 bytes). |
+| `SWIM_MAX_PACKET_SIZE` is enforced in `swim_pack_message`; exceeding it returns `SWIM_ERR_INVALID`. |
+| `SWIM_MAX_EVENTS` caps the loop in `swim_unpack_message`. |
+
+## 21. Secret Handling
+
+The cluster secret (`opts.name`) is used as the SipHash key. The implementation:
+- Truncates the string to the first **16 bytes** if longer.
+- Zero‑pads the string to exactly 16 bytes if shorter.
+Thus only the first 16 bytes affect MAC verification.
+
+## 22. Seed Retry Behavior
+
+If all seeds are unreachable the node:
+- Starts as a single‑node cluster.
+- Retries seeds **indefinitely** at `seed_retry_interval_ms` (default 5000 ms).
+- No exponential back‑off or max‑retry limit is applied.
+
+## 23. `swim_opts_for` fallback
+
+When called with:
+- `n <= 1`, or
+- `detect_ms == 0`, or
+- the derived period `T` rounds to zero,
+the function returns the **default timing parameters** (T = 1000 ms, etc.) without error.
+
+## 24. Glossary
+
+- **tval** – 4‑byte big‑endian Unix timestamp prepended to every packet.
+- **hval** – 8‑byte SipHash‑2‑4 MAC over `tval || message`.
+- **Incarnation** – monotonic counter incremented on each change of a node’s state.
+- **Transmit multiplier** – `ceil(log₂(N+1)) × 3` where `N` is the number of alive + suspect nodes.
+- **Ping target selection** – round‑robin with periodic shuffle (procedure A1).
+
+## 25. Feed Record Format
+
+Each feed record consists of:
+```
+int n          // number of strings (1 .. SWIM_FEED_MAX_ELEMENTS)
+char str0\0
+char str1\0
+...
+char str(n‑1)\0
+```
+The total size must not exceed `SWIM_FEED_MAX_RECORD_SIZE` (including the 4‑byte length header). The `swim_feed_get` API copies the strings into the caller‑provided buffer and returns the count `n`.
