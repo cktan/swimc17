@@ -47,6 +47,9 @@ format: $(FORMATDIRS)
 
 clean: $(CLEANDIRS)
 
+tag:
+	etags src/*.[ch] 
+
 $(TESTDIRS):
 	$(MAKE) -C $(@:test-%=%) test
 
@@ -57,4 +60,4 @@ $(FORMATDIRS):
 	$(MAKE) -C $(@:format-%=%) format
 
 .PHONY: $(DIRS) $(BUILDDIRS) $(TESTDIRS) $(CLEANDIRS) $(FORMATDIRS)
-.PHONY: all install test format clean
+.PHONY: all install test format clean tag
