@@ -78,8 +78,8 @@ TEST_CASE("protocol: single node startup and leave") {
   REQUIRE(inst != nullptr);
 
   // Query members (should be empty because self is not in the list)
-  int count;
-  char *p = swim_peers(inst, true, &count);
+  char *p;
+  int count = swim_peers(inst, true, &p);
   CHECK(count == 0);
   free(p);
 
@@ -133,20 +133,18 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   usleep(1500000);
 
   // Check Node 1 membership
-  int count1;
-  char *p1 = swim_peers(n1, false, &count1);
+  char *p1, *p2, *p3;
+  int count1 = swim_peers(n1, false, &p1);
   free(p1);
   CHECK(count1 >= 2); // should have discovered Node 2 and Node 3
 
   // Check Node 2 membership
-  int count2;
-  char *p2 = swim_peers(n2, false, &count2);
+  int count2 = swim_peers(n2, false, &p2);
   free(p2);
   CHECK(count2 >= 2);
 
   // Check Node 3 membership
-  int count3;
-  char *p3 = swim_peers(n3, false, &count3);
+  int count3 = swim_peers(n3, false, &p3);
   free(p3);
   CHECK(count3 >= 2);
 

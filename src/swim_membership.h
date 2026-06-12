@@ -118,15 +118,16 @@ SWIM_EXTERN int swim_membership_list(const swim_membership_t *m,
 
 /**
  * Build a packed string buffer of formatted peer IDs. Each peer is
- * NUL-terminated; *count strings are packed consecutively. Caller must
- * free() the result. Returns NULL on error.
+ * NUL-terminated; count strings are packed consecutively. Caller must
+ * free() *out. Returns count on success, -1 on error; *out is NULL
+ * when count is 0.
  *
  * @param m            The membership list instance.
  * @param include_dead Whether to include dead nodes.
- * @param count        Set to the number of peers on success.
- * @return Packed string buffer, or NULL on error.
+ * @param out          Set to the allocated buffer on success.
+ * @return Number of peers, or -1 on error.
  */
-SWIM_EXTERN char *swim_membership_peers(const swim_membership_t *m,
-                                        bool include_dead, int *count);
+SWIM_EXTERN int swim_membership_peers(const swim_membership_t *m,
+                                      bool include_dead, char **out);
 
 #endif // SWIM_MEMBERSHIP_H

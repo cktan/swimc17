@@ -1124,15 +1124,15 @@ int swim_pack_authed(const char *name, const uint8_t *msg, int msglen,
   return 12 + msglen;
 }
 
-char *swim_peers(swim_t *inst, bool include_dead, int *count) {
-  if (!inst || !count) {
+int swim_peers(swim_t *inst, bool include_dead, char **out) {
+  if (!inst || !out) {
     swim_set_error(SWIM_ERR_INVALID, "Invalid arguments to swim_peers");
-    return NULL;
+    return -1;
   }
   pthread_mutex_lock(&inst->mutex);
-  char *buf = swim_membership_peers(inst->membership, include_dead, count);
+  int n = swim_membership_peers(inst->membership, include_dead, out);
   pthread_mutex_unlock(&inst->mutex);
-  return buf;
+  return n;
 }
 
 int swim_hint_alive(swim_t *inst, const char *peer) {

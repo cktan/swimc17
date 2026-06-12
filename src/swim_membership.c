@@ -125,6 +125,7 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
 
   int idx;
   if (find_node(m, id, &idx)) {
+    // ---- Found the node
     swim_member_t *member = &m->members[idx];
 
     // Higher incarnation always wins; at equal incarnation, DEAD > SUSPECT >
@@ -147,7 +148,8 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
       member->incarnation = incarnation;
       member->dead_at = (status == SWIM_STATUS_DEAD) ? now_ms : 0;
       return 0; // State updated
-    } else if (incarnation == member->incarnation) {
+    }
+    if (incarnation == member->incarnation) {
       // Same incarnation, check state precedence: DEAD > SUSPECT > ALIVE
       if (status == SWIM_STATUS_DEAD) {
         member->status = SWIM_STATUS_DEAD;
@@ -160,43 +162,43 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
         return 0; // State updated
       }
       return 1; // Ignored
-    } else {
-      // Stale incarnation (event_inc < member->incarnation)
-      return 1; // Ignored
     }
-  } else {
-    // Node is unknown:
-    // Only accept ALIVE events for unknown nodes (new joins).
-    if (status != SWIM_STATUS_ALIVE) {
-      return 1; // Ignored
-    }
-
-    // Grow array capacity if full
-    if (m->count == m->capacity) {
-      int new_capacity = m->capacity == 0 ? 16 : m->capacity * 2;
-      swim_member_t *new_members =
-          realloc(m->members, new_capacity * sizeof(swim_member_t));
-      if (!new_members) {
-        return swim_set_error(SWIM_ERR_NOMEM,
-                              "Failed to reallocate membership list");
-      }
-      m->members = new_members;
-      m->capacity = new_capacity;
-    }
-
-    // Shift subsequent elements to the right to maintain sorted order
-    memmove(&m->members[idx + 1], &m->members[idx],
-            (m->count - idx) * sizeof(swim_member_t));
-
-    swim_member_t *member = &m->members[idx];
-    member->id = *id;
-    member->status = SWIM_STATUS_ALIVE;
-    member->incarnation = incarnation;
-    member->dead_at = 0;
-    m->count++;
-
-    return 0; // Node added
+    // Stale incarnation (event_inc < member->incarnation)
+    return 1; // Ignored
   }
+
+  // ---- Node is not found
+  // Node is unknown:
+  // Only accept ALIVE events for unknown nodes (new joins).
+  if (status != SWIM_STATUS_ALIVE) {
+    return 1; // Ignored
+  }
+
+  // Grow array capacity if full
+  if (m->count == m->capacity) {
+    int new_capacity = m->capacity == 0 ? 16 : m->capacity * 2;
+    swim_member_t *new_members =
+        realloc(m->members, new_capacity * sizeof(swim_member_t));
+    if (!new_members) {
+      return swim_set_error(SWIM_ERR_NOMEM,
+                            "Failed to reallocate membership list");
+    }
+    m->members = new_members;
+    m->capacity = new_capacity;
+  }
+
+  // Shift subsequent elements to the right to maintain sorted order
+  memmove(&m->members[idx + 1], &m->members[idx],
+          (m->count - idx) * sizeof(swim_member_t));
+
+  swim_member_t *member = &m->members[idx];
+  member->id = *id;
+  member->status = SWIM_STATUS_ALIVE;
+  member->incarnation = incarnation;
+  member->dead_at = 0;
+  m->count++;
+
+  return 0; // Node added
 }
 
 // Remove nodes that have been dead for longer than expiry_ms.
@@ -260,12 +262,12 @@ static inline size_t align1024(size_t n) { return (n + 1023) & ~(size_t)1023; }
 // Build a packed string buffer of formatted peer IDs. Each string is
 // NUL-terminated and consecutive in the returned buffer; *count is set to the
 // number of strings. Caller must free() the result. Returns NULL on error.
-char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
-                            int *count) {
-  if (!m || !count) {
+int swim_membership_peers(const swim_membership_t *m, bool include_dead,
+                          char **out) {
+  if (!m || !out) {
     swim_set_error(SWIM_ERR_INVALID,
                    "Invalid arguments to swim_membership_peers");
-    return NULL;
+    return -1;
   }
 
   char *buf = NULL;
@@ -284,7 +286,7 @@ char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
     if (!b) {
       free(buf);
       swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
-      return NULL;
+      return -1;
     }
     buf = b;
     memcpy(buf + used, tmp, len);
@@ -292,13 +294,6 @@ char *swim_membership_peers(const swim_membership_t *m, bool include_dead,
     n++;
   }
 
-  if (!buf) {
-    buf = malloc(1); // zero peers: valid pointer so caller can always free()
-    if (!buf) {
-      swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate peers buffer");
-      return NULL;
-    }
-  }
-  *count = n;
-  return buf;
+  *out = buf;
+  return n;
 }

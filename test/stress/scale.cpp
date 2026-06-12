@@ -62,8 +62,8 @@ static bool wait_for_all_peers(int from, int to, std::function<bool(int)> skip,
     for (int i = from; i <= to && all_ok; i++) {
       if (skip && skip(i))
         continue;
-      int cnt = 0;
-      char *p = swim_peers(g_nodes[i], false, &cnt);
+      char *p;
+      int cnt = swim_peers(g_nodes[i], false, &p);
       free(p);
       if (cnt != expected)
         all_ok = false;
