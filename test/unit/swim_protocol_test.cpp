@@ -94,7 +94,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   swim_start_opts_t opts1;
   memset(&opts1, 0, sizeof(opts1));
   opts1.self = "127.0.0.1:20101/c1";
-  opts1.name = "n1";
+  opts1.name = "multi_test";
   opts1.seeds = seeds1;
   opts1.protocol_period_ms = 400;
   opts1.ping_timeout_ms = 100;
@@ -105,7 +105,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   swim_start_opts_t opts2;
   memset(&opts2, 0, sizeof(opts2));
   opts2.self = "127.0.0.1:20102/c2";
-  opts2.name = "n2";
+  opts2.name = "multi_test";
   opts2.seeds = seeds2;
   opts2.protocol_period_ms = 400;
   opts2.ping_timeout_ms = 100;
@@ -116,7 +116,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   swim_start_opts_t opts3;
   memset(&opts3, 0, sizeof(opts3));
   opts3.self = "127.0.0.1:20103/c3";
-  opts3.name = "n3";
+  opts3.name = "multi_test";
   opts3.seeds = seeds3;
   opts3.protocol_period_ms = 400;
   opts3.ping_timeout_ms = 100;
@@ -185,11 +185,14 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20202);
   REQUIRE(mock_udp != nullptr);
 
-  // Construct PING packet from mock
-  uint8_t buf[256];
-  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                              buf, sizeof(buf));
-  REQUIRE(len > 0);
+  // Construct authenticated PING packet from mock
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
+                                 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t buf[256 + 12];
+  int len = swim_pack_authed("failure_node", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(len == msglen + 12);
 
   // Send packet to node
   int rc = swim_udp_send(mock_udp, &self_id, buf, len);
@@ -285,10 +288,13 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   REQUIRE(target != nullptr);
 
   auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
-    uint8_t buf[256];
-    int len = swim_pack_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
-                                nullptr, 0, buf, sizeof(buf));
-    REQUIRE(len > 0);
+    uint8_t msg_buf[256];
+    int msglen = swim_pack_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
+                                   nullptr, 0, msg_buf, sizeof(msg_buf));
+    REQUIRE(msglen > 0);
+    uint8_t buf[256 + 12];
+    int len = swim_pack_authed("relay_node", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(len == msglen + 12);
     REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
   };
 
@@ -317,12 +323,13 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   bool relay_ping_seen = false;
   for (int attempt = 0; attempt < 50 && !relay_ping_seen; attempt++) {
     swim_node_id_t src;
-    uint8_t buf[256];
+    uint8_t buf[256 + 12];
     int n = swim_udp_recv(target, &src, buf, sizeof(buf));
-    if (n > 0) {
+    if (n > 12) {
       swim_message_t in;
-      if (swim_unpack_message(buf, n, &in) == 0 && in.type == SWIM_MSG_PING &&
-          in.seq == 9999 && swim_node_id_compare(&in.sender, &node_id) == 0) {
+      if (swim_unpack_message(buf + 12, n - 12, &in) == 0 &&
+          in.type == SWIM_MSG_PING && in.seq == 9999 &&
+          swim_node_id_compare(&in.sender, &node_id) == 0) {
         relay_ping_seen = true;
       }
     } else {
@@ -465,11 +472,15 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
                                 1);
     }
 
-    uint8_t send_buf[1024];
-    int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
-                                test_q, 1, send_buf, sizeof(send_buf));
+    uint8_t msg_buf[1024];
+    int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
+                                   test_q, 1, msg_buf, sizeof(msg_buf));
     swim_gossip_queue_destroy(test_q);
-    REQUIRE(len > 0);
+    REQUIRE(msglen > 0);
+    uint8_t send_buf[1024 + 12];
+    int len = swim_pack_authed("m1_budget", msg_buf, msglen, send_buf,
+                               sizeof(send_buf));
+    REQUIRE(len == msglen + 12);
     REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
 
     // Wait and drain the reply ACK for this PING so they don't pile up.
@@ -478,9 +489,9 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     for (int attempt = 0; attempt < 50 && !ack_seen; attempt++) {
       swim_node_id_t src;
       int n = swim_udp_recv(mock_udp, &src, recv_buf, sizeof(recv_buf));
-      if (n > 0) {
+      if (n > 12) {
         swim_message_t in;
-        if (swim_unpack_message(recv_buf, n, &in) == 0 &&
+        if (swim_unpack_message(recv_buf + 12, n - 12, &in) == 0 &&
             in.type == SWIM_MSG_ACK && in.seq == 100 + p) {
           ack_seen = true;
           // For the last ACK (p == 4), verify the packet sizes and counts.
@@ -613,10 +624,13 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
   REQUIRE(mock_udp != nullptr);
 
-  uint8_t buf[256];
-  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                              buf, sizeof(buf));
-  REQUIRE(len > 0);
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
+                                 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t buf[256 + 12];
+  int len = swim_pack_authed("obs_node", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(len == msglen + 12);
   REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
 
   usleep(400000); // packet processing + a few ticks for the cluster-size emit
@@ -649,7 +663,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   swim_start_opts_t a;
   memset(&a, 0, sizeof(a));
   a.self = "127.0.0.1:20511/a1";
-  a.name = "rtt_a";
+  a.name = "rtt_test";
   a.seeds = seedsA;
   a.protocol_period_ms = 200;
   a.ping_timeout_ms = 100;
@@ -660,7 +674,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   swim_start_opts_t b;
   memset(&b, 0, sizeof(b));
   b.self = "127.0.0.1:20512/b1";
-  b.name = "rtt_b";
+  b.name = "rtt_test";
   b.seeds = seedsB;
   b.protocol_period_ms = 200;
   b.ping_timeout_ms = 100;
@@ -708,11 +722,15 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20602);
   REQUIRE(mock_udp != nullptr);
 
-  uint8_t buf[256];
-  int len = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr, 0,
-                              buf, sizeof(buf));
-  REQUIRE(len > 0);
-  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
+                                 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t auth_buf[256 + 12];
+  int authlen = swim_pack_authed("feed_test", msg_buf, msglen, auth_buf,
+                                 sizeof(auth_buf));
+  REQUIRE(authlen == msglen + 12);
+  REQUIRE(swim_udp_send(mock_udp, &self_id, auth_buf, authlen) == 0);
 
   usleep(300000);
 

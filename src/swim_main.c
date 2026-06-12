@@ -27,6 +27,8 @@
 #include "swim_timer.h"
 #include "swim_udp.h"
 
+#include <arpa/inet.h>
+#include <endian.h>
 #include <math.h>
 #include <poll.h>
 #include <pthread.h>
@@ -58,6 +60,84 @@ static uint64_t get_now_ms(void) {
 
 // Round n up to the next multiple of 8.
 static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
+
+// SipHash-2-4: keyed 64-bit hash (2 compression rounds, 4 finalization rounds).
+// Reference: https://131002.net/siphash/siphash.pdf
+#define SWIM_ROTL64(x, b) (uint64_t)(((x) << (b)) | ((x) >> (64 - (b))))
+#define SWIM_SIPROUND(v0, v1, v2, v3)                                          \
+  do {                                                                         \
+    (v0) += (v1);                                                              \
+    (v1) = SWIM_ROTL64((v1), 13);                                              \
+    (v1) ^= (v0);                                                              \
+    (v0) = SWIM_ROTL64((v0), 32);                                              \
+    (v2) += (v3);                                                              \
+    (v3) = SWIM_ROTL64((v3), 16);                                              \
+    (v3) ^= (v2);                                                              \
+    (v0) += (v3);                                                              \
+    (v3) = SWIM_ROTL64((v3), 21);                                              \
+    (v3) ^= (v0);                                                              \
+    (v2) += (v1);                                                              \
+    (v1) = SWIM_ROTL64((v1), 17);                                              \
+    (v1) ^= (v2);                                                              \
+    (v2) = SWIM_ROTL64((v2), 32);                                              \
+  } while (0)
+
+static uint64_t siphash24(const uint8_t key[16], const uint8_t *msg,
+                          size_t len) {
+  uint64_t k0, k1;
+  memcpy(&k0, key, 8);
+  memcpy(&k1, key + 8, 8);
+  k0 = le64toh(k0);
+  k1 = le64toh(k1);
+
+  uint64_t v0 = k0 ^ UINT64_C(0x736f6d6570736575);
+  uint64_t v1 = k1 ^ UINT64_C(0x646f72616e646f6d);
+  uint64_t v2 = k0 ^ UINT64_C(0x6c7967656e657261);
+  uint64_t v3 = k1 ^ UINT64_C(0x7465646279746573);
+
+  const uint8_t *end = msg + (len & ~(size_t)7);
+  for (const uint8_t *p = msg; p < end; p += 8) {
+    uint64_t m;
+    memcpy(&m, p, 8);
+    m = le64toh(m);
+    v3 ^= m;
+    SWIM_SIPROUND(v0, v1, v2, v3);
+    SWIM_SIPROUND(v0, v1, v2, v3);
+    v0 ^= m;
+  }
+
+  uint64_t last = (uint64_t)(len & 0xff) << 56;
+  switch (len & 7) {
+  case 7:
+    last |= (uint64_t)end[6] << 48; /* fallthrough */
+  case 6:
+    last |= (uint64_t)end[5] << 40; /* fallthrough */
+  case 5:
+    last |= (uint64_t)end[4] << 32; /* fallthrough */
+  case 4:
+    last |= (uint64_t)end[3] << 24; /* fallthrough */
+  case 3:
+    last |= (uint64_t)end[2] << 16; /* fallthrough */
+  case 2:
+    last |= (uint64_t)end[1] << 8; /* fallthrough */
+  case 1:
+    last |= (uint64_t)end[0]; /* fallthrough */
+  case 0:;
+  }
+
+  v3 ^= last;
+  SWIM_SIPROUND(v0, v1, v2, v3);
+  SWIM_SIPROUND(v0, v1, v2, v3);
+  v0 ^= last;
+
+  v2 ^= UINT64_C(0xff);
+  SWIM_SIPROUND(v0, v1, v2, v3);
+  SWIM_SIPROUND(v0, v1, v2, v3);
+  SWIM_SIPROUND(v0, v1, v2, v3);
+  SWIM_SIPROUND(v0, v1, v2, v3);
+
+  return v0 ^ v1 ^ v2 ^ v3;
+}
 
 // Build the suspicion-timer key for a node. The cookie is part of node
 // identity (DESIGN S3), so it must be in the key: otherwise two members that
@@ -406,11 +486,26 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   swim_gossip_queue_t *q_to_pass =
       (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
+  // Pack message into buf+12, reserving the first 12 bytes for the auth header.
   int len = swim_pack_message(type, sender, seq, peer, q_to_pass,
-                              swim_membership_count(inst->membership), buf,
-                              sizeof(buf));
+                              swim_membership_count(inst->membership), buf + 12,
+                              (int)sizeof(buf) - 12);
   if (len > 0) {
-    swim_udp_send(inst->udp, dest, buf, len);
+    // Auth header: [tval 4B BE][hval 8B]
+    uint32_t tval = (uint32_t)(get_now_ms() / 1000);
+    uint32_t tval_be = htonl(tval);
+    memcpy(buf, &tval_be, 4);
+
+    uint8_t hash_in[SWIM_MAX_PACKET_SIZE];
+    memcpy(hash_in, &tval_be, 4);
+    memcpy(hash_in + 4, buf + 12, (size_t)len);
+    uint8_t key[16] = {0};
+    size_t namelen = strlen(inst->name);
+    memcpy(key, inst->name, namelen < 16 ? namelen : 16);
+    uint64_t hval_be = htobe64(siphash24(key, hash_in, 4 + (size_t)len));
+    memcpy(buf + 4, &hval_be, 8);
+
+    swim_udp_send(inst->udp, dest, buf, (size_t)(12 + len));
   } else {
     char node_str[350];
     if (inst->feed &&
@@ -499,10 +594,35 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
                         swim_message_t *msg) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   int len = swim_udp_recv(inst->udp, src, buf, sizeof(buf));
-  if (len <= 0) {
+  if (len <= 0)
     return -1;
-  }
-  return swim_unpack_message(buf, len, msg);
+  if (len < 12)
+    return -1;
+
+  // Validate tval (±10s of receiver wall clock)
+  uint32_t tval_be;
+  memcpy(&tval_be, buf, 4);
+  uint32_t tval = ntohl(tval_be);
+  uint32_t now = (uint32_t)(get_now_ms() / 1000);
+  uint32_t diff = tval > now ? tval - now : now - tval;
+  if (diff > 10)
+    return -1;
+
+  // Validate hval: SipHash-2-4(tval_be4 || message_bytes, key=name_padded_16)
+  int msglen = len - 12;
+  uint8_t hash_in[SWIM_MAX_PACKET_SIZE];
+  memcpy(hash_in, &tval_be, 4);
+  memcpy(hash_in + 4, buf + 12, (size_t)msglen);
+  uint8_t key[16] = {0};
+  size_t namelen = strlen(inst->name);
+  memcpy(key, inst->name, namelen < 16 ? namelen : 16);
+  uint64_t expected_be = htobe64(siphash24(key, hash_in, 4 + (size_t)msglen));
+  uint64_t received_be;
+  memcpy(&received_be, buf + 4, 8);
+  if (expected_be != received_be)
+    return -1;
+
+  return swim_unpack_message(buf + 12, (size_t)msglen, msg);
 }
 
 // Packet receiver and protocol handler — drains all pending packets.
@@ -981,6 +1101,25 @@ int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
       swim_membership_list(inst->membership, out_list, max_len, include_dead);
   pthread_mutex_unlock(&inst->mutex);
   return ret;
+}
+
+int swim_pack_authed(const char *name, const uint8_t *msg, int msglen,
+                     uint8_t *out, int outsz) {
+  if (!name || !msg || msglen < 0 || outsz < 12 + msglen)
+    return -1;
+  uint32_t tval = (uint32_t)(get_now_ms() / 1000);
+  uint32_t tval_be = htonl(tval);
+  memcpy(out, &tval_be, 4);
+  uint8_t hash_in[4 + SWIM_MAX_PACKET_SIZE];
+  memcpy(hash_in, &tval_be, 4);
+  memcpy(hash_in + 4, msg, (size_t)msglen);
+  uint8_t key[16] = {0};
+  size_t namelen = strlen(name);
+  memcpy(key, name, namelen < 16 ? namelen : 16);
+  uint64_t hval_be = htobe64(siphash24(key, hash_in, 4 + (size_t)msglen));
+  memcpy(out + 4, &hval_be, 8);
+  memcpy(out + 12, msg, (size_t)msglen);
+  return 12 + msglen;
 }
 
 char *swim_peers(swim_t *inst, bool include_dead, int *count) {

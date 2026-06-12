@@ -22,4 +22,18 @@
 SWIM_EXTERN int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
                              bool include_dead);
 
+/**
+ * Wrap a pre-encoded message with an auth header for testing.
+ * Writes [tval_be4][hval_be8][msg] into out.
+ *
+ * @param name   Shared cluster secret (same as swim_start_opts_t.name).
+ * @param msg    Encoded message bytes (from swim_pack_message).
+ * @param msglen Length of msg.
+ * @param out    Output buffer; must be at least msglen + 12 bytes.
+ * @param outsz  Size of out.
+ * @return msglen + 12 on success, -1 if out is too small.
+ */
+SWIM_EXTERN int swim_pack_authed(const char *name, const uint8_t *msg,
+                                 int msglen, uint8_t *out, int outsz);
+
 #endif // SWIM_PROTOCOL_INTERNAL_H

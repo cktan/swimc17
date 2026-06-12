@@ -127,10 +127,58 @@ explicitly provided, it defaults to `""`.
 
 ## 6. Security
 
-None. Trust the network (VPC / firewall handles
-perimeter). Deserialization is safe here because
-only trusted cluster nodes communicate on the gossip
-port.
+Every UDP packet carries a 12-byte auth header
+prepended before the message payload:
+
+```
+[tval: 4 bytes BE] [hval: 8 bytes] [message ...]
+```
+
+- **tval** — sender's wall-clock time as a
+  `uint32_t` Unix seconds, big-endian. The receiver
+  rejects the packet if `|tval − now| > 10 s`.
+- **hval** — SipHash-2-4 over
+  `tval_be4 || message_bytes`, keyed on the first
+  16 bytes of `name` (zero-padded). Covers the full
+  message body, so any mutation is detected.
+- **Shared secret** — `swim_start_opts_t.name` is
+  the cluster secret. Every node in the cluster must
+  use the same value. Packets from nodes with a
+  different (or absent) secret are silently dropped.
+
+### What this provides
+
+- **Cluster isolation** — nodes that don't know the
+  secret cannot inject gossip or trigger membership
+  changes.
+- **Message integrity** — hval covers the full
+  message body; any in-flight mutation is rejected.
+- **Replay resistance** — combining a keyed MAC with
+  a ±10 s timestamp window makes replays expire
+  quickly, and the MAC prevents forging a fresh
+  timestamp without the key.
+
+### What this does not provide
+
+- **Confidentiality** — packets are plaintext; use
+  a network-layer encryption (VPC, WireGuard) if
+  needed.
+- **Insider protection** — all nodes share one
+  secret, so any cluster member can forge packets
+  from any other member.
+- **Key entropy guarantee** — short or low-entropy
+  names (e.g. `"prod"`) weaken the SipHash key.
+  Use a sufficiently random string in production.
+
+### Implementation
+
+SipHash-2-4 is implemented inline in `swim_main.c`
+(~50 lines, no new dependency). The auth header is
+prepended in `send_message` and validated in
+`recv_message`; the codec layer (`swim_codec.c`) is
+unchanged. The 12-byte header is taken from the
+existing 1400-byte MTU budget, leaving 1388 bytes
+for the message payload.
 
 ---
 
@@ -279,10 +327,15 @@ fields and call `swim_start()`:
 const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
 swim_start_opts_t opts = swim_opts_for(50, 10000);
 opts.self  = "10.0.0.2:7771/c1";
-opts.name  = "my_cluster";
+opts.name  = "my_cluster_secret"; // shared by all nodes
 opts.seeds = seeds;
 swim_start(&opts);
 ```
+
+`opts.name` is the **shared cluster secret** (see §6).
+Every node in the cluster must supply the same value.
+Packets from nodes with a different name are silently
+dropped.
 
 Or zero-initialize and set all fields manually:
 
