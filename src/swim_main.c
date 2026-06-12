@@ -647,10 +647,12 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       // Exclude self-events from direct updates (dealt with via refutation
       // below)
       if (swim_node_id_compare(&ev->id, &inst->self_id) != 0) {
+        // Apply the event to local membership state
         rc = swim_membership_apply_event(inst->membership, ev->status, &ev->id,
                                          ev->incarnation,
                                          get_monotonic_time_ms());
         if (rc == 0) {
+          // state changed -> re-gossip the event
           swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, &ev->id,
                                     ev->incarnation, 1);
 
