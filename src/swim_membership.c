@@ -259,9 +259,9 @@ int swim_membership_list(const swim_membership_t *m, swim_member_t *out_list,
 
 static inline size_t align1024(size_t n) { return (n + 1023) & ~(size_t)1023; }
 
-// Build a packed string buffer of formatted peer IDs. Each string is
-// NUL-terminated and consecutive in the returned buffer; *count is set to the
-// number of strings. Caller must free() the result. Returns NULL on error.
+// Build a packed string buffer of formatted peer IDs. Each peer is
+// NUL-terminated, packed consecutively. Caller must free() *out.
+// *out is NULL when there are no peers. Returns count, or -1 on error.
 int swim_membership_peers(const swim_membership_t *m, bool include_dead,
                           char **out) {
   if (!m || !out) {
