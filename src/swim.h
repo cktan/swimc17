@@ -241,7 +241,7 @@ SWIM_EXTERN int swim_leave(swim_t *inst);
  * Return the current peer list as a packed string buffer.
  * Each peer is formatted as "host:port" or "host:port/cookie";
  * strings are packed consecutively, each NUL-terminated.
- * Caller must free() *out. *out is NULL when count is 0.
+ * Caller must free() *out. *out is NULL when there are no peers.
  *
  * @param inst         The instance handle returned by swim_start.
  * @param include_dead Whether to include dead/quarantined peers.
