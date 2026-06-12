@@ -291,23 +291,23 @@ Thread-safe.
 ### `swim_peers`
 
 ```c
-char *swim_peers(swim_t *inst, bool include_dead,
-                 int *count);
+int swim_peers(swim_t *inst, bool include_dead,
+               char **out);
 ```
 
 Returns a snapshot of current peers as a packed string
 buffer. Each peer is formatted as `"host:port"` or
-`"host:port/cookie"`; the `*count` strings are packed
-consecutively, each NUL-terminated. The caller must
-`free()` the returned pointer.
+`"host:port/cookie"`; strings are packed consecutively,
+each NUL-terminated. The caller must `free(*out)`.
+`*out` is NULL when there are no peers.
 
 Set `include_dead` to `true` to include
 dead/quarantined entries, or `false` for active nodes
 only.
 
-Returns a valid pointer (with `*count` set) on success,
-or `NULL` on error:
-- `SWIM_ERR_INVALID`: `inst` or `count` is NULL.
+Returns the number of peers on success, or `-1` on
+error:
+- `SWIM_ERR_INVALID`: `inst` or `out` is NULL.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
 Thread-safe.
@@ -456,8 +456,8 @@ swim_start_opts_t opts_b = {
 swim_t *inst_a = swim_start(&opts_a);
 swim_t *inst_b = swim_start(&opts_b);
 
-int count;
-char *p = swim_peers(inst_a, false, &count);
+char *p;
+int count = swim_peers(inst_a, false, &p);
 // iterate p...
 free(p);
 ```
