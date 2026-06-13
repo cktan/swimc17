@@ -222,8 +222,8 @@ struct swim_t {
 typedef swim_t swim_instance_t;
 
 // Forward declarations
-static void *swim_protocol_thread_entry(void *arg);
-static void *swim_protocol_loop(swim_instance_t *instance);
+static void *swim_thread_entry(void *arg);
+static void *swim_loop(swim_instance_t *instance);
 static void queue_notification(swim_instance_t *inst, const char *verb,
                                const swim_node_id_t *node);
 static void send_ping(swim_instance_t *inst, const swim_node_id_t *dest,
@@ -798,11 +798,11 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 }
 
 // Background event loop thread
-static void *swim_protocol_thread_entry(void *arg) {
-  return swim_protocol_loop((swim_instance_t *)arg);
+static void *swim_thread_entry(void *arg) {
+  return swim_loop((swim_instance_t *)arg);
 }
 
-static void *swim_protocol_loop(swim_instance_t *instance) {
+static void *swim_loop(swim_instance_t *instance) {
   uint64_t now = get_monotonic_time_ms();
   uint64_t exp = now + 100;
 
@@ -1004,8 +1004,7 @@ swim_t *swim_start(const swim_start_opts_t *opts) {
   }
 
   // Start background event loop thread
-  if (pthread_create(&inst->thread, NULL, swim_protocol_thread_entry, inst) !=
-      0) {
+  if (pthread_create(&inst->thread, NULL, swim_thread_entry, inst) != 0) {
     swim_set_error(SWIM_ERR_BAD_STATE, "Failed to create protocol thread");
     atomic_store_explicit(&inst->running, false, memory_order_relaxed);
     pthread_mutex_destroy(&inst->mutex);
@@ -1034,7 +1033,7 @@ int swim_leave(swim_t *inst) {
   }
 
   // Stop the protocol thread. running is atomic so the worker's unlocked read
-  // in swim_protocol_loop sees this store without a data race.
+  // in swim_loop sees this store without a data race.
   atomic_store_explicit(&inst->running, false, memory_order_relaxed);
 
   // Join background thread
