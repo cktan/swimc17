@@ -144,7 +144,6 @@ SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
 typedef struct swim_t swim_t;
 
 typedef struct {
-  const char *self; // "host:port" or "host:port/cookie" (mandatory)
   const char *name; // Unique instance name (mandatory)
   const char *
       *seeds; // NULL-terminated list of seed strings ("host:port/cookie")
@@ -195,7 +194,7 @@ typedef struct {
  *   dead_node_expiry_ms    = 2 x suspicion_timeout_ms
  *   seed_retry_interval_ms = 5 x T  (5 probe periods)
  *
- * The pointer fields (self, name, seeds) are set to NULL;
+ * The pointer fields (name, seeds) are set to NULL;
  * the caller must fill them before passing to swim_start().
  *
  * Fallback to defaults:
@@ -207,9 +206,8 @@ typedef struct {
  * Example — 50-node cluster, detect failures within 15 s:
  *
  *   swim_start_opts_t opts = swim_opts_for(50, 15000);
- *   opts.self = "10.0.0.1:7771";
  *   opts.name = "my_cluster";
- *   swim_start(&opts);
+ *   swim_start("10.0.0.1", 7771, "", &opts);
  *
  * @param n          Expected cluster size (number of nodes).
  * @param detect_ms  Worst-case failure-detection latency (ms).
@@ -223,10 +221,15 @@ SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
  * loop; the thread exits when swim_leave() is called. Returns once
  * the thread is running.
  *
- * @param opts Startup options (opts->self and opts->name are mandatory).
+ * @param host   Hostname or IP address to bind and advertise.
+ * @param port   UDP port to bind and advertise.
+ * @param cookie Optional instance cookie (may be "" or NULL).
+ * @param opts   Startup options (opts->name is mandatory).
  * @return Opaque instance handle on success, NULL on failure.
  */
-SWIM_EXTERN swim_t *swim_start(const swim_start_opts_t *opts);
+SWIM_EXTERN swim_t *swim_start(const char *host, uint16_t port,
+                               const char *cookie,
+                               const swim_start_opts_t *opts);
 
 /**
  * Stop an instance, perform a graceful leave (notify peers),

@@ -892,18 +892,20 @@ swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms) {
   return opts;
 }
 
-swim_t *swim_start(const swim_start_opts_t *opts) {
-  if (!opts || !opts->self || !opts->name || opts->name[0] == '\0') {
+swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
+                   const swim_start_opts_t *opts) {
+  if (!host || !port || !opts || !opts->name || opts->name[0] == '\0') {
     swim_set_error(SWIM_ERR_INVALID,
-                   "Invalid start options: self and name are mandatory");
+                   "host, port, and opts->name are mandatory");
     return NULL;
   }
 
-  // Extract self_id
-  swim_node_id_t self_id;
-  if (swim_node_id_parse(&self_id, opts->self)) {
-    return NULL;
-  }
+  // Build self_id from explicit parameters
+  swim_node_id_t self_id = {0};
+  strncpy(self_id.host, host, sizeof(self_id.host) - 1);
+  self_id.port = port;
+  if (cookie)
+    strncpy(self_id.cookie, cookie, sizeof(self_id.cookie) - 1);
 
   // Allocate an instance
   swim_instance_t *inst = calloc(1, sizeof(*inst));
