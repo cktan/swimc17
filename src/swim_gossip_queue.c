@@ -23,16 +23,17 @@
 
 typedef struct gossip_entry_t gossip_entry_t;
 struct gossip_entry_t {
-  swim_member_t update;
-  uint32_t transmit_count;
-  uint32_t multiplier;
+  swim_member_t update;        /* member with new state change */
+  uint32_t transmit_count;     /* #times this entry has been packed so far */
+  uint32_t multiplier;         /* scale factor for the transmit limit:
+				* limit = ceil(log2(N+1))*3*multiplier */
 };
 
 // A vector of entries
 struct swim_gossip_queue_t {
-  gossip_entry_t *entries;
-  int count;
-  int capacity;
+  gossip_entry_t *entries; /* flat array of pending gossip entries */
+  int count;               /* number of active entries in the array */
+  int capacity;            /* allocated slots in entries */
 };
 
 // Convert status to priority value: DEAD (0) > SUSPECT (1) > ALIVE (2)
