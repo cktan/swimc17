@@ -12,8 +12,6 @@
  * the instance and frees the handle.
  *
  * Locking: inst->mutex guards all mutable instance state.
- * swim_leave() uses an atomic_bool (leaving) to ensure
- * only one concurrent caller performs teardown.
  *
  * Telemetry is written directly to the caller-supplied
  * swim_feed_t (optional; NULL disables telemetry).
@@ -185,7 +183,6 @@ struct swim_t {
   pthread_t thread;
   pthread_mutex_t mutex;
   atomic_bool running;
-  atomic_bool leaving;
 
   uint64_t protocol_period_ms;
   uint64_t ping_timeout_ms;
@@ -981,7 +978,6 @@ swim_t *swim_start(const swim_start_opts_t *opts) {
   // Initialize thread synchronization
   pthread_mutex_init(&inst->mutex, NULL);
   atomic_store_explicit(&inst->running, true, memory_order_relaxed);
-  atomic_store_explicit(&inst->leaving, false, memory_order_relaxed);
 
   // Seed this instance's private PRNG. Mix in the instance pointer so
   // instances started in the same second diverge.
@@ -1035,15 +1031,6 @@ error_cleanup:
 int swim_leave(swim_t *inst) {
   if (!inst) {
     return swim_set_error(SWIM_ERR_INVALID, "NULL instance");
-  }
-
-  // Claim exclusive ownership of teardown. Only one concurrent caller proceeds;
-  // the rest get BAD_STATE.
-  bool expected = false;
-  if (!atomic_compare_exchange_strong_explicit(&inst->leaving, &expected, true,
-                                               memory_order_acq_rel,
-                                               memory_order_acquire)) {
-    return swim_set_error(SWIM_ERR_BAD_STATE, "Instance already leaving");
   }
 
   // Stop the protocol thread. running is atomic so the worker's unlocked read
