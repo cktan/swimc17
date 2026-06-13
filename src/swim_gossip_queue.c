@@ -177,7 +177,8 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
 }
 
 // Pack updates into [p, q) in wire format. Writes as many updates as fit.
-// Returns bytes written, or -1 on error.
+// This is the gossip that piggybacks on to a message.
+// Returns #bytes written, or -1 on error.
 int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
                            uint8_t *p, uint8_t *q) {
   if (!queue || !p || q < p) {
@@ -185,6 +186,7 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
                           "Invalid arguments to swim_gossip_queue_pack");
   }
 
+  // queue is empty, nothing to add. done.
   if (queue->count == 0) {
     return 0;
   }
