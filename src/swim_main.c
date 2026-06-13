@@ -609,7 +609,7 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
     return -1;
 
   // Validate hval: SipHash-2-4(tval_be4 || message_bytes, key=name_padded_16)
-  int msglen = len - 12;
+  const int msglen = len - 12;
   uint8_t hash_in[SWIM_MAX_PACKET_SIZE];
   memcpy(hash_in, &tval_be, 4);
   memcpy(hash_in + 4, buf + 12, (size_t)msglen);
