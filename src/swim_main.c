@@ -1093,6 +1093,7 @@ int swim_leave(swim_t *inst) {
   return 0;
 }
 
+// Internal only.
 int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
                  bool include_dead) {
   if (!inst) {
@@ -1105,6 +1106,7 @@ int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
   return ret;
 }
 
+// Internal only.
 int swim_pack_authed(const char *name, const uint8_t *msg, int msglen,
                      uint8_t *out, int outsz) {
   if (!name || !msg || msglen < 0 || outsz < 12 + msglen)
