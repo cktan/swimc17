@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 #ifndef SWIM_NODE_ID_H
 #define SWIM_NODE_ID_H
 

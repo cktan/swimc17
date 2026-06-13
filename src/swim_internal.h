@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 #ifndef SWIM_PROTOCOL_INTERNAL_H
 #define SWIM_PROTOCOL_INTERNAL_H
 

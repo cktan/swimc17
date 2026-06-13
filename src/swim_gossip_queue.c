@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 /*
  * swim_gossip_queue.c — Gossip dissemination priority queue.
  *

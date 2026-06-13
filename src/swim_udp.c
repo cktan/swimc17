@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 /*
  * swim_udp.c — Non-blocking UDP socket abstraction.
  *
