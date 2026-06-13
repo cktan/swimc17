@@ -31,21 +31,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* One alarm in the delta list. tick is the delay relative to the
- * predecessor element (or to "now" for the head). */
 typedef struct entry_t entry_t;
 struct entry_t {
-  int tick;
-  swim_timer_cb_t cb;
-  void *ctx;
-  void *param;
-  entry_t *next;
-  char name[384];
+  int tick;           /* ticks remaining relative to predecessor (or now for head) */
+  swim_timer_cb_t cb; /* callback invoked on fire or cancel */
+  void *ctx;          /* opaque context passed to cb */
+  void *param;        /* per-alarm parameter passed to cb */
+  entry_t *next;      /* next entry in delta list or free_list */
+  char name[384];     /* human-readable label for debugging */
 };
 
 struct swim_timer_t {
-  entry_t *head;
-  entry_t *free_list;
+  entry_t *head;      /* front of the delta list; smallest remaining tick */
+  entry_t *free_list; /* slab of recycled entries available for reuse */
 };
 
 // Create an empty timer. Free it with swim_timer_destroy().
@@ -68,6 +66,8 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
   assert(name && strlen(name) < sizeof(((entry_t *)0)->name));
   assert(cb);
 
+  // any time the free list is empty, refill it with
+  // 8 new entries in a batch
   entry_t *nw;
   if (!t->free_list) {
     for (int i = 0; i < 8; i++) {
@@ -81,11 +81,14 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
       t->free_list = nw;
     }
   }
+
+  // pop an entry from free_list
   assert(t->free_list);
   nw = t->free_list;
   t->free_list = nw->next;
   memset(nw, 0, sizeof(*nw));
 
+  // initialize the new entry
   nw->cb = cb;
   nw->ctx = ctx;
   nw->param = param;
@@ -93,6 +96,9 @@ int swim_timer_add(swim_timer_t *t, int ticks, const char *name,
    * output (max ~333 bytes: 255 host + 5 port + 63 cookie + overhead).
    * The 384-byte buffer is always sufficient; strcpy is safe here. */
   strcpy(nw->name, name);
+
+  // Hook nw into the timer list at the right place, and adjust
+  // the tick of the successor.
 
   /* Walk past every alarm due at or before our target, summing the
    * deltas we step over. Tie (S + cur->tick == ticks) -> we go
@@ -122,16 +128,20 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
   assert(t);
   assert(name);
 
+  // locate an entry matching name
   entry_t **pp = &t->head;
   while (*pp && strcmp((*pp)->name, name) != 0) {
     pp = &(*pp)->next;
   }
+  // if not found, done!
   if (!*pp) {
     return;
   }
 
+  // unlink victim from the list
   entry_t *victim = *pp;
   *pp = victim->next;
+  victim->next = NULL;
   if (*pp) {
     /* The successor was measured from victim; restore it relative
      * to victim's predecessor. */
@@ -139,6 +149,8 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
   }
   /* List is consistent now, so the callback may reenter safely. */
   victim->cb(victim->ctx, SWIM_TIMER_CANCEL, victim->param);
+
+  // Insert victim into free_list.
   victim->next = t->free_list;
   t->free_list = victim;
 }
@@ -148,6 +160,7 @@ void swim_timer_cancel(swim_timer_t *t, const char *name) {
 void swim_timer_cancel_all(swim_timer_t *t) {
   assert(t);
 
+  // keep firing cancel until list is empty
   while (t->head) {
     entry_t *n = t->head;
     t->head = n->next;
@@ -177,11 +190,14 @@ void swim_timer_destroy(swim_timer_t *t) {
 void swim_timer_tick(swim_timer_t *t) {
   assert(t);
 
+  // No pending timer?
   if (!t->head) {
     return;
   }
 
+  // Deduct 1 tick
   t->head->tick -= 1;
+  
   /* Fire the head and any following alarms whose delta is 0 (i.e.
    * due on this same tick). Pop before firing so a reentrant
    * callback sees a consistent list. */
