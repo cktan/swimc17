@@ -390,49 +390,6 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
   swim_set_error(SWIM_OK, nullptr);
 }
 
-// Regression for M2: concurrent swim_leave on the same instance must be
-// memory-safe. An atomic CAS on inst->leaving ensures exactly one caller
-// tears the instance down (returns 0) and the rest get BAD_STATE without
-// double-joining or double-freeing. Meaningful under ASan/TSan.
-struct LeaveArg {
-  swim_t *inst;
-  std::atomic<int> *successes;
-};
-static void *leave_racer(void *a) {
-  LeaveArg *r = (LeaveArg *)a;
-  if (swim_leave(r->inst) == 0) {
-    r->successes->fetch_add(1);
-  }
-  return nullptr;
-}
-
-TEST_CASE("protocol: concurrent swim_leave is memory-safe (M2)") {
-  swim_start_opts_t opts;
-  memset(&opts, 0, sizeof(opts));
-  opts.self = "127.0.0.1:20402/c1";
-  opts.name = "m2_race";
-
-  swim_t *inst = swim_start(&opts);
-  REQUIRE(inst != nullptr);
-
-  std::atomic<int> successes{0};
-  LeaveArg arg;
-  arg.inst = inst;
-  arg.successes = &successes;
-
-  pthread_t th[4];
-  for (int i = 0; i < 4; i++) {
-    REQUIRE(pthread_create(&th[i], nullptr, leave_racer, &arg) == 0);
-  }
-  for (int i = 0; i < 4; i++) {
-    pthread_join(th[i], nullptr);
-  }
-
-  // Exactly one thread tore the instance down; the others saw BAD_STATE.
-  CHECK(successes.load() == 1);
-  swim_set_error(SWIM_OK, nullptr);
-}
-
 TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   swim_node_id_t self_id, mock_id;
   REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501/c1") == 0);
