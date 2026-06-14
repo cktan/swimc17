@@ -1,9 +1,11 @@
+include ../../Makefile.global
+
 CC  ?= cc
 CXX ?= c++
 
 SAN      := -fsanitize=address,undefined
 CFLAGS   := -std=c17   -Wall -Wextra -g $(SAN) -I../../src -pthread -MMD
-CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -pthread -MMD
+CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I$(HOME)/.local/include -pthread -MMD
 
 ifdef DEBUG
     CFLAGS += -O0 -g -fsanitize=address,undefined

@@ -1,9 +1,11 @@
+include ../../Makefile.global
+
 CC  ?= cc
 CXX ?= c++
 
 SAN      := -fsanitize=address,undefined
 CFLAGS   := -std=c17   -Wall -Wextra -Wmissing-declarations -g $(SAN) -I../../src -pthread -MMD
-CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I../../ext/include -pthread -MMD
+CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I$(HOME)/.local/include -pthread -MMD
 
 LIBSWIMC17 := ../../src/libswimc17.a
 
@@ -11,7 +13,7 @@ OBJ := swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o \
        swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_feed_test.o \
        swim_node_id_test.o
 
-all: unit_test
+all: $(DOCTEST_H) unit_test
 
 unit_test: $(OBJ) $(LIBSWIMC17)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm -pthread
