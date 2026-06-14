@@ -1,3 +1,5 @@
+include ../Makefile.global
+
 HFILES := swim_timer.h swim_membership.h swim_gossip_queue.h swim_codec.h swim_udp.h swim.h swim_internal.h swim_feed.h
 CFILES := swim_timer.c swim_errno.c swim_node_id.c swim_membership.c swim_gossip_queue.c swim_codec.c swim_udp.c swim_main.c swim_feed.c
 OBJ := $(CFILES:.c=.o)

@@ -1,3 +1,5 @@
+include ../Makefile.global
+
 all:
 	$(MAKE) -C unit all
 	$(MAKE) -C stress all
