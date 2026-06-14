@@ -4,6 +4,6 @@ DOCTEST_H := $(HOME)/.local/include/doctest.h
 
 $(DOCTEST_H):
 	@echo copying doctest.h to ~/.local/include
-	cd /tmp && git clone https://github.com/doctest/doctest.git
+	cd /tmp && git clone https://github.com/doctest/doctest.git || true
 	mkdir -p $(dir $@)
 	cp /tmp/doctest/doctest/doctest.h $@
