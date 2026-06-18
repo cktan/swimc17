@@ -99,3 +99,99 @@ TEST_CASE("udp: invalid binding address fails cleanly") {
   // Restore clean state for other tests
   swim_set_error(SWIM_OK, nullptr);
 }
+
+TEST_CASE("udp: swim_udp_fd returns valid descriptor") {
+  swim_udp_t *u = swim_udp_create("127.0.0.1", 18007);
+  REQUIRE(u != nullptr);
+
+  CHECK(swim_udp_fd(u) >= 0);
+  CHECK(swim_udp_fd(nullptr) == -1);
+
+  swim_udp_destroy(u);
+}
+
+TEST_CASE("udp: packet loss at 100% drops all packets") {
+  swim_udp_t *sender = swim_udp_create("127.0.0.1", 18008);
+  swim_udp_t *recvr = swim_udp_create("127.0.0.1", 18009);
+  REQUIRE(sender != nullptr);
+  REQUIRE(recvr != nullptr);
+
+  swim_node_id_t dest;
+  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18009") == 0);
+
+  // 100% loss on sender port — every outgoing packet is dropped
+  swim_udp_set_packet_loss(18008, 100);
+
+  const char *msg = "dropped";
+  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+
+  swim_node_id_t src;
+  uint8_t buf[64];
+  int n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+  CHECK(n == 0); // nothing received
+
+  swim_clear_udp_loss();
+  swim_udp_destroy(sender);
+  swim_udp_destroy(recvr);
+}
+
+TEST_CASE("udp: clear_udp_loss restores delivery") {
+  swim_udp_t *sender = swim_udp_create("127.0.0.1", 18010);
+  swim_udp_t *recvr = swim_udp_create("127.0.0.1", 18011);
+  REQUIRE(sender != nullptr);
+  REQUIRE(recvr != nullptr);
+
+  swim_node_id_t dest;
+  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18011") == 0);
+
+  swim_udp_set_packet_loss(18010, 100);
+  swim_clear_udp_loss();
+
+  const char *msg = "delivered";
+  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+
+  swim_node_id_t src;
+  uint8_t buf[64];
+  int n = 0;
+  for (int i = 0; i < 100 && n == 0; i++)
+    n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+
+  CHECK(n == (int)strlen(msg));
+
+  swim_udp_destroy(sender);
+  swim_udp_destroy(recvr);
+}
+
+static int drop_all_filter(int /*src_port*/, int /*dst_port*/) { return 1; }
+
+TEST_CASE("udp: drop filter blocks packets") {
+  swim_udp_t *sender = swim_udp_create("127.0.0.1", 18012);
+  swim_udp_t *recvr = swim_udp_create("127.0.0.1", 18013);
+  REQUIRE(sender != nullptr);
+  REQUIRE(recvr != nullptr);
+
+  swim_node_id_t dest;
+  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18013") == 0);
+
+  swim_udp_set_drop_filter(drop_all_filter);
+
+  const char *msg = "blocked";
+  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+
+  swim_node_id_t src;
+  uint8_t buf[64];
+  int n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+  CHECK(n == 0);
+
+  // Remove the filter and verify delivery works again
+  swim_udp_set_drop_filter(nullptr);
+
+  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+  n = 0;
+  for (int i = 0; i < 100 && n == 0; i++)
+    n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+  CHECK(n == (int)strlen(msg));
+
+  swim_udp_destroy(sender);
+  swim_udp_destroy(recvr);
+}

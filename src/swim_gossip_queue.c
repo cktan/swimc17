@@ -26,10 +26,10 @@
 
 typedef struct gossip_entry_t gossip_entry_t;
 struct gossip_entry_t {
-  swim_member_t update;        /* member with new state change */
-  uint32_t transmit_count;     /* #times this entry has been packed so far */
-  uint32_t multiplier;         /* scale factor for the transmit limit:
-				* limit = ceil(log2(N+1))*3*multiplier */
+  swim_member_t update;    /* member with new state change */
+  uint32_t transmit_count; /* #times this entry has been packed so far */
+  uint32_t multiplier;     /* scale factor for the transmit limit:
+                            * limit = ceil(log2(N+1))*3*multiplier */
 };
 
 // A vector of entries

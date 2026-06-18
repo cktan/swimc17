@@ -5,6 +5,7 @@ extern "C" {
 }
 
 #include <cstring>
+#include <string>
 #include <vector>
 
 TEST_CASE("membership: initialization and finalization") {
@@ -287,6 +288,109 @@ TEST_CASE("membership: garbage collection") {
 
   CHECK(swim_membership_get(m, &id2) == nullptr);
   CHECK(swim_membership_get(m, &id3) != nullptr);
+
+  swim_membership_destroy(m);
+}
+
+TEST_CASE("membership: peers — empty membership") {
+  swim_membership_t *m = swim_membership_create();
+  REQUIRE(m != nullptr);
+
+  char *out = (char *)0x1; // non-null sentinel
+  int n = swim_membership_peers(m, false, &out);
+  CHECK(n == 0);
+  CHECK(out == nullptr);
+
+  swim_membership_destroy(m);
+}
+
+TEST_CASE("membership: peers — alive-only members") {
+  swim_membership_t *m = swim_membership_create();
+  REQUIRE(m != nullptr);
+
+  swim_node_id_t id1, id2;
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001/ck1") == 0);
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002/ck2") == 0);
+
+  REQUIRE(swim_membership_add(m, &id1, 1) == 0);
+  REQUIRE(swim_membership_add(m, &id2, 1) == 0);
+
+  char *out = nullptr;
+  int n = swim_membership_peers(m, false, &out);
+  REQUIRE(n == 2);
+  REQUIRE(out != nullptr);
+
+  // Strings are packed consecutively, NUL-terminated, sorted by node ID
+  std::string s0(out);
+  std::string s1(out + s0.size() + 1);
+  CHECK(s0 == "127.0.0.1:8001/ck1");
+  CHECK(s1 == "127.0.0.1:8002/ck2");
+
+  free(out);
+  swim_membership_destroy(m);
+}
+
+TEST_CASE("membership: peers — include_dead=false excludes dead nodes") {
+  swim_membership_t *m = swim_membership_create();
+  REQUIRE(m != nullptr);
+
+  swim_node_id_t id1, id2, id3;
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001") == 0);
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002") == 0);
+  REQUIRE(swim_node_id_parse(&id3, "127.0.0.1:8003") == 0);
+
+  REQUIRE(swim_membership_add(m, &id1, 1) == 0);
+  REQUIRE(swim_membership_add(m, &id2, 1) == 0);
+  REQUIRE(swim_membership_add(m, &id3, 1) == 0);
+  REQUIRE(swim_membership_apply_event(m, SWIM_STATUS_DEAD, &id2, 1, 1000) == 0);
+
+  char *out = nullptr;
+  int n = swim_membership_peers(m, false, &out);
+  REQUIRE(n == 2);
+  REQUIRE(out != nullptr);
+
+  std::string s0(out);
+  std::string s1(out + s0.size() + 1);
+  CHECK(s0 == "127.0.0.1:8001");
+  CHECK(s1 == "127.0.0.1:8003");
+
+  free(out);
+  swim_membership_destroy(m);
+}
+
+TEST_CASE("membership: peers — include_dead=true includes dead nodes") {
+  swim_membership_t *m = swim_membership_create();
+  REQUIRE(m != nullptr);
+
+  swim_node_id_t id1, id2;
+  REQUIRE(swim_node_id_parse(&id1, "127.0.0.1:8001") == 0);
+  REQUIRE(swim_node_id_parse(&id2, "127.0.0.1:8002") == 0);
+
+  REQUIRE(swim_membership_add(m, &id1, 1) == 0);
+  REQUIRE(swim_membership_add(m, &id2, 1) == 0);
+  REQUIRE(swim_membership_apply_event(m, SWIM_STATUS_DEAD, &id2, 1, 500) == 0);
+
+  char *out = nullptr;
+  int n = swim_membership_peers(m, true, &out);
+  REQUIRE(n == 2);
+  REQUIRE(out != nullptr);
+
+  std::string s0(out);
+  std::string s1(out + s0.size() + 1);
+  CHECK(s0 == "127.0.0.1:8001");
+  CHECK(s1 == "127.0.0.1:8002");
+
+  free(out);
+  swim_membership_destroy(m);
+}
+
+TEST_CASE("membership: peers — NULL args return error") {
+  swim_membership_t *m = swim_membership_create();
+  REQUIRE(m != nullptr);
+
+  char *out = nullptr;
+  CHECK(swim_membership_peers(nullptr, false, &out) == -1);
+  CHECK(swim_membership_peers(m, false, nullptr) == -1);
 
   swim_membership_destroy(m);
 }

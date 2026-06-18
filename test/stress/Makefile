@@ -32,6 +32,7 @@ scale.o: scale.cpp
 -include $(OBJ:.o=.d)
 
 test: stress_test
+	sleep 2    # add lax for system to quiet down before stress test
 	./stress_test --duration
 
 else

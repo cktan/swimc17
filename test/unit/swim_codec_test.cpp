@@ -169,3 +169,25 @@ TEST_CASE("codec: swim_pack_membership") {
   rc = swim_pack_membership(&member, buf, buf + 32);
   CHECK(rc == -1);
 }
+
+TEST_CASE("codec: fwd_ack roundtrip") {
+  swim_node_id_t sender, peer;
+  REQUIRE(swim_node_id_parse(&sender, "10.0.0.1:7001/s") == 0);
+  REQUIRE(swim_node_id_parse(&peer, "10.0.0.2:7002/p") == 0);
+
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  int enc_len = swim_pack_message(SWIM_MSG_FWD_ACK, &sender, 777, &peer,
+                                  nullptr, 0, buf, sizeof(buf));
+  REQUIRE(enc_len > 0);
+
+  swim_message_t decoded;
+  memset(&decoded, 0, sizeof(decoded));
+  int rc = swim_unpack_message(buf, enc_len, &decoded);
+  REQUIRE(rc == 0);
+
+  CHECK(decoded.type == SWIM_MSG_FWD_ACK);
+  CHECK(decoded.seq == 777);
+  CHECK(decoded.gossip_count == 0);
+  CHECK(swim_node_id_compare(&decoded.sender, &sender) == 0);
+  CHECK(swim_node_id_compare(&decoded.peer, &peer) == 0);
+}

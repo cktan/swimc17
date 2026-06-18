@@ -324,3 +324,25 @@ TEST_CASE("swim_feed: SWIM_WAIT_FOREVER wakes on write") {
 
   swim_feed_destroy(feed);
 }
+
+TEST_CASE("swim_feed: wait times out on empty feed") {
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+
+  auto t0 = std::chrono::steady_clock::now();
+  int rc = swim_feed_wait(feed, 50); // 50 ms timeout, feed is empty
+  auto elapsed = std::chrono::steady_clock::now() - t0;
+
+  CHECK(rc == 1); // timed out
+  // Should have waited roughly 50 ms, not returned instantly
+  CHECK(elapsed >= std::chrono::milliseconds(40));
+
+  swim_feed_destroy(feed);
+}
+
+TEST_CASE("swim_feed: wait with NULL feed returns error") {
+  swim_set_error(SWIM_OK, NULL);
+  int rc = swim_feed_wait(nullptr, 100);
+  CHECK(rc == -1);
+  CHECK(swim_errno() == SWIM_ERR_INVALID);
+}

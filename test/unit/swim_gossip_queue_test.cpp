@@ -315,3 +315,32 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack budget limits") {
 
   swim_gossip_queue_destroy(q);
 }
+
+TEST_CASE("gossip_queue: invalid args return error") {
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  REQUIRE(q != nullptr);
+
+  swim_node_id_t id;
+  REQUIRE(swim_node_id_parse(&id, "127.0.0.1:8001") == 0);
+
+  char buf[64];
+
+  // swim_gossip_queue_enqueue
+  CHECK(swim_gossip_queue_enqueue(nullptr, SWIM_STATUS_ALIVE, &id, 1, 1) == -1);
+  CHECK(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, nullptr, 1, 1) == -1);
+  CHECK(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &id, 1, 0) ==
+        -1); // multiplier < 1
+
+  // swim_gossip_queue_pack
+  CHECK(swim_gossip_queue_pack(nullptr, 3, (uint8_t *)buf,
+                               (uint8_t *)buf + sizeof(buf)) == -1);
+  CHECK(swim_gossip_queue_pack(q, 3, nullptr, (uint8_t *)buf + sizeof(buf)) ==
+        -1);
+
+  // swim_gossip_queue_peek
+  swim_member_t out[4];
+  CHECK(swim_gossip_queue_peek(nullptr, out, 4) == -1);
+  CHECK(swim_gossip_queue_peek(q, nullptr, 4) == -1);
+
+  swim_gossip_queue_destroy(q);
+}

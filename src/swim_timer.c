@@ -36,7 +36,7 @@
 
 typedef struct entry_t entry_t;
 struct entry_t {
-  int tick;           /* ticks remaining relative to predecessor (or now for head) */
+  int tick; /* ticks remaining relative to predecessor (or now for head) */
   swim_timer_cb_t cb; /* callback invoked on fire or cancel */
   void *ctx;          /* opaque context passed to cb */
   void *param;        /* per-alarm parameter passed to cb */
@@ -200,7 +200,7 @@ void swim_timer_tick(swim_timer_t *t) {
 
   // Deduct 1 tick
   t->head->tick -= 1;
-  
+
   /* Fire the head and any following alarms whose delta is 0 (i.e.
    * due on this same tick). Pop before firing so a reentrant
    * callback sees a consistent list. */
