@@ -29,7 +29,14 @@
 #include "swim_udp.h"
 
 #include <arpa/inet.h>
+#if defined(__APPLE__)
+#include <libkern/OSByteOrder.h>
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#define be64toh(x) OSSwapBigToHostInt64(x)
+#define le64toh(x) OSSwapLittleToHostInt64(x)
+#else
 #include <endian.h>
+#endif
 #include <math.h>
 #include <poll.h>
 #include <pthread.h>
