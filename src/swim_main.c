@@ -63,7 +63,7 @@ static uint64_t get_now_ms(void) {
 static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
 
 // SipHash-2-4: keyed 64-bit hash (2 compression rounds, 4 finalization rounds).
-// Reference: https://131002.net/siphash/siphash.pdf
+// https://en.wikipedia.org/wiki/SipHash
 #define SWIM_ROTL64(x, b) (uint64_t)(((x) << (b)) | ((x) >> (64 - (b))))
 #define SWIM_SIPROUND(v0, v1, v2, v3)                                          \
   do {                                                                         \
