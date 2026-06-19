@@ -29,7 +29,13 @@
 #include "swim_errno.h"
 #include "swim_gossip_queue.h"
 #include <arpa/inet.h>
+#if defined(__APPLE__)
+#include <libkern/OSByteOrder.h>
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#define be64toh(x) OSSwapBigToHostInt64(x)
+#else
 #include <endian.h>
+#endif
 #include <string.h>
 
 static int pack_int8(uint8_t val, uint8_t *p, uint8_t *q) {
