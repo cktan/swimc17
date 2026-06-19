@@ -42,10 +42,9 @@ cc my_app.c $(pkg-config --cflags --libs libswimc17)
 
 ## Quick Start
 
-Initialize your configuration options and start the cluster
-membership protocol thread. The `self` and `name` options
-are mandatory. The first node starts alone, and subsequent
-nodes join by pointing to one or more known seeds.
+Initialize your configuration options and start the cluster membership
+protocol thread. The `self` and `name` options are mandatory. Each
+node starts and joins by pointing to one or more known seeds.
 
 ```c
 #include "swim.h"

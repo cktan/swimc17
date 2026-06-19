@@ -7,29 +7,35 @@ A C17 library implementing the SWIM gossip protocol.
 For detailed information on design, algorithms, and usage,
 see the following documents:
 
+- [USAGE.md](USAGE.md):
+  Installation instructions, public API reference, and
+  usage examples.
 - [DESIGN.md](DESIGN.md):
   Protocol details, design decisions, and architecture.
 - [ALGORITHM.md](ALGORITHM.md):
   A step-by-step sketch of the SWIM failure detector,
   gossip, and refutation rules.
-- [USAGE.md](USAGE.md):
-  Installation instructions, public API reference, and
-  usage examples.
+
 
 ## Building
 
-To build the static and shared libraries:
-
+For debug build:
 ```bash
+export DEBUG=1
 make
 ```
 
-To run the unit tests:
-
+For release build:
 ```bash
-make test
+unset DEBUG
+make
 ```
 
-## License
+## Running tests
 
-TBD
+The following command invokes the tests:
+
+```bash
+export DEBUG=1
+make test
+```
