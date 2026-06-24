@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "nodeid.h"
+#include "swim_nodeid.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -7,16 +7,17 @@
 #include <string.h>
 
 /* Sentinel 0xFFFF must not be a valid slot index. */
-_Static_assert(NODEID_TABLE_SIZE <= 0xFFFF,
-               "NODEID_TABLE_SIZE must be <= 0xFFFF to keep sentinel valid");
+_Static_assert(
+    SWIM_NODEID_TABLE_SIZE <= 0xFFFF,
+    "SWIM_NODEID_TABLE_SIZE must be <= 0xFFFF to keep sentinel valid");
 
 /*
  * g_table[slot] holds the registered nodeid string; NULL means empty.
- * All slots 0..NODEID_TABLE_SIZE-1 are usable.
+ * All slots 0..SWIM_NODEID_TABLE_SIZE-1 are usable.
  * Each pointer is written once under g_mu with a release store,
  * so lock-free readers can safely load with acquire.
  */
-static char *_Atomic g_table[NODEID_TABLE_SIZE];
+static char *_Atomic g_table[SWIM_NODEID_TABLE_SIZE];
 static _Atomic uint16_t g_count = 0;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 
@@ -30,38 +31,39 @@ static uint32_t nodeid_hash(const char *s) {
   return h;
 }
 
-/* Map hash to probe slot in 0..NODEID_TABLE_SIZE-1 via bitmask. */
+/* Map hash to probe slot in 0..SWIM_NODEID_TABLE_SIZE-1 via bitmask. */
 static inline uint16_t hash_slot(uint32_t h) {
-  return (uint16_t)(h & (NODEID_TABLE_SIZE - 1));
+  return (uint16_t)(h & (SWIM_NODEID_TABLE_SIZE - 1));
 }
 
-/* Advance probe slot, wrapping within 0..NODEID_TABLE_SIZE-1. */
+/* Advance probe slot, wrapping within 0..SWIM_NODEID_TABLE_SIZE-1. */
 static inline uint16_t next_slot(uint16_t slot) {
-  return (uint16_t)((slot + 1) & (NODEID_TABLE_SIZE - 1));
+  return (uint16_t)((slot + 1) & (SWIM_NODEID_TABLE_SIZE - 1));
 }
 
 /* Find existing nodeid without registering; lock-free. */
-nodeid_idx_t nodeid_find(const char *nodeid) {
+swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
   uint16_t slot = hash_slot(nodeid_hash(nodeid));
-  for (uint16_t i = 0; i < NODEID_TABLE_SIZE; i++) {
+  for (uint16_t i = 0; i < SWIM_NODEID_TABLE_SIZE; i++) {
     char *p = atomic_load_explicit(&g_table[slot], memory_order_acquire);
     if (!p)
-      return NODEID_NONE;
+      return SWIM_NODEID_NONE;
     if (strcmp(p, nodeid) == 0)
-      return (nodeid_idx_t){slot};
+      return (swim_nodeid_idx_t){slot};
     slot = next_slot(slot);
   }
-  return NODEID_NONE;
+  return SWIM_NODEID_NONE;
 }
 
-/* Register nodeid; idempotent. Returns NODEID_NONE if pool is full. */
-nodeid_idx_t nodeid_register(const char *nodeid) {
+/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full. */
+swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
   pthread_mutex_lock(&g_mu); /* acquire registration lock */
-  if (atomic_load_explicit(&g_count, memory_order_relaxed) >= NODEID_POOL_MAX) {
+  if (atomic_load_explicit(&g_count, memory_order_relaxed) >=
+      SWIM_NODEID_POOL_MAX) {
     goto none;
   }
   uint16_t slot = hash_slot(nodeid_hash(nodeid));
-  for (uint16_t i = 0; i < NODEID_TABLE_SIZE; i++) {
+  for (uint16_t i = 0; i < SWIM_NODEID_TABLE_SIZE; i++) {
     char *p = atomic_load_explicit(&g_table[slot], memory_order_relaxed);
     if (!p) {
       char *s = strdup(nodeid);
@@ -71,31 +73,31 @@ nodeid_idx_t nodeid_register(const char *nodeid) {
       atomic_store_explicit(&g_table[slot], s, memory_order_release);
       atomic_fetch_add_explicit(&g_count, 1, memory_order_relaxed);
       pthread_mutex_unlock(&g_mu); /* release registration lock */
-      return (nodeid_idx_t){slot};
+      return (swim_nodeid_idx_t){slot};
     }
     if (strcmp(p, nodeid) == 0) {
       pthread_mutex_unlock(&g_mu); /* release registration lock */
-      return (nodeid_idx_t){slot};
+      return (swim_nodeid_idx_t){slot};
     }
     slot = next_slot(slot);
   }
 
 none:
   pthread_mutex_unlock(&g_mu); /* release registration lock */
-  return NODEID_NONE;
+  return SWIM_NODEID_NONE;
 }
 
 /* Return nodeid string for idx; lock-free. */
-const char *nodeid_lookup(nodeid_idx_t idx) {
-  if (idx.v >= NODEID_TABLE_SIZE)
+const char *swim_nodeid_lookup(swim_nodeid_idx_t idx) {
+  if (idx.v >= SWIM_NODEID_TABLE_SIZE)
     return NULL;
   return atomic_load_explicit(&g_table[idx.v], memory_order_acquire);
 }
 
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */
-void nodeid_destroy(void) {
+void swim_nodeid_destroy(void) {
   pthread_mutex_lock(&g_mu); /* acquire registration lock */
-  for (uint16_t i = 0; i < NODEID_TABLE_SIZE; i++) {
+  for (uint16_t i = 0; i < SWIM_NODEID_TABLE_SIZE; i++) {
     char *p = atomic_load_explicit(&g_table[i], memory_order_relaxed);
     if (p) {
       free(p);
@@ -109,22 +111,25 @@ void nodeid_destroy(void) {
 
 /* Parse a nodeid index back into its host name, port, and optional first_pos.
  */
-int nodeid_split(nodeid_idx_t idx, char host[254], int *port, int *first_pos) {
-  const char *node_str = nodeid_lookup(idx);
+int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
+                      int *first_pos) {
+  const char *node_str = swim_nodeid_lookup(idx);
   if (!node_str)
     return -1;
 
   const char *colon = strchr(node_str, ':');
   if (!colon)
-    return -1;
+    return -1; /* malformed: no host:port separator */
 
   size_t host_len = (size_t)(colon - node_str);
   if (host_len >= 254)
-    return -1;
+    return -1; /* host too long for caller's buffer */
 
   memcpy(host, node_str, host_len);
   host[host_len] = '\0';
 
+  /* Scan for optional '/first_pos' suffix before parsing port.
+     atoi stops at '/' so colon+1 works even with the suffix present. */
   const char *slash = strchr(colon + 1, '/');
   if (port)
     *port = atoi(colon + 1);
@@ -133,7 +138,7 @@ int nodeid_split(nodeid_idx_t idx, char host[254], int *port, int *first_pos) {
     if (slash)
       *first_pos = atoi(slash + 1);
     else
-      *first_pos = 0;
+      *first_pos = 0; /* absent suffix means position not recorded */
   }
 
   return 0;
@@ -150,12 +155,12 @@ static uint32_t bloom_hash(const char *s, uint32_t basis) {
 }
 
 /* Clear the Bloom filter. */
-void nodeid_bloom_init(nodeid_bloom_t *bf) {
+void swim_nodeid_bloom_init(swim_nodeid_bloom_t *bf) {
   memset(bf->bits, 0, sizeof(bf->bits));
 }
 
 /* Add a nodeid string to the Bloom filter. */
-void nodeid_bloom_add(nodeid_bloom_t *bf, const char *nodeid) {
+void swim_nodeid_bloom_add(swim_nodeid_bloom_t *bf, const char *nodeid) {
   uint32_t h1 = bloom_hash(nodeid, 2166136261u);
   uint32_t h2 = bloom_hash(nodeid, 0u);
   uint32_t h3 = bloom_hash(nodeid, 123456789u);
@@ -168,7 +173,7 @@ void nodeid_bloom_add(nodeid_bloom_t *bf, const char *nodeid) {
 }
 
 /* Test if a nodeid string is present in the Bloom filter. */
-int nodeid_bloom_test(const nodeid_bloom_t *bf, const char *nodeid) {
+int swim_nodeid_bloom_test(const swim_nodeid_bloom_t *bf, const char *nodeid) {
   uint32_t h1 = bloom_hash(nodeid, 2166136261u);
   uint32_t h2 = bloom_hash(nodeid, 0u);
   uint32_t h3 = bloom_hash(nodeid, 123456789u);

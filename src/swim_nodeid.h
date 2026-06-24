@@ -7,54 +7,61 @@ extern "C" {
 
 /*
  * Unified nodeid pool backed by an open-addressing hash table.
- * nodeid_idx_t.v is the table slot [0..NODEID_TABLE_SIZE)
- * Arrays indexed by nodeid_idx_t must be NODEID_TABLE_SIZE elements wide.
+ * swim_nodeid_idx_t.v is the table slot [0..SWIM_NODEID_TABLE_SIZE)
+ * Arrays indexed by swim_nodeid_idx_t must be SWIM_NODEID_TABLE_SIZE elements
+ * wide.
  */
-#define NODEID_POOL_MAX 4000   /* max registered nodeids */
-#define NODEID_TABLE_SIZE 8192 /* hash table size; nodeid_idx_t.v < this */
+#define SWIM_NODEID_POOL_MAX 4000 /* max registered nodeids */
+#define SWIM_NODEID_TABLE_SIZE                                                 \
+  8192 /* hash table size; swim_nodeid_idx_t.v < this */
 
 typedef struct {
   uint16_t v;
-} nodeid_idx_t;
+} swim_nodeid_idx_t;
 
-#define NODEID_NONE ((nodeid_idx_t){0xFFFF}) /* out-of-range sentinel */
+#define SWIM_NODEID_NONE                                                       \
+  ((swim_nodeid_idx_t){0xFFFF}) /* out-of-range sentinel */
 
 /* True if idx is a valid (non-sentinel) index. */
-static inline int nodeid_valid(nodeid_idx_t idx) { return idx.v != 0xFFFF; }
+static inline int nodeid_valid(swim_nodeid_idx_t idx) {
+  return idx.v != 0xFFFF;
+}
 
 /* True if two indices refer to the same entry. */
-static inline int nodeid_eq(nodeid_idx_t a, nodeid_idx_t b) {
+static inline int nodeid_eq(swim_nodeid_idx_t a, swim_nodeid_idx_t b) {
   return a.v == b.v;
 }
 
-/* Register nodeid; idempotent. Returns NODEID_NONE if pool is full. */
-nodeid_idx_t nodeid_register(const char *nodeid);
+/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full. */
+swim_nodeid_idx_t swim_nodeid_register(const char *nodeid);
 
 /* Return the nodeid string for idx, or NULL if idx is invalid. */
-const char *nodeid_lookup(nodeid_idx_t idx);
+const char *swim_nodeid_lookup(swim_nodeid_idx_t idx);
 
-/* Find existing nodeid without registering. Returns NODEID_NONE if absent. */
-nodeid_idx_t nodeid_find(const char *nodeid);
+/* Find existing nodeid without registering. Returns SWIM_NODEID_NONE if absent.
+ */
+swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
 
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */
-void nodeid_destroy(void);
+void swim_nodeid_destroy(void);
 
 /* Parse a nodeid index back into its host name, port, and optional first_pos.
  */
-int nodeid_split(nodeid_idx_t idx, char host[254], int *port, int *first_pos);
+int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
+                      int *first_pos);
 
 typedef struct {
   uint8_t bits[512]; /* 4096-bit bloom filter; k=4, n<128 → ~0.02% FPR */
-} nodeid_bloom_t;
+} swim_nodeid_bloom_t;
 
 /* Clear the Bloom filter. */
-void nodeid_bloom_init(nodeid_bloom_t *bf);
+void swim_nodeid_bloom_init(swim_nodeid_bloom_t *bf);
 
 /* Add a nodeid string to the Bloom filter. */
-void nodeid_bloom_add(nodeid_bloom_t *bf, const char *nodeid);
+void swim_nodeid_bloom_add(swim_nodeid_bloom_t *bf, const char *nodeid);
 
 /* Test if a nodeid string is present in the Bloom filter. */
-int nodeid_bloom_test(const nodeid_bloom_t *bf, const char *nodeid);
+int swim_nodeid_bloom_test(const swim_nodeid_bloom_t *bf, const char *nodeid);
 
 #ifdef __cplusplus
 }
