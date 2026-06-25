@@ -49,19 +49,6 @@ void swim_nodeid_destroy(void);
 int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
                       char cookie[64]);
 
-typedef struct {
-  uint8_t bits[512]; /* 4096-bit bloom filter; k=4, n<128 → ~0.02% FPR */
-} swim_nodeid_bloom_t;
-
-/* Clear the Bloom filter. */
-void swim_nodeid_bloom_init(swim_nodeid_bloom_t *bf);
-
-/* Add a nodeid string to the Bloom filter. */
-void swim_nodeid_bloom_add(swim_nodeid_bloom_t *bf, const char *nodeid);
-
-/* Test if a nodeid string is present in the Bloom filter. */
-int swim_nodeid_bloom_test(const swim_nodeid_bloom_t *bf, const char *nodeid);
-
 #ifdef __cplusplus
 }
 #endif
