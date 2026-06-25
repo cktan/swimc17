@@ -312,10 +312,8 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   bool relay_ping_seen = false;
   for (int attempt = 0; attempt < 50 && !relay_ping_seen; attempt++) {
-    char src_host[256];
-    uint16_t src_port;
     uint8_t buf[256 + 12];
-    int n = swim_udp_recv(target, src_host, &src_port, buf, sizeof(buf));
+    int n = swim_udp_recv(target, buf, sizeof(buf));
     if (n > 12) {
       swim_message_t in;
       if (swim_unpack_message(buf + 12, n - 12, &in) == 0 &&
@@ -430,10 +428,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     bool ack_seen = false;
     uint8_t recv_buf[2048];
     for (int attempt = 0; attempt < 50 && !ack_seen; attempt++) {
-      char _src_host[256];
-      uint16_t _src_port;
-      int n = swim_udp_recv(mock_udp, _src_host, &_src_port, recv_buf,
-                            sizeof(recv_buf));
+      int n = swim_udp_recv(mock_udp, recv_buf, sizeof(recv_buf));
       if (n > 12) {
         swim_message_t in;
         if (swim_unpack_message(recv_buf + 12, n - 12, &in) == 0 &&

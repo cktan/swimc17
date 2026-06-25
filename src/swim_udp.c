@@ -217,41 +217,20 @@ int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
 }
 
 // Receive a packet (non-blocking). Returns bytes received, 0 if no data
-// (EWOULDBLOCK), -1 on error. Fills out_host/out_port with sender's address.
-int swim_udp_recv(swim_udp_t *u, char out_host[256], uint16_t *out_port,
-                  uint8_t *buf, size_t size) {
-  if (!u || !out_host || !out_port || !buf || size == 0) {
+// (EWOULDBLOCK), -1 on error.
+int swim_udp_recv(swim_udp_t *u, uint8_t *buf, size_t size) {
+  if (!u || !buf || size == 0) {
     return swim_set_error(
         SWIM_ERR_INVALID,
         "Invalid NULL or zero size arguments to swim_udp_recv");
   }
 
-  struct sockaddr_storage src_addr;
-  socklen_t addr_len = sizeof(src_addr);
-
-  ssize_t n =
-      recvfrom(u->fd, buf, size, 0, (struct sockaddr *)&src_addr, &addr_len);
+  ssize_t n = recvfrom(u->fd, buf, size, 0, NULL, NULL);
   if (n < 0) {
     if (errno == EWOULDBLOCK || errno == EAGAIN) {
       return 0; // No data available
     }
     return swim_set_error(SWIM_ERR_BAD_STATE, "recvfrom failed");
-  }
-
-  // Format the source address numerically (no DNS / reverse lookup).
-  const char *ok = NULL;
-  if (src_addr.ss_family == AF_INET) {
-    struct sockaddr_in *sin = (struct sockaddr_in *)&src_addr;
-    ok = inet_ntop(AF_INET, &sin->sin_addr, out_host, 256);
-    *out_port = ntohs(sin->sin_port);
-  } else if (src_addr.ss_family == AF_INET6) {
-    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&src_addr;
-    ok = inet_ntop(AF_INET6, &sin6->sin6_addr, out_host, 256);
-    *out_port = ntohs(sin6->sin6_port);
-  }
-  if (!ok) {
-    return swim_set_error(SWIM_ERR_BAD_STATE,
-                          "Failed to format source address");
   }
 
   return (int)n;

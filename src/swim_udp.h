@@ -43,16 +43,13 @@ SWIM_EXTERN int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
 /**
  * Receive a packet. Non-blocking.
  *
- * @param u        The UDP transport instance.
- * @param out_host Buffer (256 bytes) filled with sender's numeric address.
- * @param out_port Filled with sender's port.
- * @param buf      Buffer to store the received payload.
- * @param size     Size of the buffer.
+ * @param u    The UDP transport instance.
+ * @param buf  Buffer to store the received payload.
+ * @param size Size of the buffer.
  * @return The number of bytes received on success, 0 if no data is available
  * (EWOULDBLOCK), -1 on error.
  */
-SWIM_EXTERN int swim_udp_recv(swim_udp_t *u, char out_host[256],
-                              uint16_t *out_port, uint8_t *buf, size_t size);
+SWIM_EXTERN int swim_udp_recv(swim_udp_t *u, uint8_t *buf, size_t size);
 
 /**
  * Return the underlying socket file descriptor.

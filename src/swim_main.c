@@ -601,9 +601,7 @@ static void relay_gc(swim_instance_t *inst) {
 
 static int recv_message(swim_instance_t *inst, swim_message_t *msg) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  char _src_host[256];
-  uint16_t _src_port;
-  int len = swim_udp_recv(inst->udp, _src_host, &_src_port, buf, sizeof(buf));
+  int len = swim_udp_recv(inst->udp, buf, sizeof(buf));
   if (len <= 0)
     return -1;
   if (len < 12)
