@@ -28,6 +28,8 @@
 #include "swim_timer.h"
 #include "swim_udp.h"
 
+#include "swim_nodeid.h"
+
 #include <arpa/inet.h>
 #if defined(__APPLE__)
 #include <libkern/OSByteOrder.h>
@@ -147,12 +149,12 @@ static uint64_t siphash24(const uint8_t key[16], const uint8_t *msg,
   return v0 ^ v1 ^ v2 ^ v3;
 }
 
-// Build the suspicion-timer key for a node. The cookie is part of node
-// identity (DESIGN S3), so it must be in the key: otherwise two members that
-// share a host:port collide on one key and an event for one cancels the
-// other's suspicion timer. Centralized so the arm/cancel keys cannot drift.
-static void suspect_key(char *buf, size_t n, const swim_node_id_t *id) {
-  snprintf(buf, n, "suspect:%s:%u:%s", id->host, id->port, id->cookie);
+// Build the suspicion-timer key for a node. The full pool string
+// ("host:port/cookie") is unique per identity, so it is the key.
+// Centralized so the arm/cancel keys cannot drift.
+static void suspect_key(char *buf, size_t n, swim_nodeid_idx_t id) {
+  const char *s = swim_nodeid_lookup(id);
+  snprintf(buf, n, "suspect:%s", s ? s : "");
 }
 
 typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
@@ -163,7 +165,7 @@ typedef enum { PROBE_NONE = 0, PROBE_DIRECT, PROBE_INDIRECT } probe_state_t;
 // timeout.
 typedef struct {
   probe_state_t state;
-  swim_node_id_t target;
+  swim_nodeid_idx_t target;
   uint32_t seq;
   uint64_t sent_ms; // monotonic send time of the direct ping, for RTT
 } pending_probe_t;
@@ -172,8 +174,8 @@ typedef struct {
 // failure detector. We forward the PING-REQ to the target and forward any
 // ACK back to the requester. Expires after expiry_tick.
 typedef struct {
-  swim_node_id_t requester;
-  swim_node_id_t target;
+  swim_nodeid_idx_t requester;
+  swim_nodeid_idx_t target;
   uint32_t seq;
   uint64_t expiry_tick;
 } relay_probe_t;
@@ -185,7 +187,7 @@ struct swim_t {
   swim_membership_t *membership;
   swim_gossip_queue_t *gossip_queue;
 
-  swim_node_id_t self_id;
+  swim_nodeid_idx_t self_id;
   uint64_t incarnation;
   uint32_t seq;
   unsigned int rand_state; // per-instance PRNG state for rand_r()
@@ -203,7 +205,7 @@ struct swim_t {
 
   // Bootstrap addresses from opts->seeds; pinged periodically until
   // at least one responds and the node joins the cluster.
-  swim_node_id_t *seeds;
+  swim_nodeid_idx_t *seeds;
   int seed_count;
 
   // Round-robin probe list: a shuffled snapshot of alive members rebuilt
@@ -235,15 +237,15 @@ typedef swim_t swim_instance_t;
 static void *swim_thread_entry(void *arg);
 static void *swim_loop(swim_instance_t *instance);
 static void queue_notification(swim_instance_t *inst, const char *verb,
-                               const swim_node_id_t *node);
-static void send_ping(swim_instance_t *inst, const swim_node_id_t *dest,
+                               swim_nodeid_idx_t id);
+static void send_ping(swim_instance_t *inst, swim_nodeid_idx_t dest,
                       uint32_t seq);
-static void send_ack(swim_instance_t *inst, const swim_node_id_t *dest,
+static void send_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
                      uint32_t seq);
-static void send_ping_req(swim_instance_t *inst, const swim_node_id_t *helper,
-                          const swim_node_id_t *target, uint32_t seq);
-static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest,
-                         const swim_node_id_t *source, uint32_t seq);
+static void send_ping_req(swim_instance_t *inst, swim_nodeid_idx_t helper,
+                          swim_nodeid_idx_t target, uint32_t seq);
+static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
+                         swim_nodeid_idx_t source, uint32_t seq);
 static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq);
 
 // Global alarm callback router to intercept timeout triggers
@@ -322,7 +324,7 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   }
 
   if (inst->shuffle_count > 0) {
-    swim_node_id_t target = inst->shuffle_list[inst->shuffle_idx].id;
+    swim_nodeid_idx_t target = inst->shuffle_list[inst->shuffle_idx].id;
     inst->shuffle_idx++;
 
     // Probe selected target
@@ -332,7 +334,7 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
     inst->pending_probe.seq = seq;
     inst->pending_probe.sent_ms = get_monotonic_time_ms();
 
-    send_ping(inst, &target, seq);
+    send_ping(inst, target, seq);
 
     // Arm timeout alarm
     arm_probe_timeout(inst, inst->ping_timeout_ms / 100, seq);
@@ -351,7 +353,8 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 // suspicion_timeout_ms. Declares it dead and enqueues a gossip event.
 static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   swim_instance_t *inst = (swim_instance_t *)ctx;
-  swim_node_id_t *target = (swim_node_id_t *)param;
+  swim_nodeid_idx_t *target_p = (swim_nodeid_idx_t *)param;
+  swim_nodeid_idx_t target = *target_p;
 
   if (ev == SWIM_TIMER_ALARM) {
     const swim_member_t *m = swim_membership_get(inst->membership, target);
@@ -364,7 +367,7 @@ static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
       queue_notification(inst, "down", target);
     }
   }
-  free(target);
+  free(target_p);
 }
 
 // Fires when a direct ping times out. Escalates to indirect probing by sending
@@ -387,11 +390,10 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       } else {
         int count = swim_membership_list(inst->membership, helpers,
                                          active_count, false);
-        // Exclude target and self from helpers list
+        // Exclude target from helpers list
         int write_idx = 0;
         for (int i = 0; i < count; i++) {
-          if (swim_node_id_compare(&helpers[i].id,
-                                   &inst->pending_probe.target) != 0) {
+          if (!nodeid_eq(helpers[i].id, inst->pending_probe.target)) {
             helpers[write_idx++] = helpers[i];
           }
         }
@@ -400,12 +402,12 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
         // Pick up to k random helpers
         uint32_t k = inst->ping_req_fanout;
         for (uint32_t i = 0; i < k && count > 0; i++) {
-          int idx = rand_r(&inst->rand_state) % count;
-          send_ping_req(inst, &helpers[idx].id, &inst->pending_probe.target,
+          int pick = rand_r(&inst->rand_state) % count;
+          send_ping_req(inst, helpers[pick].id, inst->pending_probe.target,
                         seq);
 
           // Remove selected helper from list
-          helpers[idx] = helpers[count - 1];
+          helpers[pick] = helpers[count - 1];
           count--;
         }
         free(helpers);
@@ -418,20 +420,19 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
   } else if (inst->pending_probe.state == PROBE_INDIRECT &&
              inst->pending_probe.seq == seq) {
     // Indirect ping also timed out -> Declare suspect
-    swim_node_id_t target = inst->pending_probe.target;
+    swim_nodeid_idx_t target = inst->pending_probe.target;
     inst->pending_probe.state = PROBE_NONE;
 
-    const swim_member_t *m = swim_membership_get(inst->membership, &target);
+    const swim_member_t *m = swim_membership_get(inst->membership, target);
     if (m && m->status == SWIM_STATUS_ALIVE) {
-      swim_membership_apply_event(inst->membership, SWIM_STATUS_SUSPECT,
-                                  &target, m->incarnation,
-                                  get_monotonic_time_ms());
-      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_SUSPECT,
-                                &target, m->incarnation, 1);
-      queue_notification(inst, "suspect", &target);
+      swim_membership_apply_event(inst->membership, SWIM_STATUS_SUSPECT, target,
+                                  m->incarnation, get_monotonic_time_ms());
+      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_SUSPECT, target,
+                                m->incarnation, 1);
+      queue_notification(inst, "suspect", target);
 
       // Start suspicion timer
-      swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
+      swim_nodeid_idx_t *suspect_param = malloc(sizeof(swim_nodeid_idx_t));
       if (!suspect_param) {
         if (inst->feed)
           swim_feed_put(inst->feed, 2, "warning",
@@ -439,7 +440,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       } else {
         *suspect_param = target;
         char alarm_name[384];
-        suspect_key(alarm_name, sizeof(alarm_name), &target);
+        suspect_key(alarm_name, sizeof(alarm_name), target);
         if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
                            alarm_name, suspicion_timer_cb, inst,
                            suspect_param) != 0) {
@@ -467,12 +468,12 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
     if (active_count == 0) {
       // Alone: Ping all seeds to discover cluster
       for (int i = 0; i < inst->seed_count; i++) {
-        send_ping(inst, &inst->seeds[i], inst->seq++);
+        send_ping(inst, inst->seeds[i], inst->seq++);
       }
     } else {
       // In a cluster: Ping one random seed to heal partitions
       int idx = rand_r(&inst->rand_state) % inst->seed_count;
-      send_ping(inst, &inst->seeds[idx], inst->seq++);
+      send_ping(inst, inst->seeds[idx], inst->seq++);
     }
   }
 
@@ -487,9 +488,9 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 }
 
 // Helper to send messages
-static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
-                         uint8_t type, const swim_node_id_t *sender,
-                         uint32_t seq, const swim_node_id_t *peer) {
+static void send_message(swim_instance_t *inst, swim_nodeid_idx_t dest,
+                         uint8_t type, swim_nodeid_idx_t sender, uint32_t seq,
+                         swim_nodeid_idx_t peer) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
   swim_gossip_queue_t *q_to_pass =
       (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
@@ -512,55 +513,56 @@ static void send_message(swim_instance_t *inst, const swim_node_id_t *dest,
     uint64_t hval_be = htobe64(siphash24(key, hash_in, 4 + (size_t)len));
     memcpy(buf + 4, &hval_be, 8);
 
-    swim_udp_send(inst->udp, dest, buf, (size_t)(12 + len));
+    char dest_host[254];
+    int dest_port;
+    if (swim_nodeid_split(dest, dest_host, &dest_port, NULL) == 0)
+      swim_udp_send(inst->udp, dest_host, (uint16_t)dest_port, buf,
+                    (size_t)(12 + len));
   } else {
-    char node_str[350];
-    if (inst->feed &&
-        swim_node_id_format(dest, node_str, sizeof(node_str)) == 0) {
+    const char *dest_str = swim_nodeid_lookup(dest);
+    if (inst->feed && dest_str) {
       char warn_msg[512];
-      snprintf(warn_msg, sizeof(warn_msg), "message dropped to %s", node_str);
+      snprintf(warn_msg, sizeof(warn_msg), "message dropped to %s", dest_str);
       swim_feed_put(inst->feed, 2, "warning", warn_msg);
     }
   }
 }
 
-static void send_ping(swim_instance_t *inst, const swim_node_id_t *dest,
+static void send_ping(swim_instance_t *inst, swim_nodeid_idx_t dest,
                       uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_PING, &inst->self_id, seq, NULL);
+  send_message(inst, dest, SWIM_MSG_PING, inst->self_id, seq, SWIM_NODEID_NONE);
 }
 
-static void send_ack(swim_instance_t *inst, const swim_node_id_t *dest,
+static void send_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
                      uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_ACK, &inst->self_id, seq, NULL);
+  send_message(inst, dest, SWIM_MSG_ACK, inst->self_id, seq, SWIM_NODEID_NONE);
 }
 
-static void send_ping_req(swim_instance_t *inst, const swim_node_id_t *helper,
-                          const swim_node_id_t *target, uint32_t seq) {
-  send_message(inst, helper, SWIM_MSG_PING_REQ, &inst->self_id, seq, target);
+static void send_ping_req(swim_instance_t *inst, swim_nodeid_idx_t helper,
+                          swim_nodeid_idx_t target, uint32_t seq) {
+  send_message(inst, helper, SWIM_MSG_PING_REQ, inst->self_id, seq, target);
 }
 
-static void send_fwd_ack(swim_instance_t *inst, const swim_node_id_t *dest,
-                         const swim_node_id_t *source, uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_FWD_ACK, &inst->self_id, seq, source);
+static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
+                         swim_nodeid_idx_t source, uint32_t seq) {
+  send_message(inst, dest, SWIM_MSG_FWD_ACK, inst->self_id, seq, source);
 }
 
 // Write a membership-change record to the feed. Caller must hold inst->mutex.
 static void queue_notification(swim_instance_t *inst, const char *verb,
-                               const swim_node_id_t *node) {
+                               swim_nodeid_idx_t id) {
   if (!inst->feed)
     return;
-  char node_str[350];
-  if (swim_node_id_format(node, node_str, sizeof(node_str)) == 0)
+  const char *node_str = swim_nodeid_lookup(id);
+  if (node_str)
     swim_feed_put(inst->feed, 3, "node", verb, node_str);
 }
 
 // Mark a node as alive on receipt of any message from it. Adds it if unknown,
 // clears SUSPECT status if it was suspected. Self-messages are ignored.
-static void update_node_alive(swim_instance_t *inst,
-                              const swim_node_id_t *node) {
-  if (swim_node_id_compare(node, &inst->self_id) == 0) {
+static void update_node_alive(swim_instance_t *inst, swim_nodeid_idx_t node) {
+  if (nodeid_eq(node, inst->self_id))
     return;
-  }
 
   const swim_member_t *m = swim_membership_get(inst->membership, node);
   if (!m) {
@@ -597,10 +599,11 @@ static void relay_gc(swim_instance_t *inst) {
   }
 }
 
-static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
-                        swim_message_t *msg) {
+static int recv_message(swim_instance_t *inst, swim_message_t *msg) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  int len = swim_udp_recv(inst->udp, src, buf, sizeof(buf));
+  char _src_host[256];
+  uint16_t _src_port;
+  int len = swim_udp_recv(inst->udp, _src_host, &_src_port, buf, sizeof(buf));
   if (len <= 0)
     return -1;
   if (len < 12)
@@ -634,18 +637,13 @@ static int recv_message(swim_instance_t *inst, swim_node_id_t *src,
 
 // Packet receiver and protocol handler — drains all pending packets.
 static void swim_protocol_handle_incoming(swim_instance_t *inst) {
-  swim_node_id_t src;
   swim_message_t msg;
   int rc;
 
-  while (recv_message(inst, &src, &msg) == 0) {
-
-    // Since UDP recv doesn't contain the cookie, populate it from the decoded
-    // message sender ID
-    strcpy(src.cookie, msg.sender.cookie);
+  while (recv_message(inst, &msg) == 0) {
 
     // Apply gossip rules for incoming sender status first
-    update_node_alive(inst, &msg.sender);
+    update_node_alive(inst, msg.sender);
 
     // 1. Process Piggybacked Gossip Events
     for (int i = 0; i < msg.gossip_count; i++) {
@@ -653,36 +651,35 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 
       // Exclude self-events from direct updates (dealt with via refutation
       // below)
-      if (swim_node_id_compare(&ev->id, &inst->self_id) != 0) {
+      if (!nodeid_eq(ev->id, inst->self_id)) {
         // Apply the event to local membership state
-        rc = swim_membership_apply_event(inst->membership, ev->status, &ev->id,
+        rc = swim_membership_apply_event(inst->membership, ev->status, ev->id,
                                          ev->incarnation,
                                          get_monotonic_time_ms());
         if (rc == 0) {
           // state changed -> re-gossip the event
-          swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, &ev->id,
+          swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, ev->id,
                                     ev->incarnation, 1);
 
+          char alarm_name[384];
           if (ev->status == SWIM_STATUS_DEAD) {
-            queue_notification(inst, "down", &ev->id);
+            queue_notification(inst, "down", ev->id);
             // Cancel suspicion timer if any
-            char alarm_name[384];
-            suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
+            suspect_key(alarm_name, sizeof(alarm_name), ev->id);
             swim_timer_cancel(inst->timer, alarm_name);
           } else if (ev->status == SWIM_STATUS_SUSPECT) {
-            queue_notification(inst, "suspect", &ev->id);
+            queue_notification(inst, "suspect", ev->id);
 
-            // Heap-allocate the ID; the suspicion callback takes ownership and
-            // frees it. Start suspicion timer
-            swim_node_id_t *suspect_param = malloc(sizeof(swim_node_id_t));
+            // Heap-allocate the idx; suspicion callback owns and frees it.
+            swim_nodeid_idx_t *suspect_param =
+                malloc(sizeof(swim_nodeid_idx_t));
             if (!suspect_param) {
               if (inst->feed)
                 swim_feed_put(inst->feed, 2, "warning",
                               "suspicion timer not armed: out of memory");
             } else {
               *suspect_param = ev->id;
-              char alarm_name[384];
-              suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
+              suspect_key(alarm_name, sizeof(alarm_name), ev->id);
               if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
                                  alarm_name, suspicion_timer_cb, inst,
                                  suspect_param) != 0) {
@@ -693,10 +690,9 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
               }
             }
           } else if (ev->status == SWIM_STATUS_ALIVE) {
-            queue_notification(inst, "up", &ev->id);
+            queue_notification(inst, "up", ev->id);
             // Cancel suspicion timer
-            char alarm_name[384];
-            suspect_key(alarm_name, sizeof(alarm_name), &ev->id);
+            suspect_key(alarm_name, sizeof(alarm_name), ev->id);
             swim_timer_cancel(inst->timer, alarm_name);
           }
         }
@@ -707,7 +703,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
           if (ev->incarnation >= inst->incarnation) {
             inst->incarnation = ev->incarnation + 1;
             swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
-                                      &inst->self_id, inst->incarnation,
+                                      inst->self_id, inst->incarnation,
                                       REFUTATION_MULTIPLIER);
           }
         }
@@ -717,19 +713,18 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
     // 2. Dispatch message by type
     switch (msg.type) {
     case SWIM_MSG_PING:
-      send_ack(inst, &msg.sender, msg.seq);
+      send_ack(inst, msg.sender, msg.seq);
       break;
 
     case SWIM_MSG_ACK:
       if (inst->pending_probe.state != PROBE_NONE &&
-          swim_node_id_compare(&msg.sender, &inst->pending_probe.target) == 0 &&
+          nodeid_eq(msg.sender, inst->pending_probe.target) &&
           msg.seq == inst->pending_probe.seq) {
         // Report RTT only for a clean direct round-trip.
         if (inst->pending_probe.state == PROBE_DIRECT && inst->feed) {
           uint64_t rtt = get_monotonic_time_ms() - inst->pending_probe.sent_ms;
-          char node_str[350];
-          if (swim_node_id_format(&msg.sender, node_str, sizeof(node_str)) ==
-              0) {
+          const char *node_str = swim_nodeid_lookup(msg.sender);
+          if (node_str) {
             char rtt_str[32];
             snprintf(rtt_str, sizeof(rtt_str), "%llu", (unsigned long long)rtt);
             swim_feed_put(inst->feed, 4, "ping", "rtt", node_str, rtt_str);
@@ -740,10 +735,10 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       }
       // Process potential helper relays
       for (int i = 0; i < inst->relay_count; i++) {
-        if (swim_node_id_compare(&msg.sender, &inst->relays[i].target) == 0 &&
+        if (nodeid_eq(msg.sender, inst->relays[i].target) &&
             msg.seq == inst->relays[i].seq &&
             inst->current_tick < inst->relays[i].expiry_tick) {
-          send_fwd_ack(inst, &inst->relays[i].requester, &msg.sender, msg.seq);
+          send_fwd_ack(inst, inst->relays[i].requester, msg.sender, msg.seq);
 
           // Clear entry
           inst->relays[i] = inst->relays[inst->relay_count - 1];
@@ -766,14 +761,14 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         r->seq = msg.seq;
         r->expiry_tick = inst->current_tick + (inst->ping_timeout_ms / 100);
 
-        send_ping(inst, &msg.peer, msg.seq);
+        send_ping(inst, msg.peer, msg.seq);
       }
       break;
 
     case SWIM_MSG_FWD_ACK:
       // Relayed ack received via helper
       if (inst->pending_probe.state != PROBE_NONE &&
-          swim_node_id_compare(&msg.peer, &inst->pending_probe.target) == 0 &&
+          nodeid_eq(msg.peer, inst->pending_probe.target) &&
           msg.seq == inst->pending_probe.seq) {
         inst->pending_probe.state = PROBE_NONE;
         swim_timer_cancel(inst->timer, "probe_timeout");
@@ -784,21 +779,21 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       // Graceful leave notification: transition the sender node to DEAD.
       uint64_t inc = 0;
       const swim_member_t *m_info =
-          swim_membership_get(inst->membership, &msg.sender);
+          swim_membership_get(inst->membership, msg.sender);
       if (m_info) {
         inc = m_info->incarnation + 1;
       } else {
         inc = get_now_ms();
       }
-      rc = swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD,
-                                       &msg.sender, inc,
-                                       get_monotonic_time_ms());
+      rc =
+          swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD,
+                                      msg.sender, inc, get_monotonic_time_ms());
       if (rc == 0) {
         swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_DEAD,
-                                  &msg.sender, inc, 1);
-        queue_notification(inst, "down", &msg.sender);
+                                  msg.sender, inc, 1);
+        queue_notification(inst, "down", msg.sender);
         char alarm_name[384];
-        suspect_key(alarm_name, sizeof(alarm_name), &msg.sender);
+        suspect_key(alarm_name, sizeof(alarm_name), msg.sender);
         swim_timer_cancel(inst->timer, alarm_name);
       }
       break;
@@ -910,13 +905,6 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
     return NULL;
   }
 
-  // Build self_id from explicit parameters
-  swim_node_id_t self_id = {0};
-  strncpy(self_id.host, host, sizeof(self_id.host) - 1);
-  self_id.port = port;
-  if (cookie)
-    strncpy(self_id.cookie, cookie, sizeof(self_id.cookie) - 1);
-
   // Allocate an instance
   swim_instance_t *inst = calloc(1, sizeof(*inst));
   if (!inst) {
@@ -938,7 +926,7 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
       opts->dead_node_expiry_ms ? opts->dead_node_expiry_ms : 6000;
 
   // Initialize helper sub-modules
-  inst->udp = swim_udp_create(self_id.host, self_id.port);
+  inst->udp = swim_udp_create(host, port);
   if (!inst->udp)
     goto error_cleanup;
 
@@ -956,28 +944,40 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
 
   inst->feed = opts->feed;
 
-  // Initialize self Node ID
-  inst->self_id = self_id;
+  // Register self in the node ID pool
+  {
+    char self_str[384];
+    if (cookie && cookie[0])
+      snprintf(self_str, sizeof(self_str), "%s:%u/%s", host, port, cookie);
+    else
+      snprintf(self_str, sizeof(self_str), "%s:%u", host, port);
+    inst->self_id = swim_nodeid_register(self_str);
+    if (!nodeid_valid(inst->self_id)) {
+      swim_set_error(SWIM_ERR_INVALID, "Failed to register self node ID");
+      goto error_cleanup;
+    }
+  }
 
   // Seed incarnation with current time (wall-clock time in milliseconds)
   inst->incarnation = get_now_ms();
   inst->seq = 1;
 
-  // Parse seeds list
+  // Register seeds in the pool
   if (opts->seeds) {
     // Count how many seeds
     int n = 0;
     while (opts->seeds[n])
       n++;
     if (n > 0) {
-      // Alloc array and fill
-      inst->seeds = malloc(n * sizeof(swim_node_id_t));
+      inst->seeds = malloc(n * sizeof(swim_nodeid_idx_t));
       if (!inst->seeds) {
         swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate seeds array");
         goto error_cleanup;
       }
       for (int i = 0; i < n; i++) {
-        if (swim_node_id_parse(&inst->seeds[i], opts->seeds[i]) != 0) {
+        inst->seeds[i] = swim_nodeid_register(opts->seeds[i]);
+        if (!nodeid_valid(inst->seeds[i])) {
+          swim_set_error(SWIM_ERR_INVALID, "Failed to register seed node ID");
           free(inst->seeds);
           inst->seeds = NULL;
           goto error_cleanup;
@@ -998,7 +998,7 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
 
   // Enqueue self-announcement
   swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
-                            &inst->self_id, inst->incarnation, 1);
+                            inst->self_id, inst->incarnation, 1);
 
   // Set up logical alarms
   // 1. Probe cycle timer (self-rearming)
@@ -1068,8 +1068,8 @@ int swim_leave(swim_t *inst) {
 
       for (uint32_t i = 0; i < fanout && count > 0; i++) {
         int idx = rand_r(&inst->rand_state) % count;
-        send_message(inst, &list[idx].id, SWIM_MSG_LEAVE, &inst->self_id,
-                     inst->seq++, NULL);
+        send_message(inst, list[idx].id, SWIM_MSG_LEAVE, inst->self_id,
+                     inst->seq++, SWIM_NODEID_NONE);
         list[idx] = list[count - 1];
         count--;
       }
@@ -1143,30 +1143,30 @@ int swim_hint_alive(swim_t *inst, const char *peer) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid NULL peer in swim_hint_alive");
   }
-  swim_node_id_t peer_id;
-  if (swim_node_id_parse(&peer_id, peer) != 0)
-    return -1;
+  swim_nodeid_idx_t peer_idx = swim_nodeid_register(peer);
+  if (!nodeid_valid(peer_idx))
+    return swim_set_error(SWIM_ERR_INVALID, "Invalid peer node ID");
 
   pthread_mutex_lock(&inst->mutex);
 
-  const swim_member_t *m = swim_membership_get(inst->membership, &peer_id);
+  const swim_member_t *m = swim_membership_get(inst->membership, peer_idx);
   if (m) {
     if (m->status == SWIM_STATUS_SUSPECT) {
       // Cancel suspicion timer
       char alarm_name[384];
-      suspect_key(alarm_name, sizeof(alarm_name), &peer_id);
+      suspect_key(alarm_name, sizeof(alarm_name), peer_idx);
       swim_timer_cancel(inst->timer, alarm_name);
 
       // Re-announce as alive
-      swim_membership_set_alive(inst->membership, &peer_id, m->incarnation);
-      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, &peer_id,
+      swim_membership_set_alive(inst->membership, peer_idx, m->incarnation);
+      swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE, peer_idx,
                                 m->incarnation, 1);
-      queue_notification(inst, "up", &peer_id);
+      queue_notification(inst, "up", peer_idx);
     }
 
     // Cancel outstanding probes to this target
     if (inst->pending_probe.state != PROBE_NONE &&
-        swim_node_id_compare(&inst->pending_probe.target, &peer_id) == 0) {
+        nodeid_eq(inst->pending_probe.target, peer_idx)) {
       inst->pending_probe.state = PROBE_NONE;
       swim_timer_cancel(inst->timer, "probe_timeout");
     }

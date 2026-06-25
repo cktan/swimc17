@@ -22,6 +22,7 @@
 #define _GNU_SOURCE
 #include "swim_udp.h"
 #include "swim_errno.h"
+#include <stdint.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -140,9 +141,9 @@ void swim_udp_destroy(swim_udp_t *u) {
 }
 
 // Send a packet to dest. Returns 0 on success, -1 on failure.
-int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
-                  size_t size) {
-  if (!u || !dest || !buf || size == 0) {
+int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
+                  const uint8_t *buf, size_t size) {
+  if (!u || !host || !buf || size == 0) {
     return swim_set_error(
         SWIM_ERR_INVALID,
         "Invalid NULL or zero size arguments to swim_udp_send");
@@ -151,7 +152,7 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
 #ifndef NDEBUG
   if (g_loss[u->port] > 0 && (rand() % 100) < g_loss[u->port])
     return 0;
-  if (g_drop_filter && g_drop_filter(u->port, dest->port))
+  if (g_drop_filter && g_drop_filter(u->port, port))
     return 0;
 #endif
 
@@ -166,13 +167,13 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
   struct sockaddr_in *sin = (struct sockaddr_in *)&ss;
   struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&ss;
 
-  if (inet_pton(AF_INET, dest->host, &sin->sin_addr) == 1) {
+  if (inet_pton(AF_INET, host, &sin->sin_addr) == 1) {
     sin->sin_family = AF_INET;
-    sin->sin_port = htons(dest->port);
+    sin->sin_port = htons(port);
     ss_len = sizeof(*sin);
-  } else if (inet_pton(AF_INET6, dest->host, &sin6->sin6_addr) == 1) {
+  } else if (inet_pton(AF_INET6, host, &sin6->sin6_addr) == 1) {
     sin6->sin6_family = AF_INET6;
-    sin6->sin6_port = htons(dest->port);
+    sin6->sin6_port = htons(port);
     ss_len = sizeof(*sin6);
   } else {
     struct addrinfo hints, *res = NULL;
@@ -181,9 +182,9 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
     hints.ai_socktype = SOCK_DGRAM;
 
     char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%u", dest->port);
+    snprintf(port_str, sizeof(port_str), "%u", port);
 
-    int s = getaddrinfo(dest->host, port_str, &hints, &res);
+    int s = getaddrinfo(host, port_str, &hints, &res);
     if (s != 0) {
       return swim_set_error(SWIM_ERR_INVALID,
                             "getaddrinfo failed for destination: %s",
@@ -216,10 +217,10 @@ int swim_udp_send(swim_udp_t *u, const swim_node_id_t *dest, const uint8_t *buf,
 }
 
 // Receive a packet (non-blocking). Returns bytes received, 0 if no data
-// (EWOULDBLOCK), -1 on error. Fills out_src with sender's host/port.
-int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
-                  size_t size) {
-  if (!u || !out_src || !buf || size == 0) {
+// (EWOULDBLOCK), -1 on error. Fills out_host/out_port with sender's address.
+int swim_udp_recv(swim_udp_t *u, char out_host[256], uint16_t *out_port,
+                  uint8_t *buf, size_t size) {
+  if (!u || !out_host || !out_port || !buf || size == 0) {
     return swim_set_error(
         SWIM_ERR_INVALID,
         "Invalid NULL or zero size arguments to swim_udp_recv");
@@ -237,25 +238,21 @@ int swim_udp_recv(swim_udp_t *u, swim_node_id_t *out_src, uint8_t *buf,
     return swim_set_error(SWIM_ERR_BAD_STATE, "recvfrom failed");
   }
 
-  // Format the source address numerically (no DNS / reverse lookup). cookie is
-  // cleared since the socket sender doesn't carry it.
+  // Format the source address numerically (no DNS / reverse lookup).
   const char *ok = NULL;
   if (src_addr.ss_family == AF_INET) {
     struct sockaddr_in *sin = (struct sockaddr_in *)&src_addr;
-    ok = inet_ntop(AF_INET, &sin->sin_addr, out_src->host,
-                   sizeof(out_src->host));
-    out_src->port = ntohs(sin->sin_port);
+    ok = inet_ntop(AF_INET, &sin->sin_addr, out_host, 256);
+    *out_port = ntohs(sin->sin_port);
   } else if (src_addr.ss_family == AF_INET6) {
     struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&src_addr;
-    ok = inet_ntop(AF_INET6, &sin6->sin6_addr, out_src->host,
-                   sizeof(out_src->host));
-    out_src->port = ntohs(sin6->sin6_port);
+    ok = inet_ntop(AF_INET6, &sin6->sin6_addr, out_host, 256);
+    *out_port = ntohs(sin6->sin6_port);
   }
   if (!ok) {
     return swim_set_error(SWIM_ERR_BAD_STATE,
                           "Failed to format source address");
   }
-  out_src->cookie[0] = '\0';
 
   return (int)n;
 }

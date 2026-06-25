@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 #pragma once
 #include <stdint.h>
 
@@ -45,10 +48,9 @@ swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */
 void swim_nodeid_destroy(void);
 
-/* Parse a nodeid index back into its host name, port, and optional first_pos.
- */
+/* Parse a nodeid index back into its host, port, and optional cookie. */
 int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
-                      int *first_pos);
+                      char cookie[64]);
 
 typedef struct {
   uint8_t bits[512]; /* 4096-bit bloom filter; k=4, n<128 → ~0.02% FPR */

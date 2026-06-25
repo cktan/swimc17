@@ -6,8 +6,8 @@
  *
  * Maintains the set of known peers and their SWIM states
  * (ALIVE, SUSPECT, DEAD). Nodes are kept in a dynamically-
- * grown array sorted by node ID, giving O(log n) lookup via
- * binary search and O(n) insertion via memmove.
+ * grown array sorted by node ID string, giving O(log n)
+ * lookup via binary search and O(n) insertion via memmove.
  *
  * State transitions follow SWIM+Suspicion precedence rules:
  * higher incarnation always wins; at equal incarnation,
@@ -32,16 +32,21 @@ struct swim_membership_t {
   int capacity;
 };
 
+static inline const char *id_str(swim_nodeid_idx_t id) {
+  return swim_nodeid_lookup(id);
+}
+
 // Internal binary search helper.
 // Returns true if found and sets *out_idx. If not found, returns false and sets
 // *out_idx to the insertion point.
-static bool find_node(const swim_membership_t *m, const swim_node_id_t *id,
+static bool find_node(const swim_membership_t *m, swim_nodeid_idx_t id,
                       int *out_idx) {
+  const char *key = id_str(id);
   int low = 0;
   int high = m->count - 1;
   while (low <= high) {
     int mid = low + (high - low) / 2;
-    int r = swim_node_id_compare(&m->members[mid].id, id);
+    int r = strcmp(id_str(m->members[mid].id), key);
     if (r == 0) {
       *out_idx = mid;
       return true;
@@ -79,15 +84,15 @@ void swim_membership_destroy(swim_membership_t *m) {
 }
 
 // Add a new node as ALIVE. Delegates to swim_membership_apply_event.
-int swim_membership_add(swim_membership_t *m, const swim_node_id_t *id,
+int swim_membership_add(swim_membership_t *m, swim_nodeid_idx_t id,
                         uint64_t incarnation) {
   return swim_membership_apply_event(m, SWIM_STATUS_ALIVE, id, incarnation, 0);
 }
 
 // Force a node to ALIVE, bypassing normal incarnation precedence rules.
-int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
+int swim_membership_set_alive(swim_membership_t *m, swim_nodeid_idx_t id,
                               uint64_t incarnation) {
-  if (!m || !id) {
+  if (!m || !nodeid_valid(id)) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid NULL argument to swim_membership_set_alive");
   }
@@ -104,8 +109,8 @@ int swim_membership_set_alive(swim_membership_t *m, const swim_node_id_t *id,
 
 // Look up a node by ID. Returns pointer to member entry, or NULL if not found.
 const swim_member_t *swim_membership_get(const swim_membership_t *m,
-                                         const swim_node_id_t *id) {
-  if (!m || !id)
+                                         swim_nodeid_idx_t id) {
+  if (!m || !nodeid_valid(id))
     return NULL;
   int idx;
   if (find_node(m, id, &idx)) {
@@ -118,9 +123,9 @@ const swim_member_t *swim_membership_get(const swim_membership_t *m,
 // precedence and incarnation rules. Returns 0 if state changed, 1 if ignored
 // (stale), -1 on error.
 int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
-                                const swim_node_id_t *id, uint64_t incarnation,
+                                swim_nodeid_idx_t id, uint64_t incarnation,
                                 uint64_t now_ms) {
-  if (!m || !id) {
+  if (!m || !nodeid_valid(id)) {
     return swim_set_error(
         SWIM_ERR_INVALID,
         "Invalid NULL argument to swim_membership_apply_event");
@@ -195,7 +200,7 @@ int swim_membership_apply_event(swim_membership_t *m, swim_status_t status,
           (m->count - idx) * sizeof(swim_member_t));
 
   swim_member_t *member = &m->members[idx];
-  member->id = *id;
+  member->id = id;
   member->status = SWIM_STATUS_ALIVE;
   member->incarnation = incarnation;
   member->dead_at = 0;
@@ -281,9 +286,8 @@ int swim_membership_peers(const swim_membership_t *m, bool include_dead,
     const swim_member_t *member = &m->members[i];
     if (!include_dead && member->status == SWIM_STATUS_DEAD)
       continue;
-    char tmp[384];
-    swim_node_id_format(&member->id, tmp, sizeof(tmp));
-    size_t len = strlen(tmp) + 1;
+    const char *s = swim_nodeid_lookup(member->id);
+    size_t len = strlen(s) + 1;
     // Allocate in 1 KiB chunks to amortize realloc overhead.
     char *b = realloc(buf, align1024(used + len));
     if (!b) {
@@ -292,7 +296,7 @@ int swim_membership_peers(const swim_membership_t *m, bool include_dead,
       return -1;
     }
     buf = b;
-    memcpy(buf + used, tmp, len);
+    memcpy(buf + used, s, len);
     used += len;
     n++;
   }

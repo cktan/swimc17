@@ -1,3 +1,6 @@
+/* Copyright (c) 2026, CK Tan.
+ * https://github.com/cktan/swimc17/blob/main/LICENSE
+ */
 #define _POSIX_C_SOURCE 200809L
 #include "swim_nodeid.h"
 
@@ -55,8 +58,13 @@ swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
   return SWIM_NODEID_NONE;
 }
 
-/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full. */
+/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full.
+ * Fast path: lock-free probe first; only locks when the entry is absent. */
 swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
+  swim_nodeid_idx_t existing = swim_nodeid_find(nodeid);
+  if (nodeid_valid(existing))
+    return existing;
+
   pthread_mutex_lock(&g_mu); /* acquire registration lock */
   if (atomic_load_explicit(&g_count, memory_order_relaxed) >=
       SWIM_NODEID_POOL_MAX) {
@@ -109,10 +117,9 @@ void swim_nodeid_destroy(void) {
   pthread_mutex_destroy(&g_mu); /* destroy pool mutex */
 }
 
-/* Parse a nodeid index back into its host name, port, and optional first_pos.
- */
+/* Parse a nodeid index back into its host, port, and optional cookie. */
 int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
-                      int *first_pos) {
+                      char cookie[64]) {
   const char *node_str = swim_nodeid_lookup(idx);
   if (!node_str)
     return -1;
@@ -128,17 +135,21 @@ int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
   memcpy(host, node_str, host_len);
   host[host_len] = '\0';
 
-  /* Scan for optional '/first_pos' suffix before parsing port.
+  /* Scan for optional '/cookie' suffix before parsing port.
      atoi stops at '/' so colon+1 works even with the suffix present. */
   const char *slash = strchr(colon + 1, '/');
   if (port)
     *port = atoi(colon + 1);
 
-  if (first_pos) {
-    if (slash)
-      *first_pos = atoi(slash + 1);
-    else
-      *first_pos = 0; /* absent suffix means position not recorded */
+  if (cookie) {
+    if (slash) {
+      size_t cookie_len = strlen(slash + 1);
+      if (cookie_len >= 64)
+        return -1; /* cookie too long for caller's buffer */
+      memcpy(cookie, slash + 1, cookie_len + 1);
+    } else {
+      cookie[0] = '\0';
+    }
   }
 
   return 0;

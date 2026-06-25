@@ -40,7 +40,7 @@ SWIM_EXTERN void swim_gossip_queue_destroy(swim_gossip_queue_t *q);
  */
 SWIM_EXTERN int swim_gossip_queue_enqueue(swim_gossip_queue_t *q,
                                           swim_status_t status,
-                                          const swim_node_id_t *id,
+                                          swim_nodeid_idx_t id,
                                           uint64_t incarnation,
                                           uint32_t multiplier);
 

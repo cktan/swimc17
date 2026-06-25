@@ -10,8 +10,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -g $(SAN) -I../../src -I$(HOME)/.local/incl
 LIBSWIMC17 := ../../src/libswimc17.a
 
 OBJ := swim_timer_test.o swim_membership_test.o swim_gossip_queue_test.o \
-       swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_feed_test.o \
-       swim_node_id_test.o
+       swim_codec_test.o swim_udp_test.o swim_protocol_test.o swim_feed_test.o
 
 all: $(DOCTEST_H) unit_test
 
@@ -37,9 +36,6 @@ swim_protocol_test.o: swim_protocol_test.cpp
 	$(CXX) $(CXXFLAGS) -c $<
 
 swim_feed_test.o: swim_feed_test.cpp
-	$(CXX) $(CXXFLAGS) -c $<
-
-swim_node_id_test.o: swim_node_id_test.cpp
 	$(CXX) $(CXXFLAGS) -c $<
 
 -include $(OBJ:%.o=%.d)

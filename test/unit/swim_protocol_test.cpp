@@ -6,6 +6,7 @@ extern "C" {
 #include "swim_errno.h"
 #include "swim_gossip_queue.h"
 #include "swim_internal.h"
+#include "swim_nodeid.h"
 #include "swim_udp.h"
 }
 
@@ -154,11 +155,8 @@ TEST_CASE("protocol: multi-node auto-discovery") {
 TEST_CASE("protocol: failure detection and liveness hint") {
   clear_obs();
 
-  swim_node_id_t self_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20201/c1") == 0);
-
-  swim_node_id_t mock_id;
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20202/mock") == 0);
+  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20202/mock");
+  REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
@@ -180,15 +178,15 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 
   // Construct authenticated PING packet from mock
   uint8_t msg_buf[256];
-  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
-                                 0, msg_buf, sizeof(msg_buf));
+  int msglen = swim_pack_message(SWIM_MSG_PING, mock_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
   REQUIRE(msglen > 0);
   uint8_t buf[256 + 12];
   int len = swim_pack_authed("failure_node", msg_buf, msglen, buf, sizeof(buf));
   REQUIRE(len == msglen + 12);
 
   // Send packet to node
-  int rc = swim_udp_send(mock_udp, &self_id, buf, len);
+  int rc = swim_udp_send(mock_udp, "127.0.0.1", 20201, buf, len);
   REQUIRE(rc == 0);
 
   // Wait a moment for packet processing
@@ -198,7 +196,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   swim_member_t members[5];
   int count = swim_members(inst, members, 5, false);
   REQUIRE(count == 1);
-  CHECK(swim_node_id_compare(&members[0].id, &mock_id) == 0);
+  CHECK(nodeid_eq(members[0].id, swim_nodeid_find("127.0.0.1:20202/mock")));
   CHECK(members[0].status == SWIM_STATUS_ALIVE);
 
   // Verify feed event
@@ -260,10 +258,10 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 // stops relaying. We flood the node with 32 ping_reqs for dead targets, let
 // them expire, then verify a fresh ping_req still produces a relay ping.
 TEST_CASE("protocol: relay table does not permanently fill") {
-  swim_node_id_t node_id, requester_id, target_id;
-  REQUIRE(swim_node_id_parse(&node_id, "127.0.0.1:20301/c1") == 0);
-  REQUIRE(swim_node_id_parse(&requester_id, "127.0.0.1:20302/r") == 0);
-  REQUIRE(swim_node_id_parse(&target_id, "127.0.0.1:20303/t") == 0);
+  swim_nodeid_idx_t requester_id = swim_nodeid_register("127.0.0.1:20302/r");
+  swim_nodeid_idx_t target_id = swim_nodeid_register("127.0.0.1:20303/t");
+  REQUIRE(nodeid_valid(requester_id));
+  REQUIRE(nodeid_valid(target_id));
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -279,24 +277,24 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   swim_udp_t *target = swim_udp_create("127.0.0.1", 20303);
   REQUIRE(target != nullptr);
 
-  auto send_ping_req = [&](const swim_node_id_t &tgt, uint32_t seq) {
+  auto send_ping_req = [&](swim_nodeid_idx_t tgt, uint32_t seq) {
     uint8_t msg_buf[256];
-    int msglen = swim_pack_message(SWIM_MSG_PING_REQ, &requester_id, seq, &tgt,
+    int msglen = swim_pack_message(SWIM_MSG_PING_REQ, requester_id, seq, tgt,
                                    nullptr, 0, msg_buf, sizeof(msg_buf));
     REQUIRE(msglen > 0);
     uint8_t buf[256 + 12];
     int len = swim_pack_authed("relay_node", msg_buf, msglen, buf, sizeof(buf));
     REQUIRE(len == msglen + 12);
-    REQUIRE(swim_udp_send(requester, &node_id, buf, len) == 0);
+    REQUIRE(swim_udp_send(requester, "127.0.0.1", 20301, buf, len) == 0);
   };
 
   // Flood the relay table (capacity 32) with ping_reqs for dead targets that
   // will never ack.
   for (uint32_t i = 0; i < 32; i++) {
-    swim_node_id_t dead;
     char s[64];
     snprintf(s, sizeof(s), "127.0.0.1:%u/d", 21000 + i);
-    REQUIRE(swim_node_id_parse(&dead, s) == 0);
+    swim_nodeid_idx_t dead = swim_nodeid_register(s);
+    REQUIRE(nodeid_valid(dead));
     send_ping_req(dead, 100 + i);
     usleep(5000);
   }
@@ -314,14 +312,15 @@ TEST_CASE("protocol: relay table does not permanently fill") {
 
   bool relay_ping_seen = false;
   for (int attempt = 0; attempt < 50 && !relay_ping_seen; attempt++) {
-    swim_node_id_t src;
+    char src_host[256];
+    uint16_t src_port;
     uint8_t buf[256 + 12];
-    int n = swim_udp_recv(target, &src, buf, sizeof(buf));
+    int n = swim_udp_recv(target, src_host, &src_port, buf, sizeof(buf));
     if (n > 12) {
       swim_message_t in;
       if (swim_unpack_message(buf + 12, n - 12, &in) == 0 &&
           in.type == SWIM_MSG_PING && in.seq == 9999 &&
-          swim_node_id_compare(&in.sender, &node_id) == 0) {
+          nodeid_eq(in.sender, swim_nodeid_find("127.0.0.1:20301/c1"))) {
         relay_ping_seen = true;
       }
     } else {
@@ -384,9 +383,8 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
 }
 
 TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
-  swim_node_id_t self_id, mock_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501/c1") == 0);
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502/mock") == 0);
+  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20502/mock");
+  REQUIRE(nodeid_valid(mock_id));
 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
@@ -406,36 +404,36 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
     swim_gossip_queue_t *test_q = swim_gossip_queue_create();
     for (int i = 0; i < 6; i++) {
       int idx = p * 6 + i;
-      swim_node_id_t ev_id;
-      char host[256];
-      sprintf(host,
-              "node-with-a-very-long-name-to-make-it-large-and-fill-up-the-"
-              "packet-budget-limit-domain-%d.com",
-              idx);
-      strcpy(ev_id.host, host);
-      ev_id.port = 30000 + idx;
-      sprintf(ev_id.cookie, "cookie-cookie-cookie-cookie-%d", idx);
-      swim_gossip_queue_enqueue(test_q, SWIM_STATUS_ALIVE, &ev_id, 100 + idx,
-                                1);
+      char ev_str[512];
+      snprintf(ev_str, sizeof(ev_str),
+               "node-with-a-very-long-name-to-make-it-large-and-fill-up-the-"
+               "packet-budget-limit-domain-%d.com:%d/cookie-cookie-cookie-"
+               "cookie-%d",
+               idx, 30000 + idx, idx);
+      swim_nodeid_idx_t ev_id = swim_nodeid_register(ev_str);
+      swim_gossip_queue_enqueue(test_q, SWIM_STATUS_ALIVE, ev_id, 100 + idx, 1);
     }
 
     uint8_t msg_buf[1024];
-    int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 100 + p, nullptr,
-                                   test_q, 1, msg_buf, sizeof(msg_buf));
+    int msglen =
+        swim_pack_message(SWIM_MSG_PING, mock_id, 100 + p, SWIM_NODEID_NONE,
+                          test_q, 1, msg_buf, sizeof(msg_buf));
     swim_gossip_queue_destroy(test_q);
     REQUIRE(msglen > 0);
     uint8_t send_buf[1024 + 12];
     int len = swim_pack_authed("m1_budget", msg_buf, msglen, send_buf,
                                sizeof(send_buf));
     REQUIRE(len == msglen + 12);
-    REQUIRE(swim_udp_send(mock_udp, &self_id, send_buf, len) == 0);
+    REQUIRE(swim_udp_send(mock_udp, "127.0.0.1", 20501, send_buf, len) == 0);
 
     // Wait and drain the reply ACK for this PING so they don't pile up.
     bool ack_seen = false;
     uint8_t recv_buf[2048];
     for (int attempt = 0; attempt < 50 && !ack_seen; attempt++) {
-      swim_node_id_t src;
-      int n = swim_udp_recv(mock_udp, &src, recv_buf, sizeof(recv_buf));
+      char _src_host[256];
+      uint16_t _src_port;
+      int n = swim_udp_recv(mock_udp, _src_host, &_src_port, recv_buf,
+                            sizeof(recv_buf));
       if (n > 12) {
         swim_message_t in;
         if (swim_unpack_message(recv_buf + 12, n - 12, &in) == 0 &&
@@ -466,20 +464,21 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_node_id_t sender;
-  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/sender_cookie") == 0);
-  swim_node_id_t peer;
-  REQUIRE(swim_node_id_parse(&peer, "127.0.0.1:8002/peer_cookie") == 0);
+  swim_nodeid_idx_t sender =
+      swim_nodeid_register("127.0.0.1:8001/sender_cookie");
+  swim_nodeid_idx_t peer = swim_nodeid_register("127.0.0.1:8002/peer_cookie");
+  REQUIRE(nodeid_valid(sender));
+  REQUIRE(nodeid_valid(peer));
 
   // Enqueue a gossip event
-  swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001/gossip_cookie") ==
-          0);
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
+  swim_nodeid_idx_t gossip_node =
+      swim_nodeid_register("127.0.0.1:9001/gossip_cookie");
+  REQUIRE(nodeid_valid(gossip_node));
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, gossip_node, 100,
                                     1) == 0);
 
   uint8_t buf[2048];
-  int bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
+  int bytes = swim_pack_message(SWIM_MSG_PING_REQ, sender, 12345, peer, q,
                                 swim_membership_count(m), buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
@@ -490,15 +489,15 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
 
   CHECK(msg.type == SWIM_MSG_PING_REQ);
   CHECK(msg.seq == 12345);
-  CHECK(swim_node_id_compare(&msg.sender, &sender) == 0);
-  CHECK(swim_node_id_compare(&msg.peer, &peer) == 0);
+  CHECK(nodeid_eq(msg.sender, sender));
+  CHECK(nodeid_eq(msg.peer, peer));
   CHECK(msg.gossip_count == 1);
   CHECK(msg.gossip[0].status == SWIM_STATUS_ALIVE);
   CHECK(msg.gossip[0].incarnation == 100);
-  CHECK(swim_node_id_compare(&msg.gossip[0].id, &gossip_node) == 0);
+  CHECK(nodeid_eq(msg.gossip[0].id, gossip_node));
 
   // Check error handling with buffer too small
-  int err_bytes = swim_pack_message(SWIM_MSG_PING_REQ, &sender, 12345, &peer, q,
+  int err_bytes = swim_pack_message(SWIM_MSG_PING_REQ, sender, 12345, peer, q,
                                     swim_membership_count(m), buf, 10);
   CHECK(err_bytes == -1);
 
@@ -512,19 +511,20 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_node_id_t sender;
-  REQUIRE(swim_node_id_parse(&sender, "127.0.0.1:8001/sender_cookie") == 0);
+  swim_nodeid_idx_t sender =
+      swim_nodeid_register("127.0.0.1:8001/sender_cookie");
+  REQUIRE(nodeid_valid(sender));
 
   // Enqueue a gossip event (should be ignored for LEAVE)
-  swim_node_id_t gossip_node;
-  REQUIRE(swim_node_id_parse(&gossip_node, "127.0.0.1:9001/gossip_cookie") ==
-          0);
-  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, &gossip_node, 100,
+  swim_nodeid_idx_t gossip_node =
+      swim_nodeid_register("127.0.0.1:9001/gossip_cookie");
+  REQUIRE(nodeid_valid(gossip_node));
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, gossip_node, 100,
                                     1) == 0);
 
   uint8_t buf[2048];
   // Pass NULL gossip queue
-  int bytes = swim_pack_message(SWIM_MSG_LEAVE, &sender, 12345, nullptr,
+  int bytes = swim_pack_message(SWIM_MSG_LEAVE, sender, 12345, SWIM_NODEID_NONE,
                                 nullptr, 0, buf, sizeof(buf));
   REQUIRE(bytes > 0);
 
@@ -535,7 +535,7 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
 
   CHECK(msg.type == SWIM_MSG_LEAVE);
   CHECK(msg.seq == 12345);
-  CHECK(swim_node_id_compare(&msg.sender, &sender) == 0);
+  CHECK(nodeid_eq(msg.sender, sender));
   CHECK(msg.gossip_count == 0);
 
   swim_membership_destroy(m);
@@ -547,13 +547,9 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
           "(L3)") {
   clear_obs();
 
-  swim_node_id_t self_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20501/c1") == 0);
-
   // Mock peer with a cookie containing non-alphanumeric bytes (space, '!').
-  swim_node_id_t mock_id;
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20502") == 0);
-  strcpy(mock_id.cookie, "a b!");
+  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20502/a b!");
+  REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
@@ -571,13 +567,13 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   REQUIRE(mock_udp != nullptr);
 
   uint8_t msg_buf[256];
-  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
-                                 0, msg_buf, sizeof(msg_buf));
+  int msglen = swim_pack_message(SWIM_MSG_PING, mock_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
   REQUIRE(msglen > 0);
   uint8_t buf[256 + 12];
   int len = swim_pack_authed("obs_node", msg_buf, msglen, buf, sizeof(buf));
   REQUIRE(len == msglen + 12);
-  REQUIRE(swim_udp_send(mock_udp, &self_id, buf, len) == 0);
+  REQUIRE(swim_udp_send(mock_udp, "127.0.0.1", 20501, buf, len) == 0);
 
   usleep(400000); // packet processing + a few ticks for the cluster-size emit
 
@@ -646,9 +642,8 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 TEST_CASE("protocol: feed delivers node-up event (L3)") {
   clear_obs();
 
-  swim_node_id_t self_id, mock_id;
-  REQUIRE(swim_node_id_parse(&self_id, "127.0.0.1:20601/c1") == 0);
-  REQUIRE(swim_node_id_parse(&mock_id, "127.0.0.1:20602/mock") == 0);
+  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20602/mock");
+  REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();
   REQUIRE(feed != nullptr);
@@ -666,14 +661,14 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   REQUIRE(mock_udp != nullptr);
 
   uint8_t msg_buf[256];
-  int msglen = swim_pack_message(SWIM_MSG_PING, &mock_id, 1, nullptr, nullptr,
-                                 0, msg_buf, sizeof(msg_buf));
+  int msglen = swim_pack_message(SWIM_MSG_PING, mock_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
   REQUIRE(msglen > 0);
   uint8_t auth_buf[256 + 12];
   int authlen = swim_pack_authed("feed_test", msg_buf, msglen, auth_buf,
                                  sizeof(auth_buf));
   REQUIRE(authlen == msglen + 12);
-  REQUIRE(swim_udp_send(mock_udp, &self_id, auth_buf, authlen) == 0);
+  REQUIRE(swim_udp_send(mock_udp, "127.0.0.1", 20601, auth_buf, authlen) == 0);
 
   usleep(300000);
 

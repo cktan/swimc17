@@ -6,6 +6,7 @@
 
 #include "swim.h"
 #include "swim_membership.h"
+#include <stddef.h>
 
 #define SWIM_MSG_PING 1
 #define SWIM_MSG_ACK 2
@@ -19,9 +20,9 @@
 typedef struct swim_message_t swim_message_t;
 struct swim_message_t {
   uint8_t type;
-  swim_node_id_t sender;
+  swim_nodeid_idx_t sender;
   uint32_t seq;
-  swim_node_id_t
+  swim_nodeid_idx_t
       peer; // target for ping_req, source for fwd_ack (ignored otherwise)
   uint8_t gossip_count;
   swim_member_t gossip[SWIM_MAX_EVENTS];
@@ -32,8 +33,8 @@ struct swim_gossip_queue_t;
 SWIM_EXTERN int swim_pack_membership(const swim_member_t *m, uint8_t *p,
                                      uint8_t *q);
 
-SWIM_EXTERN int swim_pack_message(uint8_t type, const swim_node_id_t *sender,
-                                  uint32_t seq, const swim_node_id_t *peer,
+SWIM_EXTERN int swim_pack_message(uint8_t type, swim_nodeid_idx_t sender,
+                                  uint32_t seq, swim_nodeid_idx_t peer,
                                   struct swim_gossip_queue_t *q,
                                   uint32_t active_members, uint8_t *buf,
                                   int bufsz);

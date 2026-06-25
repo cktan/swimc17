@@ -11,9 +11,10 @@ TEST_CASE("udp: non-blocking receive on empty socket returns 0") {
   swim_udp_t *u = swim_udp_create("127.0.0.1", 18001);
   REQUIRE(u != nullptr);
 
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t buf[256];
-  int rc = swim_udp_recv(u, &src, buf, sizeof(buf));
+  int rc = swim_udp_recv(u, src_host, &src_port, buf, sizeof(buf));
   CHECK(rc == 0); // EAGAIN / EWOULDBLOCK
 
   swim_udp_destroy(u);
@@ -25,20 +26,17 @@ TEST_CASE("udp: ipv4 loopback packet exchange") {
   REQUIRE(u1 != nullptr);
   REQUIRE(u2 != nullptr);
 
-  swim_node_id_t dest2;
-  REQUIRE(swim_node_id_parse(&dest2, "127.0.0.1:18003") == 0);
-
   const char *msg = "hello IPv4";
-  int rc = swim_udp_send(u1, &dest2, (const uint8_t *)msg, strlen(msg));
+  int rc =
+      swim_udp_send(u1, "127.0.0.1", 18003, (const uint8_t *)msg, strlen(msg));
   REQUIRE(rc == 0);
 
-  // Allow a tiny window or simply read since it's loopback and synchronous in
-  // OS
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t recv_buf[256];
   int n = 0;
   for (int i = 0; i < 100; i++) {
-    n = swim_udp_recv(u2, &src, recv_buf, sizeof(recv_buf));
+    n = swim_udp_recv(u2, src_host, &src_port, recv_buf, sizeof(recv_buf));
     if (n > 0)
       break;
   }
@@ -46,8 +44,8 @@ TEST_CASE("udp: ipv4 loopback packet exchange") {
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
   CHECK(strcmp((const char *)recv_buf, msg) == 0);
-  CHECK(strcmp(src.host, "127.0.0.1") == 0);
-  CHECK(src.port == 18002);
+  CHECK(strcmp(src_host, "127.0.0.1") == 0);
+  CHECK(src_port == 18002);
 
   swim_udp_destroy(u1);
   swim_udp_destroy(u2);
@@ -64,18 +62,16 @@ TEST_CASE("udp: ipv6 loopback packet exchange") {
   swim_udp_t *u2 = swim_udp_create("::1", 18005);
   REQUIRE(u2 != nullptr);
 
-  swim_node_id_t dest2;
-  REQUIRE(swim_node_id_parse(&dest2, "[::1]:18005") == 0);
-
   const char *msg = "hello IPv6";
-  int rc = swim_udp_send(u1, &dest2, (const uint8_t *)msg, strlen(msg));
+  int rc = swim_udp_send(u1, "::1", 18005, (const uint8_t *)msg, strlen(msg));
   REQUIRE(rc == 0);
 
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t recv_buf[256];
   int n = 0;
   for (int i = 0; i < 100; i++) {
-    n = swim_udp_recv(u2, &src, recv_buf, sizeof(recv_buf));
+    n = swim_udp_recv(u2, src_host, &src_port, recv_buf, sizeof(recv_buf));
     if (n > 0)
       break;
   }
@@ -83,8 +79,8 @@ TEST_CASE("udp: ipv6 loopback packet exchange") {
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
   CHECK(strcmp((const char *)recv_buf, msg) == 0);
-  CHECK(strcmp(src.host, "::1") == 0);
-  CHECK(src.port == 18004);
+  CHECK(strcmp(src_host, "::1") == 0);
+  CHECK(src_port == 18004);
 
   swim_udp_destroy(u1);
   swim_udp_destroy(u2);
@@ -116,18 +112,17 @@ TEST_CASE("udp: packet loss at 100% drops all packets") {
   REQUIRE(sender != nullptr);
   REQUIRE(recvr != nullptr);
 
-  swim_node_id_t dest;
-  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18009") == 0);
-
   // 100% loss on sender port — every outgoing packet is dropped
   swim_udp_set_packet_loss(18008, 100);
 
   const char *msg = "dropped";
-  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+  REQUIRE(swim_udp_send(sender, "127.0.0.1", 18009, (const uint8_t *)msg,
+                        strlen(msg)) == 0);
 
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t buf[64];
-  int n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+  int n = swim_udp_recv(recvr, src_host, &src_port, buf, sizeof(buf));
   CHECK(n == 0); // nothing received
 
   swim_clear_udp_loss();
@@ -141,20 +136,19 @@ TEST_CASE("udp: clear_udp_loss restores delivery") {
   REQUIRE(sender != nullptr);
   REQUIRE(recvr != nullptr);
 
-  swim_node_id_t dest;
-  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18011") == 0);
-
   swim_udp_set_packet_loss(18010, 100);
   swim_clear_udp_loss();
 
   const char *msg = "delivered";
-  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+  REQUIRE(swim_udp_send(sender, "127.0.0.1", 18011, (const uint8_t *)msg,
+                        strlen(msg)) == 0);
 
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t buf[64];
   int n = 0;
   for (int i = 0; i < 100 && n == 0; i++)
-    n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+    n = swim_udp_recv(recvr, src_host, &src_port, buf, sizeof(buf));
 
   CHECK(n == (int)strlen(msg));
 
@@ -170,26 +164,26 @@ TEST_CASE("udp: drop filter blocks packets") {
   REQUIRE(sender != nullptr);
   REQUIRE(recvr != nullptr);
 
-  swim_node_id_t dest;
-  REQUIRE(swim_node_id_parse(&dest, "127.0.0.1:18013") == 0);
-
   swim_udp_set_drop_filter(drop_all_filter);
 
   const char *msg = "blocked";
-  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+  REQUIRE(swim_udp_send(sender, "127.0.0.1", 18013, (const uint8_t *)msg,
+                        strlen(msg)) == 0);
 
-  swim_node_id_t src;
+  char src_host[256];
+  uint16_t src_port;
   uint8_t buf[64];
-  int n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+  int n = swim_udp_recv(recvr, src_host, &src_port, buf, sizeof(buf));
   CHECK(n == 0);
 
   // Remove the filter and verify delivery works again
   swim_udp_set_drop_filter(nullptr);
 
-  REQUIRE(swim_udp_send(sender, &dest, (const uint8_t *)msg, strlen(msg)) == 0);
+  REQUIRE(swim_udp_send(sender, "127.0.0.1", 18013, (const uint8_t *)msg,
+                        strlen(msg)) == 0);
   n = 0;
   for (int i = 0; i < 100 && n == 0; i++)
-    n = swim_udp_recv(recvr, &src, buf, sizeof(buf));
+    n = swim_udp_recv(recvr, src_host, &src_port, buf, sizeof(buf));
   CHECK(n == (int)strlen(msg));
 
   swim_udp_destroy(sender);

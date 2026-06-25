@@ -22,7 +22,9 @@
 #include "swim_gossip_queue.h"
 #include "swim_codec.h"
 #include "swim_errno.h"
+#include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct gossip_entry_t gossip_entry_t;
 struct gossip_entry_t {
@@ -67,8 +69,9 @@ static int compare_entries(const void *a, const void *b) {
     return (ea->transmit_count < eb->transmit_count) ? -1 : 1;
   }
 
-  // 3. Stable tie-breaker: Node ID comparison
-  return swim_node_id_compare(&ea->update.id, &eb->update.id);
+  // 3. Stable tie-breaker: lexicographic node ID string comparison
+  return strcmp(swim_nodeid_lookup(ea->update.id),
+                swim_nodeid_lookup(eb->update.id));
 }
 
 // Integer-only ceil(log2(n)) limit multiplier helper
@@ -106,9 +109,9 @@ void swim_gossip_queue_destroy(swim_gossip_queue_t *q) {
   free(q);
 }
 
-static int find_entry(const swim_gossip_queue_t *q, const swim_node_id_t *id) {
+static int find_entry(const swim_gossip_queue_t *q, swim_nodeid_idx_t id) {
   for (int i = 0; i < q->count; i++) {
-    if (swim_node_id_compare(&q->entries[i].update.id, id) == 0) {
+    if (nodeid_eq(q->entries[i].update.id, id)) {
       return i;
     }
   }
@@ -118,9 +121,9 @@ static int find_entry(const swim_gossip_queue_t *q, const swim_node_id_t *id) {
 // Enqueue a membership update. Supersession rules: higher incarnation wins; on
 // equal incarnations, higher priority (DEAD > SUSPECT > ALIVE) wins.
 int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
-                              const swim_node_id_t *id, uint64_t incarnation,
+                              swim_nodeid_idx_t id, uint64_t incarnation,
                               uint32_t multiplier) {
-  if (!q || !id || multiplier < 1) {
+  if (!q || !nodeid_valid(id) || multiplier < 1) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid arguments to swim_gossip_queue_enqueue");
   }
@@ -141,7 +144,7 @@ int swim_gossip_queue_enqueue(swim_gossip_queue_t *q, swim_status_t status,
     }
 
     gossip_entry_t *entry = &q->entries[q->count];
-    entry->update.id = *id;
+    entry->update.id = id;
     entry->update.status = status;
     entry->update.incarnation = incarnation;
     entry->update.dead_at = 0;
