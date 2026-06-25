@@ -12,7 +12,7 @@ extern "C" {
 #include <string>
 
 TEST_CASE("codec: ping/ack roundtrip without events") {
-  swim_nodeid_idx_t sender = swim_nodeid_register("127.0.0.1:8001/my_cookie");
+  swim_nodeid_idx_t sender = swim_nodeid_find("127.0.0.1:8001/my_cookie");
   REQUIRE(nodeid_valid(sender));
 
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
@@ -32,8 +32,8 @@ TEST_CASE("codec: ping/ack roundtrip without events") {
 }
 
 TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
-  swim_nodeid_idx_t sender = swim_nodeid_register("[::1]:9001/sender_cookie");
-  swim_nodeid_idx_t peer = swim_nodeid_register("[::1]:9002/target_cookie");
+  swim_nodeid_idx_t sender = swim_nodeid_find("[::1]:9001/sender_cookie");
+  swim_nodeid_idx_t peer = swim_nodeid_find("[::1]:9002/target_cookie");
   REQUIRE(nodeid_valid(sender));
   REQUIRE(nodeid_valid(peer));
 
@@ -55,15 +55,15 @@ TEST_CASE("codec: ping_req/fwd_ack roundtrip without events") {
 }
 
 TEST_CASE("codec: full message roundtrip with events") {
-  swim_nodeid_idx_t sender = swim_nodeid_register("192.168.0.10:80");
+  swim_nodeid_idx_t sender = swim_nodeid_find("192.168.0.10:80");
   REQUIRE(nodeid_valid(sender));
 
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("192.168.0.11:81/c1");
-  swim_nodeid_idx_t id2 = swim_nodeid_register("192.168.0.12:82/c2");
-  swim_nodeid_idx_t id3 = swim_nodeid_register("192.168.0.13:83/c3");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("192.168.0.11:81/c1");
+  swim_nodeid_idx_t id2 = swim_nodeid_find("192.168.0.12:82/c2");
+  swim_nodeid_idx_t id3 = swim_nodeid_find("192.168.0.13:83/c3");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
   REQUIRE(nodeid_valid(id3));
@@ -110,7 +110,7 @@ TEST_CASE("codec: full message roundtrip with events") {
 }
 
 TEST_CASE("codec: error validation and bounds checking") {
-  swim_nodeid_idx_t sender = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t sender = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(sender));
 
   uint8_t buf[256];
@@ -144,7 +144,7 @@ TEST_CASE("codec: error validation and bounds checking") {
 
 TEST_CASE("codec: swim_pack_membership") {
   swim_member_t member;
-  member.id = swim_nodeid_register("127.0.0.1:8001/my_cookie");
+  member.id = swim_nodeid_find("127.0.0.1:8001/my_cookie");
   REQUIRE(nodeid_valid(member.id));
   member.status = SWIM_STATUS_ALIVE;
   member.incarnation = 42;
@@ -174,8 +174,8 @@ TEST_CASE("codec: swim_pack_membership") {
 }
 
 TEST_CASE("codec: fwd_ack roundtrip") {
-  swim_nodeid_idx_t sender = swim_nodeid_register("10.0.0.1:7001/s");
-  swim_nodeid_idx_t peer = swim_nodeid_register("10.0.0.2:7002/p");
+  swim_nodeid_idx_t sender = swim_nodeid_find("10.0.0.1:7001/s");
+  swim_nodeid_idx_t peer = swim_nodeid_find("10.0.0.2:7002/p");
   REQUIRE(nodeid_valid(sender));
   REQUIRE(nodeid_valid(peer));
 

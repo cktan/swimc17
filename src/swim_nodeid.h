@@ -35,13 +35,10 @@ static inline int nodeid_eq(swim_nodeid_idx_t a, swim_nodeid_idx_t b) {
   return a.v == b.v;
 }
 
-/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full. */
-swim_nodeid_idx_t swim_nodeid_register(const char *nodeid);
-
 /* Return the nodeid string for idx, or NULL if idx is invalid. */
 const char *swim_nodeid_lookup(swim_nodeid_idx_t idx);
 
-/* Find existing nodeid without registering. Returns SWIM_NODEID_NONE if absent.
+/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if pool full.
  */
 swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
 

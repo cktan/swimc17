@@ -155,7 +155,7 @@ TEST_CASE("protocol: multi-node auto-discovery") {
 TEST_CASE("protocol: failure detection and liveness hint") {
   clear_obs();
 
-  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20202/mock");
+  swim_nodeid_idx_t mock_id = swim_nodeid_find("127.0.0.1:20202/mock");
   REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();
@@ -258,8 +258,8 @@ TEST_CASE("protocol: failure detection and liveness hint") {
 // stops relaying. We flood the node with 32 ping_reqs for dead targets, let
 // them expire, then verify a fresh ping_req still produces a relay ping.
 TEST_CASE("protocol: relay table does not permanently fill") {
-  swim_nodeid_idx_t requester_id = swim_nodeid_register("127.0.0.1:20302/r");
-  swim_nodeid_idx_t target_id = swim_nodeid_register("127.0.0.1:20303/t");
+  swim_nodeid_idx_t requester_id = swim_nodeid_find("127.0.0.1:20302/r");
+  swim_nodeid_idx_t target_id = swim_nodeid_find("127.0.0.1:20303/t");
   REQUIRE(nodeid_valid(requester_id));
   REQUIRE(nodeid_valid(target_id));
 
@@ -293,7 +293,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   for (uint32_t i = 0; i < 32; i++) {
     char s[64];
     snprintf(s, sizeof(s), "127.0.0.1:%u/d", 21000 + i);
-    swim_nodeid_idx_t dead = swim_nodeid_register(s);
+    swim_nodeid_idx_t dead = swim_nodeid_find(s);
     REQUIRE(nodeid_valid(dead));
     send_ping_req(dead, 100 + i);
     usleep(5000);
@@ -383,7 +383,7 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
 }
 
 TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
-  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20502/mock");
+  swim_nodeid_idx_t mock_id = swim_nodeid_find("127.0.0.1:20502/mock");
   REQUIRE(nodeid_valid(mock_id));
 
   swim_start_opts_t opts;
@@ -410,7 +410,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
                "packet-budget-limit-domain-%d.com:%d/cookie-cookie-cookie-"
                "cookie-%d",
                idx, 30000 + idx, idx);
-      swim_nodeid_idx_t ev_id = swim_nodeid_register(ev_str);
+      swim_nodeid_idx_t ev_id = swim_nodeid_find(ev_str);
       swim_gossip_queue_enqueue(test_q, SWIM_STATUS_ALIVE, ev_id, 100 + idx, 1);
     }
 
@@ -464,15 +464,14 @@ TEST_CASE("protocol: pack and unpack message helper roundtrip") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t sender =
-      swim_nodeid_register("127.0.0.1:8001/sender_cookie");
-  swim_nodeid_idx_t peer = swim_nodeid_register("127.0.0.1:8002/peer_cookie");
+  swim_nodeid_idx_t sender = swim_nodeid_find("127.0.0.1:8001/sender_cookie");
+  swim_nodeid_idx_t peer = swim_nodeid_find("127.0.0.1:8002/peer_cookie");
   REQUIRE(nodeid_valid(sender));
   REQUIRE(nodeid_valid(peer));
 
   // Enqueue a gossip event
   swim_nodeid_idx_t gossip_node =
-      swim_nodeid_register("127.0.0.1:9001/gossip_cookie");
+      swim_nodeid_find("127.0.0.1:9001/gossip_cookie");
   REQUIRE(nodeid_valid(gossip_node));
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, gossip_node, 100,
                                     1) == 0);
@@ -511,13 +510,12 @@ TEST_CASE("protocol: pack and unpack leave message roundtrip") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t sender =
-      swim_nodeid_register("127.0.0.1:8001/sender_cookie");
+  swim_nodeid_idx_t sender = swim_nodeid_find("127.0.0.1:8001/sender_cookie");
   REQUIRE(nodeid_valid(sender));
 
   // Enqueue a gossip event (should be ignored for LEAVE)
   swim_nodeid_idx_t gossip_node =
-      swim_nodeid_register("127.0.0.1:9001/gossip_cookie");
+      swim_nodeid_find("127.0.0.1:9001/gossip_cookie");
   REQUIRE(nodeid_valid(gossip_node));
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, gossip_node, 100,
                                     1) == 0);
@@ -548,7 +546,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   clear_obs();
 
   // Mock peer with a cookie containing non-alphanumeric bytes (space, '!').
-  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20502/a b!");
+  swim_nodeid_idx_t mock_id = swim_nodeid_find("127.0.0.1:20502/a b!");
   REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();
@@ -642,7 +640,7 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
 TEST_CASE("protocol: feed delivers node-up event (L3)") {
   clear_obs();
 
-  swim_nodeid_idx_t mock_id = swim_nodeid_register("127.0.0.1:20602/mock");
+  swim_nodeid_idx_t mock_id = swim_nodeid_find("127.0.0.1:20602/mock");
   REQUIRE(nodeid_valid(mock_id));
 
   swim_feed_t *feed = swim_feed_create();

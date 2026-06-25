@@ -20,7 +20,7 @@ TEST_CASE("gossip_queue: basic enqueue and supersession") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001/cookie1");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001/cookie1");
   REQUIRE(nodeid_valid(id1));
 
   // 1. Enqueue brand new event (ALIVE, inc 10)
@@ -77,9 +77,9 @@ TEST_CASE("gossip_queue: priority sorting order") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t idA = swim_nodeid_register("127.0.0.1:8001"); // ALIVE
-  swim_nodeid_idx_t idB = swim_nodeid_register("127.0.0.1:8002"); // SUSPECT
-  swim_nodeid_idx_t idC = swim_nodeid_register("127.0.0.1:8003"); // DEAD
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001"); // ALIVE
+  swim_nodeid_idx_t idB = swim_nodeid_find("127.0.0.1:8002"); // SUSPECT
+  swim_nodeid_idx_t idC = swim_nodeid_find("127.0.0.1:8003"); // DEAD
   REQUIRE(nodeid_valid(idA));
   REQUIRE(nodeid_valid(idB));
   REQUIRE(nodeid_valid(idC));
@@ -107,8 +107,8 @@ TEST_CASE("gossip_queue: transmit count priority tie-breaker") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t idA = swim_nodeid_register("127.0.0.1:8001");
-  swim_nodeid_idx_t idB = swim_nodeid_register("127.0.0.1:8002");
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001");
+  swim_nodeid_idx_t idB = swim_nodeid_find("127.0.0.1:8002");
   REQUIRE(nodeid_valid(idA));
   REQUIRE(nodeid_valid(idB));
 
@@ -150,9 +150,9 @@ TEST_CASE("gossip_queue: event size limit packing budget") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t idA = swim_nodeid_register("127.0.0.1:8001"); // 25 bytes
-  swim_nodeid_idx_t idB = swim_nodeid_register("127.0.0.1:8002"); // 25 bytes
-  swim_nodeid_idx_t idC = swim_nodeid_register("127.0.0.1:8003"); // 25 bytes
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001"); // 25 bytes
+  swim_nodeid_idx_t idB = swim_nodeid_find("127.0.0.1:8002"); // 25 bytes
+  swim_nodeid_idx_t idC = swim_nodeid_find("127.0.0.1:8003"); // 25 bytes
   REQUIRE(nodeid_valid(idA));
   REQUIRE(nodeid_valid(idB));
   REQUIRE(nodeid_valid(idC));
@@ -182,7 +182,7 @@ TEST_CASE("gossip_queue: transmit limit pruning") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t idA = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(idA));
 
   // Cluster size N = 3.
@@ -210,7 +210,7 @@ TEST_CASE("gossip_queue: transmit limit pruning with multiplier") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t idA = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(idA));
 
   // Cluster size N = 3 -> limit = 6.
@@ -245,7 +245,7 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack basic encoding") {
   CHECK(rc == 0);
 
   // 2. Add a member
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001/cookie1");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001/cookie1");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, id1, 42, 1) == 0);
 
@@ -293,9 +293,9 @@ TEST_CASE("gossip_queue: swim_gossip_queue_pack budget limits") {
   REQUIRE(q != nullptr);
 
   swim_nodeid_idx_t id1 =
-      swim_nodeid_register("127.0.0.1:8001/cookie1"); // 2+22+1+8 = 33 bytes
+      swim_nodeid_find("127.0.0.1:8001/cookie1"); // 2+22+1+8 = 33 bytes
   swim_nodeid_idx_t id2 =
-      swim_nodeid_register("127.0.0.1:8002/cookie2"); // 33 bytes
+      swim_nodeid_find("127.0.0.1:8002/cookie2"); // 33 bytes
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
 
@@ -317,7 +317,7 @@ TEST_CASE("gossip_queue: invalid args return error") {
   swim_gossip_queue_t *q = swim_gossip_queue_create();
   REQUIRE(q != nullptr);
 
-  swim_nodeid_idx_t id = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t id = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(id));
 
   char buf[64];

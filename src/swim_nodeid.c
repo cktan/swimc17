@@ -44,8 +44,8 @@ static inline uint16_t next_slot(uint16_t slot) {
   return (uint16_t)((slot + 1) & (SWIM_NODEID_TABLE_SIZE - 1));
 }
 
-/* Find existing nodeid without registering; lock-free. */
-swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
+/* Lock-free probe; returns SWIM_NODEID_NONE if absent. */
+static swim_nodeid_idx_t nodeid_probe(const char *nodeid) {
   uint16_t slot = hash_slot(nodeid_hash(nodeid));
   for (uint16_t i = 0; i < SWIM_NODEID_TABLE_SIZE; i++) {
     char *p = atomic_load_explicit(&g_table[slot], memory_order_acquire);
@@ -60,8 +60,8 @@ swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
 
 /* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full.
  * Fast path: lock-free probe first; only locks when the entry is absent. */
-swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
-  swim_nodeid_idx_t existing = swim_nodeid_find(nodeid);
+static swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
+  swim_nodeid_idx_t existing = nodeid_probe(nodeid);
   if (nodeid_valid(existing))
     return existing;
 
@@ -93,6 +93,12 @@ swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
 none:
   pthread_mutex_unlock(&g_mu); /* release registration lock */
   return SWIM_NODEID_NONE;
+}
+
+/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if pool full.
+ */
+swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
+  return swim_nodeid_register(nodeid);
 }
 
 /* Return nodeid string for idx; lock-free. */

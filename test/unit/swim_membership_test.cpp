@@ -21,7 +21,7 @@ TEST_CASE("membership: add and get node") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001/cookie1");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001/cookie1");
   REQUIRE(nodeid_valid(id1));
 
   // Get unknown node
@@ -48,7 +48,7 @@ TEST_CASE("membership: set_alive forces ALIVE state") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("[::1]:8001/cookie1");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("[::1]:8001/cookie1");
   REQUIRE(nodeid_valid(id1));
 
   // Force set on empty membership
@@ -99,7 +99,7 @@ TEST_CASE("membership: event precedence rules for unknown nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(id1));
 
   // Unknown nodes only accept ALIVE events
@@ -122,7 +122,7 @@ TEST_CASE("membership: event precedence rules for ALIVE nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(id1));
 
   // Add as ALIVE, incarnation 10
@@ -185,7 +185,7 @@ TEST_CASE("membership: event precedence rules for SUSPECT nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(id1));
 
   // Add and make SUSPECT at incarnation 10
@@ -214,7 +214,7 @@ TEST_CASE("membership: event precedence rules for DEAD nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
   REQUIRE(nodeid_valid(id1));
 
   // Add and make DEAD at incarnation 10
@@ -257,9 +257,9 @@ TEST_CASE("membership: garbage collection") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
-  swim_nodeid_idx_t id2 = swim_nodeid_register("127.0.0.1:8002");
-  swim_nodeid_idx_t id3 = swim_nodeid_register("127.0.0.1:8003");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
+  swim_nodeid_idx_t id2 = swim_nodeid_find("127.0.0.1:8002");
+  swim_nodeid_idx_t id3 = swim_nodeid_find("127.0.0.1:8003");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
   REQUIRE(nodeid_valid(id3));
@@ -311,8 +311,8 @@ TEST_CASE("membership: peers — alive-only members") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001/ck1");
-  swim_nodeid_idx_t id2 = swim_nodeid_register("127.0.0.1:8002/ck2");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001/ck1");
+  swim_nodeid_idx_t id2 = swim_nodeid_find("127.0.0.1:8002/ck2");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
 
@@ -338,9 +338,9 @@ TEST_CASE("membership: peers — include_dead=false excludes dead nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
-  swim_nodeid_idx_t id2 = swim_nodeid_register("127.0.0.1:8002");
-  swim_nodeid_idx_t id3 = swim_nodeid_register("127.0.0.1:8003");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
+  swim_nodeid_idx_t id2 = swim_nodeid_find("127.0.0.1:8002");
+  swim_nodeid_idx_t id3 = swim_nodeid_find("127.0.0.1:8003");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
   REQUIRE(nodeid_valid(id3));
@@ -368,8 +368,8 @@ TEST_CASE("membership: peers — include_dead=true includes dead nodes") {
   swim_membership_t *m = swim_membership_create();
   REQUIRE(m != nullptr);
 
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8001");
-  swim_nodeid_idx_t id2 = swim_nodeid_register("127.0.0.1:8002");
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8001");
+  swim_nodeid_idx_t id2 = swim_nodeid_find("127.0.0.1:8002");
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
 
@@ -407,9 +407,9 @@ TEST_CASE("membership: list and count members") {
   REQUIRE(m != nullptr);
 
   // Nodes inserted out of lexicographic order; membership keeps them sorted
-  swim_nodeid_idx_t id1 = swim_nodeid_register("127.0.0.1:8003"); // Port 8003
-  swim_nodeid_idx_t id2 = swim_nodeid_register("127.0.0.1:8001"); // Port 8001
-  swim_nodeid_idx_t id3 = swim_nodeid_register("127.0.0.1:8002"); // Port 8002
+  swim_nodeid_idx_t id1 = swim_nodeid_find("127.0.0.1:8003"); // Port 8003
+  swim_nodeid_idx_t id2 = swim_nodeid_find("127.0.0.1:8001"); // Port 8001
+  swim_nodeid_idx_t id3 = swim_nodeid_find("127.0.0.1:8002"); // Port 8002
   REQUIRE(nodeid_valid(id1));
   REQUIRE(nodeid_valid(id2));
   REQUIRE(nodeid_valid(id3));

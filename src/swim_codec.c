@@ -159,7 +159,7 @@ static int unpack_membership(swim_member_t *m, const uint8_t *p,
   if (n < 0)
     return -1;
   p += n;
-  m->id = swim_nodeid_register(id_str);
+  m->id = swim_nodeid_find(id_str);
   if (!nodeid_valid(m->id))
     return -1;
 
@@ -276,7 +276,7 @@ int swim_unpack_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
     return swim_set_error(SWIM_ERR_INVALID, "Failed to decode sender node ID");
   }
   p += n;
-  msg->sender = swim_nodeid_register(id_str);
+  msg->sender = swim_nodeid_find(id_str);
   if (!nodeid_valid(msg->sender)) {
     return swim_set_error(SWIM_ERR_INVALID, "Failed to decode sender node ID");
   }
@@ -287,7 +287,7 @@ int swim_unpack_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
       return swim_set_error(SWIM_ERR_INVALID, "Failed to decode peer node ID");
     }
     p += n;
-    msg->peer = swim_nodeid_register(id_str);
+    msg->peer = swim_nodeid_find(id_str);
     if (!nodeid_valid(msg->peer)) {
       return swim_set_error(SWIM_ERR_INVALID, "Failed to decode peer node ID");
     }

@@ -951,7 +951,7 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
       snprintf(self_str, sizeof(self_str), "%s:%u/%s", host, port, cookie);
     else
       snprintf(self_str, sizeof(self_str), "%s:%u", host, port);
-    inst->self_id = swim_nodeid_register(self_str);
+    inst->self_id = swim_nodeid_find(self_str);
     if (!nodeid_valid(inst->self_id)) {
       swim_set_error(SWIM_ERR_INVALID, "Failed to register self node ID");
       goto error_cleanup;
@@ -975,7 +975,7 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
         goto error_cleanup;
       }
       for (int i = 0; i < n; i++) {
-        inst->seeds[i] = swim_nodeid_register(opts->seeds[i]);
+        inst->seeds[i] = swim_nodeid_find(opts->seeds[i]);
         if (!nodeid_valid(inst->seeds[i])) {
           swim_set_error(SWIM_ERR_INVALID, "Failed to register seed node ID");
           free(inst->seeds);
@@ -1143,7 +1143,7 @@ int swim_hint_alive(swim_t *inst, const char *peer) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Invalid NULL peer in swim_hint_alive");
   }
-  swim_nodeid_idx_t peer_idx = swim_nodeid_register(peer);
+  swim_nodeid_idx_t peer_idx = swim_nodeid_find(peer);
   if (!nodeid_valid(peer_idx))
     return swim_set_error(SWIM_ERR_INVALID, "Invalid peer node ID");
 
