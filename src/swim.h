@@ -144,10 +144,27 @@ SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
 
 // --- Instance lifecycle ---
 
+/*
+ * Node identity and groups
+ *
+ * Each node is identified by the string
+ * "host:port/cookie". The cookie is arbitrary text —
+ * it carries no protocol meaning beyond forming part
+ * of the identity. Two nodes on the same host:port
+ * but with different cookies are distinct nodes.
+ *
+ * The `name` field in swim_start_opts_t is a group
+ * name, not an instance name. Only nodes that share
+ * the same group name exchange messages with each
+ * other. Packets from nodes with a different group
+ * name are silently dropped.
+ */
+
 typedef struct swim_t swim_t;
 
 typedef struct {
-  const char *name; // Unique instance name (mandatory)
+  const char *name; // Group name — only nodes sharing this name exchange
+                    // messages (mandatory)
   const char *
       *seeds; // NULL-terminated list of seed strings ("host:port/cookie")
 

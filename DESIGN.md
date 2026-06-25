@@ -57,14 +57,27 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
 While a node is reachable via its network
 location (`host` and `port`), the protocol
 incorporates a `cookie` into the node's strict
-identity (`host:port/cookie`). This cookie allows
-the application to distinguish between different
-instances, sessions, or restarts of a node running
-on the exact same host and port.
+identity (`host:port/cookie`). The cookie is
+arbitrary text — it carries no protocol meaning
+beyond forming part of the identity. Two nodes on
+the same `host:port` but with different cookies are
+treated as distinct nodes by the protocol.
 
 The cookie is optionally specified by the caller
 during node startup or when defining seeds. If not
 explicitly provided, it defaults to `""`.
+
+### Group Name
+
+`swim_start_opts_t.name` is a group name. Only
+nodes that share the same group name can exchange
+messages with each other; packets from nodes with a
+different group name are silently dropped. This is
+the mechanism that partitions independent clusters
+sharing the same network.
+
+The group name also serves as the SipHash-2-4 key
+for packet authentication (see §6).
 
 ---
 
@@ -141,10 +154,12 @@ prepended before the message payload:
   `tval_be4 || message_bytes`, keyed on the first
   16 bytes of `name` (zero-padded). Covers the full
   message body, so any mutation is detected.
-- **Shared secret** — `swim_start_opts_t.name` is
-  the cluster secret. Every node in the cluster must
-  use the same value. Packets from nodes with a
-  different (or absent) secret are silently dropped.
+- **Shared secret** — the group name
+  (`swim_start_opts_t.name`, see §3) doubles as the
+  SipHash key. Every node in the cluster must use
+  the same value. Packets from nodes with a
+  different (or absent) group name are silently
+  dropped.
 
 ### What this provides
 
@@ -332,10 +347,10 @@ opts.seeds = seeds;
 swim_start(&opts);
 ```
 
-`opts.name` is the **shared cluster secret** (see §6).
-Every node in the cluster must supply the same value.
-Packets from nodes with a different name are silently
-dropped.
+`opts.name` is the **group name** (see §3). Only nodes
+sharing the same group name exchange messages. It also
+serves as the SipHash key (see §6); every node in the
+cluster must supply the same value.
 
 Or zero-initialize and set all fields manually:
 

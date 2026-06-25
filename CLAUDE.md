@@ -1,4 +1,6 @@
 
+**Before starting any work on this project, read `DESIGN.md`.**
+
 ## Guidelines
 
 ### 1. General guidelines
