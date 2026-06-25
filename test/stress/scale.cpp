@@ -44,7 +44,8 @@ static void reset_cluster(swim_start_opts_t opts, swim_feed_t *feed = nullptr) {
     opts.name = "scale_test";
     opts.seeds = seed_list;
     opts.feed = (i == 1) ? feed : nullptr;
-    g_nodes[i] = swim_start("127.0.0.1", (uint16_t)(5000 + i), "", &opts);
+    std::string nodeid = "127.0.0.1:" + std::to_string(5000 + i);
+    g_nodes[i] = swim_start(nodeid.c_str(), &opts);
     REQUIRE(g_nodes[i] != nullptr);
   }
 }
@@ -170,7 +171,7 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
     swim_start_opts_t opts = make_opts();
     opts.name = "scale_test";
     opts.seeds = seed_ptrs.data();
-    g_nodes[14] = swim_start("127.0.0.1", 5014, "", &opts);
+    g_nodes[14] = swim_start("127.0.0.1:5014", &opts);
     REQUIRE(g_nodes[14] != nullptr);
   }
   CHECK(drain_feed_for(feed, "up", ":5014", 10000));
@@ -326,7 +327,8 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
     swim_start_opts_t opts = make_opts();
     opts.name = "scale_test";
     opts.seeds = restart_seeds;
-    g_nodes[i] = swim_start("127.0.0.1", (uint16_t)(5000 + i), "", &opts);
+    std::string nodeid = "127.0.0.1:" + std::to_string(5000 + i);
+    g_nodes[i] = swim_start(nodeid.c_str(), &opts);
     REQUIRE(g_nodes[i] != nullptr);
   }
 
@@ -366,12 +368,12 @@ TEST_CASE("scale: half-cluster immediate restart") {
   // will accept the new ALIVE messages over the old dead entries.
   const char *restart_seeds[] = {"127.0.0.1:5033/", nullptr};
   for (int i = 1; i <= 32; i++) {
-    std::string cookie = std::to_string(i);
+    std::string nodeid =
+        "127.0.0.1:" + std::to_string(5000 + i) + "/" + std::to_string(i);
     swim_start_opts_t opts = make_opts();
     opts.name = "scale_test";
     opts.seeds = restart_seeds;
-    g_nodes[i] =
-        swim_start("127.0.0.1", (uint16_t)(5000 + i), cookie.c_str(), &opts);
+    g_nodes[i] = swim_start(nodeid.c_str(), &opts);
     REQUIRE(g_nodes[i] != nullptr);
   }
 
@@ -414,7 +416,8 @@ TEST_CASE("scale: half-cluster staged revival") {
     swim_start_opts_t opts = make_opts();
     opts.name = "scale_test";
     opts.seeds = restart_seeds;
-    g_nodes[i] = swim_start("127.0.0.1", (uint16_t)(5000 + i), "", &opts);
+    std::string nodeid = "127.0.0.1:" + std::to_string(5000 + i);
+    g_nodes[i] = swim_start(nodeid.c_str(), &opts);
     REQUIRE(g_nodes[i] != nullptr);
   }
 
@@ -457,7 +460,8 @@ TEST_CASE("scale: rolling upgrade simulation") {
       swim_start_opts_t opts = make_opts();
       opts.name = "scale_test";
       opts.seeds = restart_seeds;
-      g_nodes[i] = swim_start("127.0.0.1", (uint16_t)(5000 + i), "", &opts);
+      std::string nodeid = "127.0.0.1:" + std::to_string(5000 + i);
+      g_nodes[i] = swim_start(nodeid.c_str(), &opts);
       REQUIRE(g_nodes[i] != nullptr);
     }
 

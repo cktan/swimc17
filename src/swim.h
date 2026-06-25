@@ -227,7 +227,7 @@ typedef struct {
  *
  *   swim_start_opts_t opts = swim_opts_for(50, 15000);
  *   opts.name = "my_cluster";
- *   swim_start("10.0.0.1", 7771, "", &opts);
+ *   swim_start("10.0.0.1:7771", &opts);
  *
  * @param n          Expected cluster size (number of nodes).
  * @param detect_ms  Worst-case failure-detection latency (ms).
@@ -236,19 +236,20 @@ typedef struct {
 SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
 
 /**
- * Initialize and start a named SWIM protocol instance. Spawns a
+ * Initialize and start a SWIM protocol instance. Spawns a
  * background thread that monitors the UDP port and runs the SWIM
  * loop; the thread exits when swim_leave() is called. Returns once
  * the thread is running.
  *
- * @param host   Hostname or IP address to bind and advertise.
- * @param port   UDP port to bind and advertise.
- * @param cookie Optional instance cookie (may be "" or NULL).
- * @param opts   Startup options (opts->name is mandatory).
+ * @param mynodeid This node's identity: "host:port" or
+ *                 "host:port/cookie". The host and port are used
+ *                 to bind and advertise; cookie is arbitrary text
+ *                 that distinguishes nodes sharing the same
+ *                 host:port.
+ * @param opts     Startup options (opts->name is mandatory).
  * @return Opaque instance handle on success, NULL on failure.
  */
-SWIM_EXTERN swim_t *swim_start(const char *host, uint16_t port,
-                               const char *cookie,
+SWIM_EXTERN swim_t *swim_start(const char *mynodeid,
                                const swim_start_opts_t *opts);
 
 /**

@@ -74,7 +74,7 @@ TEST_CASE("protocol: single node startup and leave") {
   memset(&opts, 0, sizeof(opts));
   opts.name = "single_node";
 
-  swim_t *inst = swim_start("127.0.0.1", 20001, "", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20001", &opts);
   REQUIRE(inst != nullptr);
 
   // Query members (should be empty because self is not in the list)
@@ -119,9 +119,9 @@ TEST_CASE("protocol: multi-node auto-discovery") {
   opts3.ping_timeout_ms = 100;
   opts3.seed_retry_interval_ms = 400;
 
-  swim_t *n1 = swim_start("127.0.0.1", 20101, "c1", &opts1);
-  swim_t *n2 = swim_start("127.0.0.1", 20102, "c2", &opts2);
-  swim_t *n3 = swim_start("127.0.0.1", 20103, "c3", &opts3);
+  swim_t *n1 = swim_start("127.0.0.1:20101/c1", &opts1);
+  swim_t *n2 = swim_start("127.0.0.1:20102/c2", &opts2);
+  swim_t *n3 = swim_start("127.0.0.1:20103/c3", &opts3);
   REQUIRE(n1 != nullptr);
   REQUIRE(n2 != nullptr);
   REQUIRE(n3 != nullptr);
@@ -169,7 +169,7 @@ TEST_CASE("protocol: failure detection and liveness hint") {
   opts.suspicion_timeout_ms = 600;
   opts.feed = feed;
 
-  swim_t *inst = swim_start("127.0.0.1", 20201, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20201/c1", &opts);
   REQUIRE(inst != nullptr);
 
   // Simulate a join from a mock node by sending a raw PING packet to opts.port
@@ -269,7 +269,7 @@ TEST_CASE("protocol: relay table does not permanently fill") {
   opts.protocol_period_ms = 1000; // keep the node's own probing out of the way
   opts.ping_timeout_ms = 100;     // relay entries expire after ~1 tick
 
-  swim_t *inst = swim_start("127.0.0.1", 20301, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20301/c1", &opts);
   REQUIRE(inst != nullptr);
 
   swim_udp_t *requester = swim_udp_create("127.0.0.1", 20302);
@@ -358,7 +358,7 @@ TEST_CASE("protocol: concurrent swim_hint_alive and swim_leave are memory-safe "
   opts.protocol_period_ms = 100;
   opts.ping_timeout_ms = 50;
 
-  swim_t *inst = swim_start("127.0.0.1", 20403, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20403/c1", &opts);
   REQUIRE(inst != nullptr);
 
   RaceArg arg;
@@ -390,7 +390,7 @@ TEST_CASE("protocol: gossip byte budget does not exceed MTU (M1)") {
   opts.protocol_period_ms = 10000; // slow
   opts.ping_timeout_ms = 1000;
 
-  swim_t *inst = swim_start("127.0.0.1", 20501, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20501/c1", &opts);
   REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
@@ -553,7 +553,7 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   opts.protocol_period_ms = 200;
   opts.feed = feed;
 
-  swim_t *inst = swim_start("127.0.0.1", 20501, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20501/c1", &opts);
   REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20502);
@@ -613,8 +613,8 @@ TEST_CASE("protocol: observer reports direct ping RTT (L3)") {
   b.ping_timeout_ms = 100;
   b.seed_retry_interval_ms = 200;
 
-  swim_t *na = swim_start("127.0.0.1", 20511, "a1", &a);
-  swim_t *nb = swim_start("127.0.0.1", 20512, "b1", &b);
+  swim_t *na = swim_start("127.0.0.1:20511/a1", &a);
+  swim_t *nb = swim_start("127.0.0.1:20512/b1", &b);
   REQUIRE(na != nullptr);
   REQUIRE(nb != nullptr);
 
@@ -647,7 +647,7 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   opts.protocol_period_ms = 200;
   opts.feed = feed;
 
-  swim_t *inst = swim_start("127.0.0.1", 20601, "c1", &opts);
+  swim_t *inst = swim_start("127.0.0.1:20601/c1", &opts);
   REQUIRE(inst != nullptr);
 
   swim_udp_t *mock_udp = swim_udp_create("127.0.0.1", 20602);

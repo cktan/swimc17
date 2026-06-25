@@ -341,10 +341,9 @@ fields and call `swim_start()`:
 ```c
 const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
 swim_start_opts_t opts = swim_opts_for(50, 10000);
-opts.self  = "10.0.0.2:7771/c1";
 opts.name  = "my_cluster_secret"; // shared by all nodes
 opts.seeds = seeds;
-swim_start(&opts);
+swim_start("10.0.0.2:7771/c1", &opts);
 ```
 
 `opts.name` is the **group name** (see §3). Only nodes
@@ -356,7 +355,6 @@ Or zero-initialize and set all fields manually:
 
 ```c
 swim_start_opts_t opts = {
-  .self  = "10.0.0.1:7771/c1",
   .name  = "my_cluster",
   .seeds = seeds,
   .protocol_period_ms    = 1000,
@@ -366,7 +364,7 @@ swim_start_opts_t opts = {
   .seed_retry_interval_ms = 5000,
   .dead_node_expiry_ms   = 6000
 };
-swim_t *inst = swim_start(&opts);
+swim_t *inst = swim_start("10.0.0.1:7771/c1", &opts);
 ```
 
 All instance functions take the opaque `swim_t *` handle

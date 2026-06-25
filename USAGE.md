@@ -43,7 +43,7 @@ cc my_app.c $(pkg-config --cflags --libs libswimc17)
 ## Quick Start
 
 Initialize your configuration options and start the cluster membership
-protocol thread. The `self` and `name` options are mandatory. Each
+protocol thread. `mynodeid` and `opts->name` are mandatory. Each
 node starts and joins by pointing to one or more known seeds.
 
 ```c
@@ -54,13 +54,12 @@ int main() {
     swim_feed_t *feed = swim_feed_create();
 
     swim_start_opts_t opts = {0};
-    opts.self  = "10.0.0.7:7771/c1";
     opts.name  = "my_cluster";
     opts.feed  = feed;
     const char *seeds[] = { "10.0.0.1:7771/c1", NULL };
     opts.seeds = seeds;
 
-    swim_t *inst = swim_start(&opts);
+    swim_t *inst = swim_start("10.0.0.7:7771/c1", &opts);
     if (!inst) {
         fprintf(stderr, "Failed to start SWIM: %s\n", swim_errmsg());
         return 1;
@@ -106,10 +105,9 @@ its own pace.
 swim_feed_t *feed = swim_feed_create();
 
 swim_start_opts_t opts = {0};
-opts.self = "10.0.0.1:7771";
 opts.name = "my_cluster";
 opts.feed = feed;   // NULL disables telemetry
-swim_start(&opts);
+swim_start("10.0.0.1:7771", &opts);
 ```
 
 ### Reading records
@@ -225,7 +223,7 @@ All timing fields are computed from `T`:
 | `dead_node_expiry_ms` | `2 × suspicion_timeout_ms` |
 | `seed_retry_interval_ms` | `5 × T` |
 
-The pointer fields (`self`, `name`, `seeds`, `feed`) are
+The pointer fields (`name`, `seeds`, `feed`) are
 set to `NULL`; the caller must fill them before passing
 the struct to `swim_start()`.
 
@@ -236,10 +234,9 @@ No error is reported.
 
 ```c
 swim_start_opts_t opts = swim_opts_for(50, 10000);
-opts.self  = "10.0.0.1:7771";
 opts.name  = "my_cluster";
 opts.feed  = feed;
-swim_start(&opts);
+swim_start("10.0.0.1:7771", &opts);
 ```
 
 ---
@@ -247,23 +244,26 @@ swim_start(&opts);
 ### `swim_start`
 
 ```c
-swim_t *swim_start(const swim_start_opts_t *opts);
+swim_t *swim_start(const char *mynodeid,
+                   const swim_start_opts_t *opts);
 ```
 
 Starts the background protocol worker thread and
-registers a new named cluster membership instance.
+registers a new cluster membership instance.
 
-`opts->self` and `opts->name` are mandatory.
+`mynodeid` is this node's identity: `"host:port"` or
+`"host:port/cookie"`. The host and port are used to
+bind and advertise; the cookie is arbitrary text that
+distinguishes nodes sharing the same host:port.
+
+`mynodeid` and `opts->name` are mandatory.
 `opts->feed` is optional; pass `NULL` to disable
 telemetry.
 
 Returns an opaque `swim_t *` handle on success, or
 `NULL` on failure. On failure, sets `swim_errno` to:
-- `SWIM_ERR_INVALID`: `opts` is NULL, or `opts->self` /
-  `opts->name` are empty or invalid.
-- `SWIM_ERR_BAD_STATE`: An instance with the same name
-  is already running.
-- `SWIM_ERR_FULL`: Maximum active instances (16) exceeded.
+- `SWIM_ERR_INVALID`: `mynodeid` or `opts->name` are
+  NULL, empty, or malformed.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
 Thread-safe.
@@ -403,8 +403,7 @@ Options are configured in the `swim_start_opts_t` struct:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `self` | `const char*` | **required** | `"host:port"` or `"host:port/cookie"` |
-| `name` | `const char*` | **required** | Unique instance name |
+| `name` | `const char*` | **required** | Group name — only nodes sharing this name exchange messages |
 | `seeds` | `const char**` | `NULL` | NULL-terminated seed list |
 | `feed` | `swim_feed_t*` | `NULL` | Telemetry feed; `NULL` disables |
 | `protocol_period_ms` | `uint64_t` | `1000` | How often to probe one peer |
@@ -423,10 +422,9 @@ Then set the identity fields and start:
 
 ```c
 swim_start_opts_t opts = swim_opts_for(50, 10000);
-opts.self  = "10.0.0.1:7771";
 opts.name  = "my_cluster";
 opts.feed  = feed;
-swim_start(&opts);
+swim_start("10.0.0.1:7771", &opts);
 ```
 
 The defaults (zero-initialized fields) target an 8-node
@@ -443,17 +441,11 @@ process by giving each a unique name:
 swim_feed_t *feed_a = swim_feed_create();
 swim_feed_t *feed_b = swim_feed_create();
 
-swim_start_opts_t opts_a = {
-    .self = "10.0.0.1:7771", .name = "cluster_a",
-    .feed = feed_a
-};
-swim_start_opts_t opts_b = {
-    .self = "10.0.0.1:7772", .name = "cluster_b",
-    .feed = feed_b
-};
+swim_start_opts_t opts_a = { .name = "cluster_a", .feed = feed_a };
+swim_start_opts_t opts_b = { .name = "cluster_b", .feed = feed_b };
 
-swim_t *inst_a = swim_start(&opts_a);
-swim_t *inst_b = swim_start(&opts_b);
+swim_t *inst_a = swim_start("10.0.0.1:7771", &opts_a);
+swim_t *inst_b = swim_start("10.0.0.1:7772", &opts_b);
 
 char *p;
 int count = swim_peers(inst_a, false, &p);

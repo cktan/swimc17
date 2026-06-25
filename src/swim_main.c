@@ -895,11 +895,9 @@ swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms) {
   return opts;
 }
 
-swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
-                   const swim_start_opts_t *opts) {
-  if (!host || !port || !opts || !opts->name || opts->name[0] == '\0') {
-    swim_set_error(SWIM_ERR_INVALID,
-                   "host, port, and opts->name are mandatory");
+swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
+  if (!mynodeid || !opts || !opts->name || opts->name[0] == '\0') {
+    swim_set_error(SWIM_ERR_INVALID, "mynodeid and opts->name are mandatory");
     return NULL;
   }
 
@@ -923,8 +921,22 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
   inst->dead_node_expiry_ms =
       opts->dead_node_expiry_ms ? opts->dead_node_expiry_ms : 6000;
 
+  // Register self in the node ID pool and parse host/port for UDP bind
+  inst->self_id = swim_nodeid_find(mynodeid);
+  if (!nodeid_valid(inst->self_id)) {
+    swim_set_error(SWIM_ERR_INVALID, "Failed to register self node ID");
+    goto error_cleanup;
+  }
+  char self_host[254];
+  int self_port = 0;
+  if (swim_nodeid_split(inst->self_id, self_host, &self_port, NULL) != 0 ||
+      self_port <= 0) {
+    swim_set_error(SWIM_ERR_INVALID, "Invalid mynodeid format");
+    goto error_cleanup;
+  }
+
   // Initialize helper sub-modules
-  inst->udp = swim_udp_create(host, port);
+  inst->udp = swim_udp_create(self_host, (uint16_t)self_port);
   if (!inst->udp)
     goto error_cleanup;
 
@@ -941,20 +953,6 @@ swim_t *swim_start(const char *host, uint16_t port, const char *cookie,
     goto error_cleanup;
 
   inst->feed = opts->feed;
-
-  // Register self in the node ID pool
-  {
-    char self_str[384];
-    if (cookie && cookie[0])
-      snprintf(self_str, sizeof(self_str), "%s:%u/%s", host, port, cookie);
-    else
-      snprintf(self_str, sizeof(self_str), "%s:%u", host, port);
-    inst->self_id = swim_nodeid_find(self_str);
-    if (!nodeid_valid(inst->self_id)) {
-      swim_set_error(SWIM_ERR_INVALID, "Failed to register self node ID");
-      goto error_cleanup;
-    }
-  }
 
   // Seed incarnation with current time (wall-clock time in milliseconds)
   inst->incarnation = get_now_ms();
