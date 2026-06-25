@@ -7,13 +7,54 @@ over UDP sockets.
 
 ## Contents
 
-1. [Installation](#installation)
-2. [Quick Start](#quick-start)
-3. [Telemetry Feed](#telemetry-feed)
-4. [API Reference](#api-reference)
-5. [Configuration](#configuration)
-6. [Multiple Instances](#multiple-instances)
-7. [Testing](#testing)
+1. [Concepts](#concepts)
+2. [Installation](#installation)
+3. [Quick Start](#quick-start)
+4. [Telemetry Feed](#telemetry-feed)
+5. [API Reference](#api-reference)
+6. [Configuration](#configuration)
+7. [Multiple Instances](#multiple-instances)
+8. [Testing](#testing)
+
+---
+
+## Concepts
+
+**What the library does** — libswimc17 tracks which nodes
+in a cluster are alive or dead. Each node runs a background
+thread that periodically probes a peer, propagates
+membership changes via gossip, and delivers events to the
+application through a feed queue. The library does not
+replicate data, elect leaders, or provide reliable
+messaging; it only tells you who is up and who is down.
+
+**Node identity** — every node is identified by the string
+`"host:port/cookie"`. The `host` and `port` are the UDP
+address the node binds and advertises. The `cookie` is
+arbitrary text with no protocol meaning; it exists solely
+to distinguish nodes that share the same `host:port` —
+for example, successive restarts of a process on the same
+port, or multiple logical instances on one machine.
+`host:port/AAA` and `host:port/BBB` are treated as two
+completely different nodes. The cookie may be omitted,
+giving the shorter form `"host:port"` (equivalent to an
+empty cookie).
+
+**Group name** — `swim_start_opts_t.name` is a group name,
+not an instance name. Only nodes that share the same group
+name exchange messages with each other; packets from nodes
+with a different group name are silently dropped. This is
+how independent clusters can coexist on the same network
+without interfering. The group name also serves as the
+authentication key for every packet (see DESIGN.md §6),
+so all members of a group must use the same value.
+
+**Feed** — the library reports membership events through a
+caller-owned `swim_feed_t` queue. The application creates
+the feed, passes it to `swim_start`, and drains it from a
+separate thread at its own pace. The feed is the only
+output channel; the library itself does no logging. Passing
+`NULL` disables telemetry entirely.
 
 ---
 
