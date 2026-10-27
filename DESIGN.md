@@ -211,6 +211,12 @@ opts. Defaults are tuned for an 8-node cluster.
 | `seed_retry_interval` | 5000 ms | `5 × T` |
 | `dead_node_expiry` | 6000 ms | `2 × suspicion_timeout` |
 
+Timers run on 100 ms ticks: each duration is rounded to
+the nearest tick, with a minimum of one. If a probe is
+still resolving when the next period starts (possible when
+`2 × ping_timeout ≥ protocol_period`), that period's probe
+is skipped rather than abandoning the pending one.
+
 ### Deriving T from detection latency
 
 The worst-case failure-detection path is:

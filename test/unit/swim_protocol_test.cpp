@@ -550,7 +550,8 @@ TEST_CASE("protocol: observer telemetry — transitions, cluster size, escaping 
   swim_start_opts_t opts;
   memset(&opts, 0, sizeof(opts));
   opts.name = "obs_node";
-  opts.protocol_period_ms = 200;
+  // First probe lands after the quiet window checked below.
+  opts.protocol_period_ms = 1000;
   opts.feed = feed;
 
   swim_t *inst = swim_start("127.0.0.1:20501/c1", &opts);
@@ -777,5 +778,106 @@ TEST_CASE("protocol: self-announcement reaches all seeds") {
   swim_leave(inst);
   for (int i = 0; i < 3; i++)
     swim_udp_destroy(mocks[i]);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// A ping timeout under one 100 ms tick must still give relays a window to
+// forward the target's ack; it used to round to zero ticks, so relay entries
+// expired immediately and indirect probes could never succeed.
+TEST_CASE("protocol: sub-tick ping timeout still relays acks") {
+  swim_nodeid_idx_t requester_id = swim_nodeid_find("127.0.0.1:20722/r");
+  swim_nodeid_idx_t target_id = swim_nodeid_find("127.0.0.1:20723/t");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "subtick_test";
+  opts.protocol_period_ms = 10000; // keep the node's own probing out of the way
+  opts.ping_timeout_ms = 50;
+
+  swim_t *inst = swim_start("127.0.0.1:20721/c1", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *requester = swim_udp_create("127.0.0.1", 20722);
+  REQUIRE(requester != nullptr);
+  swim_udp_t *target = swim_udp_create("127.0.0.1", 20723);
+  REQUIRE(target != nullptr);
+
+  auto send_msg = [&](swim_udp_t *from, uint8_t type, swim_nodeid_idx_t sender,
+                      uint32_t seq, swim_nodeid_idx_t peer) {
+    uint8_t msg_buf[256];
+    int msglen = swim_pack_message(type, sender, seq, peer, nullptr, 0, msg_buf,
+                                   sizeof(msg_buf));
+    REQUIRE(msglen > 0);
+    uint8_t buf[256 + 12];
+    int len =
+        swim_pack_authed("subtick_test", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(from, "127.0.0.1", 20721, buf, len) == 0);
+  };
+  auto recv_msg = [](swim_udp_t *udp, uint8_t type, swim_message_t *in) {
+    for (int attempt = 0; attempt < 100; attempt++) {
+      uint8_t buf[SWIM_MAX_PACKET_SIZE];
+      int n = swim_udp_recv(udp, buf, sizeof(buf));
+      if (n > 12 && swim_unpack_message(buf + 12, n - 12, in) == 0 &&
+          in->type == type)
+        return true;
+      if (n <= 12)
+        usleep(10000);
+    }
+    return false;
+  };
+
+  send_msg(requester, SWIM_MSG_PING_REQ, requester_id, 777, target_id);
+
+  // The target answers the relay ping immediately.
+  swim_message_t in;
+  REQUIRE(recv_msg(target, SWIM_MSG_PING, &in));
+  REQUIRE(in.seq == 777);
+  send_msg(target, SWIM_MSG_ACK, target_id, 777, SWIM_NODEID_NONE);
+
+  REQUIRE(recv_msg(requester, SWIM_MSG_FWD_ACK, &in));
+  CHECK(in.seq == 777);
+  CHECK(nodeid_eq(in.peer, target_id));
+
+  swim_udp_destroy(requester);
+  swim_udp_destroy(target);
+  swim_leave(inst);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// With 2 x ping_timeout >= protocol_period, the next probe used to overwrite
+// the pending one before its indirect phase timed out, so a dead peer was
+// never suspected.
+TEST_CASE("protocol: short period still detects failure") {
+  swim_nodeid_idx_t mock_id = swim_nodeid_find("127.0.0.1:20732/mock");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "short_period";
+  opts.protocol_period_ms = 200; // ping_timeout_ms keeps its 200 ms default
+
+  swim_t *inst = swim_start("127.0.0.1:20731/c1", &opts);
+  REQUIRE(inst != nullptr);
+
+  // The mock joins with one ping, then goes silent.
+  swim_udp_t *mock = swim_udp_create("127.0.0.1", 20732);
+  REQUIRE(mock != nullptr);
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, mock_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t buf[256 + 12];
+  int len = swim_pack_authed("short_period", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(swim_udp_send(mock, "127.0.0.1", 20731, buf, len) == 0);
+  swim_udp_destroy(mock);
+
+  bool suspected = false;
+  for (int i = 0; i < 30 && !suspected; i++) {
+    usleep(100000);
+    swim_member_t members[4];
+    int count = swim_members(inst, members, 4, true);
+    suspected = count == 1 && members[0].status != SWIM_STATUS_ALIVE;
+  }
+  CHECK(suspected);
+
+  swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }

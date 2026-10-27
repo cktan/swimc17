@@ -71,6 +71,13 @@ static uint64_t get_now_ms(void) {
 // Round n up to the next multiple of 8.
 static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
 
+// Convert a duration to 100 ms timer ticks, rounding to nearest. Never returns
+// 0: swim_timer_add requires >= 1, and a sub-tick duration still waits a tick.
+static inline int ms_to_ticks(uint64_t ms) {
+  uint64_t t = (ms + 50) / 100;
+  return t ? (int)t : 1;
+}
+
 // SipHash-2-4: keyed 64-bit hash (2 compression rounds, 4 finalization rounds).
 // https://en.wikipedia.org/wiki/SipHash
 #define SWIM_ROTL64(x, b) (uint64_t)(((x) << (b)) | ((x) >> (64 - (b))))
@@ -276,12 +283,15 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
                      get_monotonic_time_ms());
 
   // 2. Select target
-  // Retrieve all active members (excluding self)
+  // Retrieve all active members (excluding self). Skip this period if there is
+  // no one to probe, or if the previous probe is still resolving: its two
+  // timeouts can outlast a short protocol period, and starting a new probe
+  // would abandon it before the target could be suspected.
   int active_count = swim_membership_count(inst->membership);
-  if (active_count == 0) {
+  if (active_count == 0 || inst->pending_probe.state != PROBE_NONE) {
     // Re-arm probe timer
-    if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                       probe_timer_cb, inst, NULL) != 0) {
+    if (swim_timer_add(inst->timer, ms_to_ticks(inst->protocol_period_ms),
+                       "probe", probe_timer_cb, inst, NULL) != 0) {
       if (inst->feed)
         swim_feed_put(inst->feed, 2, "warning",
                       "probe timer failed to re-arm: probing stopped");
@@ -336,13 +346,15 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
     send_ping(inst, target, seq);
 
-    // Arm timeout alarm
-    arm_probe_timeout(inst, inst->ping_timeout_ms / 100, seq);
+    // Arm timeout alarm. Without it the probe would never resolve and block
+    // every later one.
+    if (arm_probe_timeout(inst, ms_to_ticks(inst->ping_timeout_ms), seq) != 0)
+      inst->pending_probe.state = PROBE_NONE;
   }
 
   // Re-arm probe timer
-  if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                     probe_timer_cb, inst, NULL) != 0) {
+  if (swim_timer_add(inst->timer, ms_to_ticks(inst->protocol_period_ms),
+                     "probe", probe_timer_cb, inst, NULL) != 0) {
     if (inst->feed)
       swim_feed_put(inst->feed, 2, "warning",
                     "probe timer failed to re-arm: probing stopped");
@@ -415,7 +427,8 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
     }
 
     // Arm second timeout alarm for indirect probe
-    arm_probe_timeout(inst, inst->ping_timeout_ms / 100, seq);
+    if (arm_probe_timeout(inst, ms_to_ticks(inst->ping_timeout_ms), seq) != 0)
+      inst->pending_probe.state = PROBE_NONE;
 
   } else if (inst->pending_probe.state == PROBE_INDIRECT &&
              inst->pending_probe.seq == seq) {
@@ -441,7 +454,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
         *suspect_param = target;
         char alarm_name[384];
         suspect_key(alarm_name, sizeof(alarm_name), target);
-        if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
+        if (swim_timer_add(inst->timer, ms_to_ticks(inst->suspicion_timeout_ms),
                            alarm_name, suspicion_timer_cb, inst,
                            suspect_param) != 0) {
           free(suspect_param);
@@ -478,7 +491,7 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   }
 
   // Re-arm seed retry timer
-  if (swim_timer_add(inst->timer, inst->seed_retry_interval_ms / 100,
+  if (swim_timer_add(inst->timer, ms_to_ticks(inst->seed_retry_interval_ms),
                      "seed_retry", seed_retry_timer_cb, inst, NULL) != 0) {
     if (inst->feed)
       swim_feed_put(
@@ -678,7 +691,8 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
             } else {
               *suspect_param = ev->id;
               suspect_key(alarm_name, sizeof(alarm_name), ev->id);
-              if (swim_timer_add(inst->timer, inst->suspicion_timeout_ms / 100,
+              if (swim_timer_add(inst->timer,
+                                 ms_to_ticks(inst->suspicion_timeout_ms),
                                  alarm_name, suspicion_timer_cb, inst,
                                  suspect_param) != 0) {
                 free(suspect_param);
@@ -758,7 +772,8 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         r->requester = msg.sender;
         r->target = msg.peer;
         r->seq = msg.seq;
-        r->expiry_tick = inst->current_tick + (inst->ping_timeout_ms / 100);
+        r->expiry_tick =
+            inst->current_tick + ms_to_ticks(inst->ping_timeout_ms);
 
         send_ping(inst, msg.peer, msg.seq);
       }
@@ -1004,8 +1019,8 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
 
   // Set up logical alarms
   // 1. Probe cycle timer (self-rearming)
-  if (swim_timer_add(inst->timer, inst->protocol_period_ms / 100, "probe",
-                     probe_timer_cb, inst, NULL) != 0) {
+  if (swim_timer_add(inst->timer, ms_to_ticks(inst->protocol_period_ms),
+                     "probe", probe_timer_cb, inst, NULL) != 0) {
     swim_set_error(SWIM_ERR_NOMEM, "Failed to arm probe timer");
     goto error_cleanup;
   }
