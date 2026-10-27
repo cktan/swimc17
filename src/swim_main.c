@@ -695,15 +695,16 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
           }
         }
       } else {
-        // Rumor about ourselves! Self-refutation logic
+        // Rumor about ourselves! Self-refutation logic. Refute even a rumor
+        // below our incarnation: a peer that learned of us by direct contact
+        // holds us at incarnation 0 and only our alive event can correct it.
         if (ev->status == SWIM_STATUS_SUSPECT ||
             ev->status == SWIM_STATUS_DEAD) {
-          if (ev->incarnation >= inst->incarnation) {
+          if (ev->incarnation >= inst->incarnation)
             inst->incarnation = ev->incarnation + 1;
-            swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
-                                      inst->self_id, inst->incarnation,
-                                      REFUTATION_MULTIPLIER);
-          }
+          swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_ALIVE,
+                                    inst->self_id, inst->incarnation,
+                                    REFUTATION_MULTIPLIER);
         }
       }
     }
@@ -970,16 +971,21 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
         swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate seeds array");
         goto error_cleanup;
       }
+      int kept = 0;
       for (int i = 0; i < n; i++) {
-        inst->seeds[i] = swim_nodeid_find(opts->seeds[i]);
-        if (!nodeid_valid(inst->seeds[i])) {
+        swim_nodeid_idx_t seed = swim_nodeid_find(opts->seeds[i]);
+        if (!nodeid_valid(seed)) {
           swim_set_error(SWIM_ERR_INVALID, "Failed to register seed node ID");
           free(inst->seeds);
           inst->seeds = NULL;
           goto error_cleanup;
         }
+        // A shared seed list usually names this node too; pinging ourselves
+        // would only waste gossip transmissions.
+        if (!nodeid_eq(seed, inst->self_id))
+          inst->seeds[kept++] = seed;
       }
-      inst->seed_count = n;
+      inst->seed_count = kept;
     }
   }
 

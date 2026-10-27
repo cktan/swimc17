@@ -673,3 +673,109 @@ TEST_CASE("protocol: feed delivers node-up event (L3)") {
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// Wait up to ~1s for a packet on `udp` and return the incarnation carried by
+// its alive(node) gossip, or 0 if the packet has none.
+static uint64_t recv_alive_inc(swim_udp_t *udp, const char *node) {
+  swim_nodeid_idx_t id = swim_nodeid_find(node);
+  for (int attempt = 0; attempt < 100; attempt++) {
+    uint8_t buf[SWIM_MAX_PACKET_SIZE];
+    int n = swim_udp_recv(udp, buf, sizeof(buf));
+    if (n <= 12) {
+      usleep(10000);
+      continue;
+    }
+    swim_message_t in;
+    if (swim_unpack_message(buf + 12, n - 12, &in) != 0)
+      return 0;
+    for (int i = 0; i < in.gossip_count; i++) {
+      if (nodeid_eq(in.gossip[i].id, id) &&
+          in.gossip[i].status == SWIM_STATUS_ALIVE)
+        return in.gossip[i].incarnation;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+// A peer that learned of X only by direct contact records X at incarnation 0
+// and may later gossip suspect(X, 0). X must refute it even though 0 is below
+// its own incarnation; otherwise nothing overrides the rumor and X is declared
+// dead.
+TEST_CASE("protocol: stale suspicion about self is refuted") {
+  const char *x_str = "127.0.0.1:20701/x";
+  swim_nodeid_idx_t x_id = swim_nodeid_find(x_str);
+  swim_nodeid_idx_t y_id = swim_nodeid_find("127.0.0.1:20702/y");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "refute_test";
+  opts.protocol_period_ms = 10000; // keep X's own probes off Y's socket
+
+  swim_t *inst = swim_start(x_str, &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *y = swim_udp_create("127.0.0.1", 20702);
+  REQUIRE(y != nullptr);
+
+  auto ping_x = [&](swim_gossip_queue_t *q, uint32_t seq) {
+    uint8_t msg_buf[512];
+    int msglen = swim_pack_message(SWIM_MSG_PING, y_id, seq, SWIM_NODEID_NONE,
+                                   q, 1, msg_buf, sizeof(msg_buf));
+    REQUIRE(msglen > 0);
+    uint8_t buf[512 + 12];
+    int len =
+        swim_pack_authed("refute_test", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(y, "127.0.0.1", 20701, buf, len) == 0);
+  };
+
+  // Drain X's startup self-announcement out of its gossip queue.
+  uint64_t inc = 0;
+  for (uint32_t seq = 1; seq <= 4; seq++) {
+    ping_x(nullptr, seq);
+    inc = recv_alive_inc(y, x_str);
+  }
+  REQUIRE(inc == 0);
+
+  // Y suspects X at the stale incarnation 0.
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  REQUIRE(q != nullptr);
+  swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, x_id, 0, 1);
+  ping_x(q, 5);
+  CHECK(recv_alive_inc(y, x_str) > 0);
+
+  swim_gossip_queue_destroy(q);
+  swim_udp_destroy(y);
+  swim_leave(inst);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// A node starting alone pings all its seeds. Its self-announcement must reach
+// every other seed, even when the shared seed list names the node itself
+// first.
+TEST_CASE("protocol: self-announcement reaches all seeds") {
+  const char *x_str = "127.0.0.1:20711/x";
+  const char *seeds[] = {x_str, "127.0.0.1:20712/a", "127.0.0.1:20713/b",
+                         "127.0.0.1:20714/c", nullptr};
+
+  swim_udp_t *mocks[3];
+  for (int i = 0; i < 3; i++) {
+    mocks[i] = swim_udp_create("127.0.0.1", (uint16_t)(20712 + i));
+    REQUIRE(mocks[i] != nullptr);
+  }
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "announce_test";
+  opts.seeds = seeds;
+
+  swim_t *inst = swim_start(x_str, &opts);
+  REQUIRE(inst != nullptr);
+
+  for (int i = 0; i < 3; i++)
+    CHECK(recv_alive_inc(mocks[i], x_str) > 0);
+
+  swim_leave(inst);
+  for (int i = 0; i < 3; i++)
+    swim_udp_destroy(mocks[i]);
+  swim_set_error(SWIM_OK, nullptr);
+}

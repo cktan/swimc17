@@ -183,8 +183,13 @@ If a node receives `suspect(self)` or `dead(self)` with an
 incarnation `>=` its own, it **bumps its incarnation** to
 one above the rumor and gossips `alive(self, new_inc)`. By
 E1, this higher incarnation overrides the false rumor
-everywhere. (The node also self-announces `alive` once at
-startup so peers learn its real incarnation early.)
+everywhere. A rumor *below* its own incarnation is refuted
+too, by re-gossiping `alive(self, inc)` unchanged: a peer
+that learned of the node only by direct contact holds it
+at incarnation 0, and nothing else corrects that peer.
+(The node also self-announces `alive` once at startup so
+peers learn its real incarnation early; a node that lists
+itself among its seeds does not ping itself.)
 
 ---
 
