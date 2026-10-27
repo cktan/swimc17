@@ -881,3 +881,57 @@ TEST_CASE("protocol: short period still detects failure") {
   swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// A second suspect(X) at a higher incarnation used to arm a second suspicion
+// timer without cancelling the first, so the older timer declared X dead
+// before X had its full suspicion timeout.
+TEST_CASE("protocol: re-suspicion restarts the suspicion timeout") {
+  swim_nodeid_idx_t y_id = swim_nodeid_find("127.0.0.1:20742/y");
+  swim_nodeid_idx_t x_id = swim_nodeid_find("127.0.0.1:20743/x");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "resuspect";
+  opts.protocol_period_ms = 10000; // keep the node's own probing out of the way
+  opts.suspicion_timeout_ms = 1000;
+
+  swim_t *inst = swim_start("127.0.0.1:20741/c1", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *y = swim_udp_create("127.0.0.1", 20742);
+  REQUIRE(y != nullptr);
+
+  auto gossip = [&](swim_status_t status, uint64_t inc, uint32_t seq) {
+    swim_gossip_queue_t *q = swim_gossip_queue_create();
+    REQUIRE(q != nullptr);
+    swim_gossip_queue_enqueue(q, status, x_id, inc, 1);
+    uint8_t msg_buf[512];
+    int msglen = swim_pack_message(SWIM_MSG_PING, y_id, seq, SWIM_NODEID_NONE,
+                                   q, 1, msg_buf, sizeof(msg_buf));
+    swim_gossip_queue_destroy(q);
+    REQUIRE(msglen > 0);
+    uint8_t buf[512 + 12];
+    int len = swim_pack_authed("resuspect", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(y, "127.0.0.1", 20741, buf, len) == 0);
+  };
+  auto x_status = [&]() {
+    swim_member_t members[4];
+    int count = swim_members(inst, members, 4, true);
+    for (int i = 0; i < count; i++)
+      if (nodeid_eq(members[i].id, x_id))
+        return members[i].status;
+    return (swim_status_t)0;
+  };
+
+  gossip(SWIM_STATUS_ALIVE, 5, 1);
+  gossip(SWIM_STATUS_SUSPECT, 5, 2); // first timer: due at ~1000 ms
+  usleep(600000);
+  gossip(SWIM_STATUS_SUSPECT, 6, 3); // restarts: due at ~1600 ms
+  usleep(600000);
+  CHECK(x_status() == SWIM_STATUS_SUSPECT); // ~1200 ms
+  usleep(700000);
+  CHECK(x_status() == SWIM_STATUS_DEAD); // ~1900 ms
+
+  swim_udp_destroy(y);
+  swim_leave(inst);
+  swim_set_error(SWIM_OK, nullptr);
+}

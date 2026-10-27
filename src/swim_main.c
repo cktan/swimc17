@@ -382,6 +382,33 @@ static void suspicion_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   free(target_p);
 }
 
+// (Re)start the suspicion timer for a node. Any timer already running for it
+// is cancelled first, so a re-suspicion at a higher incarnation gets the full
+// timeout and a stale timer cannot declare the node dead early.
+static void arm_suspicion_timer(swim_instance_t *inst, swim_nodeid_idx_t id) {
+  char alarm_name[384];
+  suspect_key(alarm_name, sizeof(alarm_name), id);
+  swim_timer_cancel(inst->timer, alarm_name);
+
+  // Heap-allocate the idx; suspicion callback owns and frees it.
+  swim_nodeid_idx_t *suspect_param = malloc(sizeof(swim_nodeid_idx_t));
+  if (!suspect_param) {
+    if (inst->feed)
+      swim_feed_put(inst->feed, 2, "warning",
+                    "suspicion timer not armed: out of memory");
+    return;
+  }
+  *suspect_param = id;
+  if (swim_timer_add(inst->timer, ms_to_ticks(inst->suspicion_timeout_ms),
+                     alarm_name, suspicion_timer_cb, inst,
+                     suspect_param) != 0) {
+    free(suspect_param);
+    if (inst->feed)
+      swim_feed_put(inst->feed, 2, "warning",
+                    "suspicion timer not armed: timer add failed");
+  }
+}
+
 // Fires when a direct ping times out. Escalates to indirect probing by sending
 // PING-REQs to a random subset of helpers. If no helpers are available, or a
 // second timeout fires with state still INDIRECT, the target is declared dead.
@@ -443,26 +470,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
       swim_gossip_queue_enqueue(inst->gossip_queue, SWIM_STATUS_SUSPECT, target,
                                 m->incarnation, 1);
       queue_notification(inst, "suspect", target);
-
-      // Start suspicion timer
-      swim_nodeid_idx_t *suspect_param = malloc(sizeof(swim_nodeid_idx_t));
-      if (!suspect_param) {
-        if (inst->feed)
-          swim_feed_put(inst->feed, 2, "warning",
-                        "suspicion timer not armed: out of memory");
-      } else {
-        *suspect_param = target;
-        char alarm_name[384];
-        suspect_key(alarm_name, sizeof(alarm_name), target);
-        if (swim_timer_add(inst->timer, ms_to_ticks(inst->suspicion_timeout_ms),
-                           alarm_name, suspicion_timer_cb, inst,
-                           suspect_param) != 0) {
-          free(suspect_param);
-          if (inst->feed)
-            swim_feed_put(inst->feed, 2, "warning",
-                          "suspicion timer not armed: timer add failed");
-        }
-      }
+      arm_suspicion_timer(inst, target);
     }
   }
 }
@@ -680,27 +688,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
             swim_timer_cancel(inst->timer, alarm_name);
           } else if (ev->status == SWIM_STATUS_SUSPECT) {
             queue_notification(inst, "suspect", ev->id);
-
-            // Heap-allocate the idx; suspicion callback owns and frees it.
-            swim_nodeid_idx_t *suspect_param =
-                malloc(sizeof(swim_nodeid_idx_t));
-            if (!suspect_param) {
-              if (inst->feed)
-                swim_feed_put(inst->feed, 2, "warning",
-                              "suspicion timer not armed: out of memory");
-            } else {
-              *suspect_param = ev->id;
-              suspect_key(alarm_name, sizeof(alarm_name), ev->id);
-              if (swim_timer_add(inst->timer,
-                                 ms_to_ticks(inst->suspicion_timeout_ms),
-                                 alarm_name, suspicion_timer_cb, inst,
-                                 suspect_param) != 0) {
-                free(suspect_param);
-                if (inst->feed)
-                  swim_feed_put(inst->feed, 2, "warning",
-                                "suspicion timer not armed: timer add failed");
-              }
-            }
+            arm_suspicion_timer(inst, ev->id);
           } else if (ev->status == SWIM_STATUS_ALIVE) {
             queue_notification(inst, "up", ev->id);
             // Cancel suspicion timer
