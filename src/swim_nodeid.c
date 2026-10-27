@@ -44,6 +44,57 @@ static inline uint16_t next_slot(uint16_t slot) {
   return (uint16_t)((slot + 1) & (SWIM_NODEID_TABLE_SIZE - 1));
 }
 
+/*
+ * Parse "host:port[/cookie]", where host may be a bracketed IPv6 literal
+ * ("[::1]:7000"). On success points *host at the host (brackets excluded,
+ * length *host_len < 254), sets *port (1..65535), and points *cookie at the
+ * cookie ("" if absent, length < 64). Returns 0, or -1 if malformed.
+ */
+static int parse_nodeid(const char *s, const char **host, size_t *host_len,
+                        int *port, const char **cookie) {
+  const char *h = s;
+  const char *p;
+  size_t hl;
+  if (*s == '[') {
+    const char *rb = strchr(s, ']');
+    if (!rb || rb[1] != ':')
+      return -1;
+    h = s + 1;
+    hl = (size_t)(rb - h);
+    p = rb + 2;
+  } else {
+    const char *colon = strchr(s, ':');
+    if (!colon)
+      return -1;
+    hl = (size_t)(colon - s);
+    p = colon + 1;
+  }
+  if (hl == 0 || hl >= 254)
+    return -1;
+
+  int v = 0;
+  const char *q = p;
+  for (; *q >= '0' && *q <= '9'; q++) {
+    v = v * 10 + (*q - '0');
+    if (v > 65535)
+      return -1;
+  }
+  if (q == p || v == 0)
+    return -1;
+  if (*q == '/')
+    q++;
+  else if (*q)
+    return -1;
+  if (strlen(q) >= 64)
+    return -1;
+
+  *host = h;
+  *host_len = hl;
+  *port = v;
+  *cookie = q;
+  return 0;
+}
+
 /* Lock-free probe; returns SWIM_NODEID_NONE if absent. */
 static swim_nodeid_idx_t nodeid_probe(const char *nodeid) {
   uint16_t slot = hash_slot(nodeid_hash(nodeid));
@@ -58,12 +109,20 @@ static swim_nodeid_idx_t nodeid_probe(const char *nodeid) {
   return SWIM_NODEID_NONE;
 }
 
-/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if pool is full.
- * Fast path: lock-free probe first; only locks when the entry is absent. */
+/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if malformed or pool
+ * is full. Fast path: lock-free probe first; only locks when the entry is
+ * absent. */
 static swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
   swim_nodeid_idx_t existing = nodeid_probe(nodeid);
   if (nodeid_valid(existing))
     return existing;
+
+  /* Only well-formed ids may take one of the pool's limited slots. */
+  const char *h, *c;
+  size_t hl;
+  int port;
+  if (parse_nodeid(nodeid, &h, &hl, &port, &c) != 0)
+    return SWIM_NODEID_NONE;
 
   pthread_mutex_lock(&g_mu); /* acquire registration lock */
   if (atomic_load_explicit(&g_count, memory_order_relaxed) >=
@@ -95,10 +154,16 @@ none:
   return SWIM_NODEID_NONE;
 }
 
-/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if pool full.
+/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if malformed
+ * or pool full.
  */
 swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
   return swim_nodeid_register(nodeid);
+}
+
+/* Find nodeid without registering it; lock-free. */
+swim_nodeid_idx_t swim_nodeid_get(const char *nodeid) {
+  return nodeid_probe(nodeid);
 }
 
 /* Return nodeid string for idx; lock-free. */
@@ -130,33 +195,17 @@ int swim_nodeid_split(swim_nodeid_idx_t idx, char host[254], int *port,
   if (!node_str)
     return -1;
 
-  const char *colon = strchr(node_str, ':');
-  if (!colon)
-    return -1; /* malformed: no host:port separator */
+  const char *h, *c;
+  size_t host_len;
+  int p;
+  if (parse_nodeid(node_str, &h, &host_len, &p, &c) != 0)
+    return -1;
 
-  size_t host_len = (size_t)(colon - node_str);
-  if (host_len >= 254)
-    return -1; /* host too long for caller's buffer */
-
-  memcpy(host, node_str, host_len);
+  memcpy(host, h, host_len);
   host[host_len] = '\0';
-
-  /* Scan for optional '/cookie' suffix before parsing port.
-     atoi stops at '/' so colon+1 works even with the suffix present. */
-  const char *slash = strchr(colon + 1, '/');
   if (port)
-    *port = atoi(colon + 1);
-
-  if (cookie) {
-    if (slash) {
-      size_t cookie_len = strlen(slash + 1);
-      if (cookie_len >= 64)
-        return -1; /* cookie too long for caller's buffer */
-      memcpy(cookie, slash + 1, cookie_len + 1);
-    } else {
-      cookie[0] = '\0';
-    }
-  }
-
+    *port = p;
+  if (cookie)
+    strcpy(cookie, c); /* parse_nodeid bounds it below 64 bytes */
   return 0;
 }

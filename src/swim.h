@@ -276,7 +276,7 @@ SWIM_EXTERN int swim_peers(swim_t *inst, bool include_dead, char **out);
 
 /**
  * Feed out-of-band reachability signal to cancel suspicion and
- * revive a node.
+ * revive a node. A peer this instance has never seen is ignored.
  *
  * @param inst The instance handle returned by swim_start.
  * @param peer The node ID of the peer.

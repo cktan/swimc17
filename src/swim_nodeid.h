@@ -38,9 +38,14 @@ static inline int nodeid_eq(swim_nodeid_idx_t a, swim_nodeid_idx_t b) {
 /* Return the nodeid string for idx, or NULL if idx is invalid. */
 const char *swim_nodeid_lookup(swim_nodeid_idx_t idx);
 
-/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if pool full.
+/* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if nodeid
+ * is not "host:port[/cookie]" (host may be a bracketed IPv6 literal, port is
+ * 1..65535, cookie is under 64 bytes) or if the pool is full.
  */
 swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
+
+/* Find nodeid without registering it. Returns SWIM_NODEID_NONE if absent. */
+swim_nodeid_idx_t swim_nodeid_get(const char *nodeid);
 
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */
 void swim_nodeid_destroy(void);

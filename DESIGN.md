@@ -609,7 +609,19 @@ with pure random selection.
 
 ## 18. Node Identity Limits
 
-- Cookie length is limited to `SWIM_NODE_ID_MAX_COOKIE` (64 bytes). Empty cookie is allowed.
+- A node ID must be `host:port[/cookie]`. `host` is 1–253
+  bytes, or a bracketed IPv6 literal (`[::1]:7000`);
+  `port` is 1–65535; the cookie is under 64 bytes and may
+  be empty. Malformed IDs are rejected: by `swim_start`
+  for self and seeds, and by the decoder, which drops the
+  packet.
+- Node IDs are interned in a process-wide pool shared by
+  all instances, capped at 4000 distinct strings
+  (`SWIM_NODEID_POOL_MAX`) and never shrunk. Every ID ever
+  seen consumes a slot, so a long-running process whose
+  peers keep changing port or cookie eventually cannot
+  learn new peers. `swim_hint_alive` only looks IDs up and
+  never adds them.
 
 ## 19. Thread‑Safety
 
