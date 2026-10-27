@@ -935,3 +935,33 @@ TEST_CASE("protocol: re-suspicion restarts the suspicion timeout") {
   swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// Group names that share their first 16 bytes must still isolate clusters;
+// the auth key used to be just those 16 bytes, so these two merged.
+TEST_CASE("protocol: group names differing after 16 bytes stay isolated") {
+  const char *seeds_a[] = {"127.0.0.1:20772/b", nullptr};
+  swim_start_opts_t a;
+  memset(&a, 0, sizeof(a));
+  a.name = "prod-cluster-east-1";
+  a.seeds = seeds_a;
+  a.seed_retry_interval_ms = 200;
+
+  const char *seeds_b[] = {"127.0.0.1:20771/a", nullptr};
+  swim_start_opts_t b = a;
+  b.name = "prod-cluster-east-2";
+  b.seeds = seeds_b;
+
+  swim_t *na = swim_start("127.0.0.1:20771/a", &a);
+  swim_t *nb = swim_start("127.0.0.1:20772/b", &b);
+  REQUIRE(na != nullptr);
+  REQUIRE(nb != nullptr);
+
+  usleep(800000); // several seed retries
+  swim_member_t members[4];
+  CHECK(swim_members(na, members, 4, true) == 0);
+  CHECK(swim_members(nb, members, 4, true) == 0);
+
+  swim_leave(na);
+  swim_leave(nb);
+  swim_set_error(SWIM_OK, nullptr);
+}

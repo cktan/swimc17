@@ -151,12 +151,12 @@ prepended before the message payload:
   `uint32_t` Unix seconds, big-endian. The receiver
   rejects the packet if `|tval − now| > 10 s`.
 - **hval** — SipHash-2-4 over
-  `tval_be4 || message_bytes`, keyed on the first
-  16 bytes of `name` (zero-padded). Covers the full
-  message body, so any mutation is detected.
+  `tval_be4 || message_bytes`, keyed on a 16-byte
+  key derived from the full `name` (see §21). Covers
+  the full message body, so any mutation is detected.
 - **Shared secret** — the group name
-  (`swim_start_opts_t.name`, see §3) doubles as the
-  SipHash key. Every node in the cluster must use
+  (`swim_start_opts_t.name`, see §3) is the source
+  of the SipHash key. Every node in the cluster must use
   the same value. Packets from nodes with a
   different (or absent) group name are silently
   dropped.
@@ -640,10 +640,16 @@ All public functions are thread‑safe **except** the feed API:
 
 ## 21. Secret Handling
 
-The cluster secret (`opts.name`) is used as the SipHash key. The implementation:
-- Truncates the string to the first **16 bytes** if longer.
-- Zero‑pads the string to exactly 16 bytes if shorter.
-Thus only the first 16 bytes affect MAC verification.
+The SipHash key is derived from the cluster secret
+(`opts.name`) once, in `swim_start`: the two 64-bit
+halves are SipHash-2-4 of the full name under two fixed,
+distinct keys. Every byte of the name therefore affects
+MAC verification, and names of any length work.
+
+This derivation changed from an earlier version that
+used the first 16 bytes of the name directly; nodes
+running that version cannot exchange packets with nodes
+running this one.
 
 ## 22. Seed Retry Behavior
 

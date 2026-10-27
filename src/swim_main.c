@@ -36,6 +36,7 @@
 #define htobe64(x) OSSwapHostToBigInt64(x)
 #define be64toh(x) OSSwapBigToHostInt64(x)
 #define le64toh(x) OSSwapLittleToHostInt64(x)
+#define htole64(x) OSSwapHostToLittleInt64(x)
 #else
 #include <endian.h>
 #endif
@@ -156,6 +157,19 @@ static uint64_t siphash24(const uint8_t key[16], const uint8_t *msg,
   return v0 ^ v1 ^ v2 ^ v3;
 }
 
+// Derive the 16-byte SipHash packet-auth key from the full group name, so
+// every byte of the name separates clusters. Two SipHash passes under fixed,
+// distinct keys supply the 128 bits.
+static void derive_key(const char *name, uint8_t key[16]) {
+  static const uint8_t k_lo[16] = {0};
+  static const uint8_t k_hi[16] = {1};
+  size_t len = strlen(name);
+  uint64_t lo = htole64(siphash24(k_lo, (const uint8_t *)name, len));
+  uint64_t hi = htole64(siphash24(k_hi, (const uint8_t *)name, len));
+  memcpy(key, &lo, 8);
+  memcpy(key + 8, &hi, 8);
+}
+
 // Build the suspicion-timer key for a node. The full pool string
 // ("host:port/cookie") is unique per identity, so it is the key.
 // Centralized so the arm/cancel keys cannot drift.
@@ -188,7 +202,7 @@ typedef struct {
 } relay_probe_t;
 
 struct swim_t {
-  char name[64];
+  uint8_t key[16]; // packet-auth key derived from the group name
   swim_udp_t *udp;
   swim_timer_t *timer;
   swim_membership_t *membership;
@@ -528,10 +542,7 @@ static void send_message(swim_instance_t *inst, swim_nodeid_idx_t dest,
     uint8_t hash_in[SWIM_MAX_PACKET_SIZE];
     memcpy(hash_in, &tval_be, 4);
     memcpy(hash_in + 4, buf + 12, (size_t)len);
-    uint8_t key[16] = {0};
-    size_t namelen = strlen(inst->name);
-    memcpy(key, inst->name, namelen < 16 ? namelen : 16);
-    uint64_t hval_be = htobe64(siphash24(key, hash_in, 4 + (size_t)len));
+    uint64_t hval_be = htobe64(siphash24(inst->key, hash_in, 4 + (size_t)len));
     memcpy(buf + 4, &hval_be, 8);
 
     char dest_host[254];
@@ -637,15 +648,13 @@ static int recv_message(swim_instance_t *inst, swim_message_t *msg) {
   if (diff > 10)
     return -1;
 
-  // Validate hval: SipHash-2-4(tval_be4 || message_bytes, key=name_padded_16)
+  // Validate hval: SipHash-2-4(tval_be4 || message_bytes, key=inst->key)
   const int msglen = len - 12;
   uint8_t hash_in[SWIM_MAX_PACKET_SIZE];
   memcpy(hash_in, &tval_be, 4);
   memcpy(hash_in + 4, buf + 12, (size_t)msglen);
-  uint8_t key[16] = {0};
-  size_t namelen = strlen(inst->name);
-  memcpy(key, inst->name, namelen < 16 ? namelen : 16);
-  uint64_t expected_be = htobe64(siphash24(key, hash_in, 4 + (size_t)msglen));
+  uint64_t expected_be =
+      htobe64(siphash24(inst->key, hash_in, 4 + (size_t)msglen));
   uint64_t received_be;
   memcpy(&received_be, buf + 4, 8);
   if (expected_be != received_be)
@@ -913,7 +922,7 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
   }
 
   // Populate configuration
-  strncpy(inst->name, opts->name, sizeof(inst->name) - 1);
+  derive_key(opts->name, inst->key);
   inst->protocol_period_ms =
       opts->protocol_period_ms ? opts->protocol_period_ms : 1000;
   inst->ping_timeout_ms = opts->ping_timeout_ms ? opts->ping_timeout_ms : 200;
@@ -1120,9 +1129,8 @@ int swim_pack_authed(const char *name, const uint8_t *msg, int msglen,
   uint8_t hash_in[4 + SWIM_MAX_PACKET_SIZE];
   memcpy(hash_in, &tval_be, 4);
   memcpy(hash_in + 4, msg, (size_t)msglen);
-  uint8_t key[16] = {0};
-  size_t namelen = strlen(name);
-  memcpy(key, name, namelen < 16 ? namelen : 16);
+  uint8_t key[16];
+  derive_key(name, key);
   uint64_t hval_be = htobe64(siphash24(key, hash_in, 4 + (size_t)msglen));
   memcpy(out + 4, &hval_be, 8);
   memcpy(out + 12, msg, (size_t)msglen);
