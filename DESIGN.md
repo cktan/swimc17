@@ -238,7 +238,9 @@ to the nearest tick, since they set a rate. Timeouts
 never fire before their configured duration; one armed by
 an incoming packet rather than on a tick (a suspicion
 learned from gossip) may still fire up to one tick early
-relative to the packet's arrival. If a probe is
+relative to the packet's arrival. A `ping_req` relay
+gets one extra tick for this reason, so its window
+never closes before the requester's. If a probe is
 still resolving when the next period starts (possible when
 `2 × ping_timeout ≥ protocol_period`), the next probe waits
 for it rather than abandoning it, starting on the first

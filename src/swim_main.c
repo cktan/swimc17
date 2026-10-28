@@ -873,8 +873,10 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         r->requester = msg.sender;
         r->target = msg.peer;
         r->seq = msg.seq;
+        // The current tick is already partly over; one more tick keeps the
+        // window from closing before the requester's.
         r->expiry_tick =
-            inst->current_tick + timeout_ticks(inst->ping_timeout_ms);
+            inst->current_tick + timeout_ticks(inst->ping_timeout_ms) + 1;
 
         send_ping(inst, msg.peer, msg.seq);
       }

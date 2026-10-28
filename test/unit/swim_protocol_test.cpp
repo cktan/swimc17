@@ -1492,3 +1492,66 @@ TEST_CASE("protocol: ping timeout is never shorter than configured") {
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// A relay's window opens mid-tick, so counting whole ticks from the current
+// one closed it up to a tick early: with a one-tick timeout, between 0 and
+// 100 ms after the ping_req arrived. It must last at least the timeout.
+TEST_CASE("protocol: a relay waits at least the ping timeout") {
+  swim_nodeid_idx_t m_id = swim_nodeid_find("127.0.0.1:20912/m");
+  swim_nodeid_idx_t t_id = swim_nodeid_find("127.0.0.1:20913/t");
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "relay_window";
+  opts.protocol_period_ms = 10000;
+  opts.ping_timeout_ms = 100;
+  swim_t *inst = swim_start("127.0.0.1:20911/x", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *m = swim_udp_create("127.0.0.1", 20912);
+  REQUIRE(m != nullptr);
+  swim_udp_t *t = swim_udp_create("127.0.0.1", 20913);
+  REQUIRE(t != nullptr);
+
+  auto send = [&](swim_udp_t *from, swim_nodeid_idx_t sender, uint8_t type,
+                  uint32_t seq, swim_nodeid_idx_t peer) {
+    uint8_t msg_buf[256];
+    int msglen = swim_pack_message(type, sender, seq, peer, nullptr, 0, msg_buf,
+                                   sizeof(msg_buf));
+    REQUIRE(msglen > 0);
+    uint8_t buf[256 + 12];
+    int len =
+        swim_pack_authed("relay_window", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(from, "127.0.0.1", 20911, buf, len) == 0);
+  };
+  // Wait up to timeout_ms for a message of `type` and `seq` on u.
+  auto wait_for = [](swim_udp_t *u, uint8_t type, uint32_t seq,
+                     int timeout_ms) {
+    for (int waited = 0; waited < timeout_ms; waited++) {
+      uint8_t buf[SWIM_MAX_PACKET_SIZE];
+      swim_message_t in;
+      int n;
+      while ((n = swim_udp_recv(u, buf, sizeof(buf))) > 12) {
+        if (swim_unpack_message(buf + 12, n - 12, &in) == 0 &&
+            in.type == type && in.seq == seq)
+          return true;
+      }
+      usleep(1000);
+    }
+    return false;
+  };
+
+  // The target answers each relayed ping after 80 ms.
+  int relayed = 0;
+  for (uint32_t seq = 100; seq < 104; seq++) {
+    send(m, m_id, SWIM_MSG_PING_REQ, seq, t_id);
+    REQUIRE(wait_for(t, SWIM_MSG_PING, seq, 1000));
+    usleep(80000);
+    send(t, t_id, SWIM_MSG_ACK, seq, SWIM_NODEID_NONE);
+    relayed += wait_for(m, SWIM_MSG_FWD_ACK, seq, 300);
+  }
+  CHECK(relayed == 4);
+
+  swim_udp_destroy(t);
+  swim_udp_destroy(m);
+  swim_leave(inst);
+  swim_set_error(SWIM_OK, nullptr);
+}
