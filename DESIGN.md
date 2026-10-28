@@ -470,12 +470,14 @@ swim_leave(inst);
 ```
 
 1. Stops and joins the protocol thread.
-2. Sends a leave message directly to
+2. Increments own incarnation number.
+3. Sends a leave message directly to
    `max(⌈N×0.25⌉, 8)` random peers (not via gossip
    queue), where `N` is the number of alive + suspect
-   peers. Receivers mark the node dead (see
-   `ALGORITHM.md` procedure H).
-3. Frees the instance; the handle is invalid
+   peers. Each carries `dead(self, inc)` at the new
+   incarnation, so receivers mark the node dead at its
+   real incarnation (see `ALGORITHM.md` procedure H).
+4. Frees the instance; the handle is invalid
    afterwards.
 
 There is no silent-stop API. If a process exits without

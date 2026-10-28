@@ -1074,3 +1074,57 @@ TEST_CASE("protocol: swim_pack_authed rejects oversized messages") {
   CHECK(swim_pack_authed("g", msg, max_msg + 1, out, sizeof(out)) == -1);
   CHECK(swim_pack_authed("g", msg, 2000, out, sizeof(out)) == -1);
 }
+
+// A LEAVE must carry the leaver's real incarnation as dead(self, inc) gossip.
+// Receivers used to guess "their view + 1"; one that knew the leaver only at
+// incarnation 0 recorded dead@1, which peers' alive@real-inc then overrode.
+TEST_CASE("protocol: leave carries dead(self) at the real incarnation") {
+  const char *x_str = "127.0.0.1:20811/x";
+  swim_nodeid_idx_t x_id = swim_nodeid_find(x_str);
+  swim_nodeid_idx_t m_id = swim_nodeid_find("127.0.0.1:20812/m");
+
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "leave_inc";
+  opts.protocol_period_ms = 10000;
+  swim_t *inst = swim_start(x_str, &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *m = swim_udp_create("127.0.0.1", 20812);
+  REQUIRE(m != nullptr);
+
+  // M joins; X's ack carries its startup alive(self, inc).
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, m_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t buf[256 + 12];
+  int len = swim_pack_authed("leave_inc", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(swim_udp_send(m, "127.0.0.1", 20811, buf, len) == 0);
+  uint64_t alive_inc = recv_alive_inc(m, x_str);
+  REQUIRE(alive_inc > 0);
+
+  swim_leave(inst);
+
+  uint64_t dead_inc = 0;
+  for (int attempt = 0; attempt < 100 && !dead_inc; attempt++) {
+    uint8_t rbuf[SWIM_MAX_PACKET_SIZE];
+    int n = swim_udp_recv(m, rbuf, sizeof(rbuf));
+    if (n <= 12) {
+      usleep(10000);
+      continue;
+    }
+    swim_message_t in;
+    if (swim_unpack_message(rbuf + 12, n - 12, &in) != 0 ||
+        in.type != SWIM_MSG_LEAVE)
+      continue;
+    for (int i = 0; i < in.gossip_count; i++)
+      if (nodeid_eq(in.gossip[i].id, x_id) &&
+          in.gossip[i].status == SWIM_STATUS_DEAD)
+        dead_inc = in.gossip[i].incarnation;
+    break;
+  }
+  CHECK(dead_inc > alive_inc);
+
+  swim_udp_destroy(m);
+  swim_set_error(SWIM_OK, nullptr);
+}

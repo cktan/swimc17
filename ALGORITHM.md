@@ -212,15 +212,21 @@ reply pulls the node into the gossip mesh.
 
 ## H. Graceful leave
 
-H1. Send a `leave` message **directly** (not via the
-    gossip queue) to a fanout of `max(ceil(N × 0.25), 8)`
-    random peers, then stop the instance.
+H1. Bump own incarnation by one, so it outranks any rumor
+    about the node.
 
-H2. A `leave` carries no incarnation. A receiver that
-    knows the sender marks it dead one incarnation above
-    the one it holds, so the dead event outranks any rumor
-    it holds. A `leave` from an unknown node is ignored; it
-    is not a sign of life.
+H2. Send a `leave` message **directly** (not via the
+    gossip queue) to a fanout of `max(ceil(N × 0.25), 8)`
+    random peers, then stop the instance. Each `leave`
+    carries one gossip event, `dead(self, inc)`, at the
+    bumped incarnation.
+
+H3. A receiver applies that event like any other gossip
+    (procedure E), recording the leaver dead at its real
+    incarnation. A `leave` without the event falls back to
+    one incarnation above the one the receiver holds. A
+    `leave` from an unknown node is ignored; it is not a
+    sign of life.
 
 There is no silent-stop API: `swim_leave` always notifies
 peers. If a process exits without calling it, its peers

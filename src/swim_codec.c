@@ -231,9 +231,9 @@ int swim_pack_message(uint8_t type, swim_nodeid_idx_t sender, uint32_t seq,
     p += n;
   }
 
-  // Fill gossip into the remaining packet room (DESIGN §8). With no queue
-  // (e.g. leave messages) the packet simply ends after the header; the
-  // decoder treats a missing gossip section as zero events.
+  // Fill gossip into the remaining packet room (DESIGN §8). With no queue the
+  // packet simply ends after the header; the decoder treats a missing gossip
+  // section as zero events.
   int gossip_bytes = 0;
   if (q) {
     gossip_bytes = swim_gossip_queue_pack(q, active_members, p, end);

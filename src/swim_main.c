@@ -522,15 +522,13 @@ static void seed_retry_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
   }
 }
 
-// Helper to send messages
+// Helper to send messages. Gossip is piggybacked from q (may be NULL).
 static void send_message(swim_instance_t *inst, swim_nodeid_idx_t dest,
                          uint8_t type, swim_nodeid_idx_t sender, uint32_t seq,
-                         swim_nodeid_idx_t peer) {
+                         swim_nodeid_idx_t peer, swim_gossip_queue_t *q) {
   uint8_t buf[SWIM_MAX_PACKET_SIZE];
-  swim_gossip_queue_t *q_to_pass =
-      (type == SWIM_MSG_LEAVE) ? NULL : inst->gossip_queue;
   // Pack message into buf+12, reserving the first 12 bytes for the auth header.
-  int len = swim_pack_message(type, sender, seq, peer, q_to_pass,
+  int len = swim_pack_message(type, sender, seq, peer, q,
                               swim_membership_count(inst->membership), buf + 12,
                               (int)sizeof(buf) - 12);
   if (len > 0) {
@@ -562,22 +560,26 @@ static void send_message(swim_instance_t *inst, swim_nodeid_idx_t dest,
 
 static void send_ping(swim_instance_t *inst, swim_nodeid_idx_t dest,
                       uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_PING, inst->self_id, seq, SWIM_NODEID_NONE);
+  send_message(inst, dest, SWIM_MSG_PING, inst->self_id, seq, SWIM_NODEID_NONE,
+               inst->gossip_queue);
 }
 
 static void send_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
                      uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_ACK, inst->self_id, seq, SWIM_NODEID_NONE);
+  send_message(inst, dest, SWIM_MSG_ACK, inst->self_id, seq, SWIM_NODEID_NONE,
+               inst->gossip_queue);
 }
 
 static void send_ping_req(swim_instance_t *inst, swim_nodeid_idx_t helper,
                           swim_nodeid_idx_t target, uint32_t seq) {
-  send_message(inst, helper, SWIM_MSG_PING_REQ, inst->self_id, seq, target);
+  send_message(inst, helper, SWIM_MSG_PING_REQ, inst->self_id, seq, target,
+               inst->gossip_queue);
 }
 
 static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
                          swim_nodeid_idx_t source, uint32_t seq) {
-  send_message(inst, dest, SWIM_MSG_FWD_ACK, inst->self_id, seq, source);
+  send_message(inst, dest, SWIM_MSG_FWD_ACK, inst->self_id, seq, source,
+               inst->gossip_queue);
 }
 
 // Write a membership-change record to the feed. Caller must hold inst->mutex.
@@ -796,9 +798,10 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       break;
 
     case SWIM_MSG_LEAVE: {
-      // Graceful leave notification: transition the sender node to DEAD, one
-      // incarnation above what we know so it outranks rumors we hold. A LEAVE
-      // carries no incarnation, and an unknown sender has nothing to mark.
+      // Graceful leave notification: transition the sender node to DEAD. The
+      // dead(sender) gossip it carries was applied above at the sender's real
+      // incarnation; this is a fallback for a LEAVE without it, one
+      // incarnation above what we know. An unknown sender has nothing to mark.
       const swim_member_t *m_info =
           swim_membership_get(inst->membership, msg.sender);
       if (!m_info)
@@ -1085,13 +1088,24 @@ int swim_leave(swim_t *inst) {
       if (fanout < 8)
         fanout = 8;
 
+      // Each LEAVE carries dead(self) one incarnation above any rumor about
+      // us, so receivers record our real incarnation rather than guessing it.
+      // A multiplier of fanout keeps the event alive for every send. If the
+      // queue cannot be allocated, the LEAVE goes out without it.
+      inst->incarnation++;
+      swim_gossip_queue_t *leave_q = swim_gossip_queue_create();
+      if (leave_q)
+        swim_gossip_queue_enqueue(leave_q, SWIM_STATUS_DEAD, inst->self_id,
+                                  inst->incarnation, fanout);
+
       for (uint32_t i = 0; i < fanout && count > 0; i++) {
         int idx = rand_r(&inst->rand_state) % count;
         send_message(inst, list[idx].id, SWIM_MSG_LEAVE, inst->self_id,
-                     inst->seq++, SWIM_NODEID_NONE);
+                     inst->seq++, SWIM_NODEID_NONE, leave_q);
         list[idx] = list[count - 1];
         count--;
       }
+      swim_gossip_queue_destroy(leave_q);
       free(list);
     }
   }
