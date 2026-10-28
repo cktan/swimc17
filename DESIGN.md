@@ -663,9 +663,10 @@ with pure random selection.
     opaque and case-sensitive.
 
   Ambiguous hosts are rejected: brackets around anything
-  but an IP, and all-numeric names that are not a dotted
-  quad (`010.0.0.1`, which a resolver may read as
-  octal). A hostname and its IP address remain distinct
+  but an IP, all-numeric names that are not a dotted
+  quad, and names a resolver reads as an IPv4 address
+  (`010.0.0.1` as octal, `0x0a.0.0.1` as hex). A
+  hostname and its IP address remain distinct
   identities; merging them would need DNS.
 - Node IDs are interned in a process-wide pool shared by
   all instances, capped at 4000 distinct strings

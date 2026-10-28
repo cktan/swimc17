@@ -2,6 +2,7 @@
  * https://github.com/cktan/swimc17/blob/main/LICENSE
  */
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE /* inet_aton */
 #include "swim_nodeid.h"
 
 #include <arpa/inet.h>
@@ -110,9 +111,9 @@ static int parse_nodeid(const char *s, const char **host, size_t *host_len,
  *   - IPv4: dotted quad, unbracketed ("[10.0.0.1]" -> "10.0.0.1")
  *   - IPv6: shortest form, bracketed ("[0:0::1]" -> "[::1]"); a zone
  *     ("[fe80::1%eth0]") is kept as written
- *   - hostname: lowercase; brackets, '/' and all-numeric names are rejected
- *     (a numeric name that is not a dotted quad, like "010.0.0.1", may be
- *     read as octal by a resolver)
+ *   - hostname: lowercase; brackets, '/' and all-numeric names are rejected,
+ *     as are other names a resolver reads as an IPv4 address ("010.0.0.1"
+ *     as octal, "0x0a.0.0.1" as hex)
  *   - empty cookie: no slash ("h:1/" -> "h:1"); cookies are otherwise opaque
  */
 static int canonicalize(const char *nodeid, char out[NODEID_CANON_MAX]) {
@@ -152,7 +153,7 @@ static int canonicalize(const char *nodeid, char out[NODEID_CANON_MAX]) {
     strcat(canon_host, "]");
   } else {
     if (nodeid[0] == '[' || strpbrk(host, "/[]") ||
-        strspn(host, "0123456789.") == hl)
+        strspn(host, "0123456789.") == hl || inet_aton(host, &a4))
       return -1;
     for (char *q = host; *q; q++)
       *q = (char)tolower((unsigned char)*q);

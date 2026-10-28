@@ -126,6 +126,8 @@ TEST_CASE("nodeid: equivalent spellings normalize to one identity") {
 TEST_CASE("nodeid: ambiguous hosts are rejected") {
   const char *bad[] = {"010.0.0.1:7000",       // octal-looking, not IPv4
                        "10.0.0:7000",          // numeric but not dotted-quad
+                       "0x0a.0.0.1:7000",      // hex: resolves to 10.0.0.1
+                       "0xa000001:7000",       // likewise
                        "[myhost]:7000",        // brackets only around IPs
                        "[fe80::1%]:7000",      // empty zone
                        "[fe80::1%a/b]:7000",   // zone is an interface name
