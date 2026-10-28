@@ -83,8 +83,8 @@ not an instance name. Only nodes that share the same group
 name exchange messages with each other; packets from nodes
 with a different group name are silently dropped. This is
 how independent clusters can coexist on the same network
-without interfering. The group name also serves as the
-authentication key for every packet (see DESIGN.md §6),
+without interfering. The key that authenticates every
+packet is derived from the group name (see DESIGN.md §6),
 so all members of a group must use the same value.
 
 **Feed** — the library reports membership events through a
@@ -231,6 +231,12 @@ Record formats:
 | `"cluster"` | `"size"`    | `"5"`                 | —          |
 | `"warning"` | `"<msg>"`   | —                     | —          |
 
+`cluster size` counts the peers this node sees as alive
+or suspect, not counting itself, and is written only when
+it changes. `ping rtt` is written only for a direct probe
+answered directly. Node IDs appear in canonical form (see
+[Concepts](#concepts)).
+
 ### Blocking wait
 
 Call `swim_feed_wait` to sleep until the feed is
@@ -351,7 +357,11 @@ telemetry.
 Returns an opaque `swim_t *` handle on success, or
 `NULL` on failure. On failure, sets `swim_errno` to:
 - `SWIM_ERR_INVALID`: `mynodeid` or `opts->name` are
-  NULL, empty, or malformed, or a seed is malformed.
+  NULL, empty, or malformed, a seed is malformed, or
+  the host in `mynodeid` cannot be resolved.
+- `SWIM_ERR_BAD_STATE`: the socket could not be bound
+  (for example, the port is in use) or the protocol
+  thread could not be created.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
 Thread-safe.
@@ -369,9 +379,11 @@ and deallocates all associated resources. Does not
 destroy the caller's feed. The handle is invalid after
 this call.
 
-Returns `0` on success, `-1` on failure.
+Returns `0` on success, or `-1` with
+`SWIM_ERR_INVALID` if `inst` is NULL.
 
-Thread-safe.
+Thread-safe, but no other call may use `inst`
+concurrently or afterwards.
 
 ---
 
@@ -431,6 +443,7 @@ Thread-safe.
 swim_feed_t *swim_feed_create(void);
 void         swim_feed_destroy(swim_feed_t *feed);
 void         swim_feed_wakeall(swim_feed_t *feed);
+int          swim_feed_put(swim_feed_t *feed, int n, ...);
 int          swim_feed_get(swim_feed_t *feed, int bufsz,
                            char *buf, int nptr, char **ptr);
 int          swim_feed_wait(swim_feed_t *feed,
@@ -449,6 +462,13 @@ for the required call order.
 condition variable without writing a record. Use during
 shutdown to unblock threads sleeping in `swim_feed_wait`.
 
+**`swim_feed_put`** — appends a record of `n`
+NUL-terminated strings (1 to `SWIM_FEED_MAX_ELEMENTS`,
+at most `SWIM_FEED_MAX_RECORD_SIZE` bytes in total). The
+library uses it to write telemetry; applications may add
+their own records. Returns `0`, or `-1` with
+`SWIM_ERR_INVALID` for a bad record or `SWIM_ERR_NOMEM`.
+
 **`swim_feed_get`** — copies the next record out of the
 feed into `buf` and populates `ptr[0..n-1]` with
 pointers to each string. Returns the string count
@@ -464,6 +484,11 @@ immediately if the feed already has unread data. Pass
 
 **`swim_feed_empty`** — returns `true` if the feed has
 no unread records.
+
+All feed functions are thread-safe; each takes the feed's
+own lock. The exception is `swim_feed_destroy`, which
+must not run while any thread uses the feed (see
+[Shutdown sequence](#shutdown-sequence)).
 
 ---
 
@@ -482,7 +507,10 @@ a given error code.
 
 Error codes: `SWIM_OK`, `SWIM_ERR_NOMEM`,
 `SWIM_ERR_INVALID`, `SWIM_ERR_FULL`, `SWIM_ERR_TIMEOUT`,
-`SWIM_ERR_BAD_STATE`.
+`SWIM_ERR_BAD_STATE`. `SWIM_ERR_FULL` and
+`SWIM_ERR_TIMEOUT` are reserved and not currently
+returned; `swim_feed_wait` reports a timeout by returning
+`1`.
 
 ---
 
@@ -553,5 +581,16 @@ free(p);
 
 ## Testing
 
-For unit and integration test implementation details,
-see the test suite files in `test/unit/`.
+Run the suite with a debug build:
+
+```bash
+export DEBUG=1
+make test
+```
+
+This runs the unit tests (`test/unit/`) and, in debug
+builds, the 64-node stress tests (`test/stress/`, see
+`test/stress/scale_test_cases.md`). Debug builds also
+expose fault-injection hooks on the UDP transport
+(packet loss, drop filters, DNS failure); see
+`src/swim_udp.h`.

@@ -21,13 +21,15 @@ and libm, and builds down to a single static library.
   third-party JSON/serialization library, no vendored
   crypto. Packet authentication is done with an inline
   ~50-line SipHash-2-4, not a linked crypto library.
-- **Small, bounded footprint** — a 1000-node membership
-  list is about 340 KB; see `DESIGN.md` §17 for the full
-  resource accounting.
-- **Thread-safe by design** — every public call except
-  the feed API is safe to call concurrently; each
-  `swim_t` instance owns its own mutex, and there's no
-  global lock.
+- **Small footprint** — about 33 KB per instance plus 24
+  bytes per member, so a 1000-node membership list is
+  about 24 KB; see `DESIGN.md` §17 for the full resource
+  accounting.
+- **Thread-safe by design** — every public call is safe
+  to call concurrently, including the feed API (only
+  destroying a feed or leaving an instance must not race
+  with other use of it); each `swim_t` instance owns its
+  own mutex, and there's no global lock.
 - **UDP only, IPv4 + IPv6**, capped at a conservative
   1400-byte MTU so it works unmodified across typical
   networks. Nodes are named by IP address or hostname;
@@ -39,9 +41,9 @@ and libm, and builds down to a single static library.
 - **No logging dependency** — telemetry goes out through
   a caller-owned feed queue that you can drain, buffer, or
   pipe into whatever logging you already use.
-- **Tested at scale** — unit tests, property tests, and
-  64-node stress tests with simulated packet loss and
-  network partitions.
+- **Tested at scale** — unit tests, plus 64-node stress
+  tests with simulated packet loss, network partitions
+  and restarts.
 
 ## Quick example
 

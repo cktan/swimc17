@@ -16,7 +16,8 @@ extern "C" {
 // Handle table indexed by node number (1-based; slot 0 unused).
 static swim_t *g_nodes[65] = {};
 
-// swim_opts_for(64, 4000) → T≈540ms, ping_timeout≈108ms (1 tick minimum).
+// swim_opts_for(64, 4000) → T≈540ms, ping_timeout≈108ms (rounded up to 2
+// ticks).
 // Detection latency target ~4s. Used for all tests.
 static swim_start_opts_t make_opts() { return swim_opts_for(64, 4000); }
 
@@ -120,17 +121,17 @@ TEST_CASE("scale: cluster setup") {
 // Time: ~9s
 //
 // Steps:
-// 1. Start node_1 as seed with a telemetry feed attached.
-// 2. Start nodes 2-64, all seeded to node_1.
-// 3. Wait for full convergence: every node sees 63 peers.
-// 4. Kill node_7 (graceful leave); confirm feed reports it down.
-// 5. Pause node_14 (100% outbound packet loss); confirm feed
+// 1. Start all 64 nodes seeded to nodes 1-4, with a telemetry feed
+//    attached to node_1.
+// 2. Wait for full convergence: every node sees 63 peers.
+// 3. Kill node_7 (graceful leave); confirm feed reports it down.
+// 4. Pause node_14 (100% outbound packet loss); confirm feed
 //    reports it down after the suspicion timeout expires.
-// 6. Unpause node_14: clear packet loss, leave, and restart it
+// 5. Unpause node_14: clear packet loss, leave, and restart it
 //    with all 62 surviving nodes as seeds so it rejoins in one
 //    round. Confirm feed reports node_14 up.
-// 7. Wait for all 63 surviving nodes to stabilise at 62 peers.
-// 8. Gracefully leave node_14; confirm feed reports it down.
+// 6. Wait for all 63 surviving nodes to stabilise at 62 peers.
+// 7. Gracefully leave node_14; confirm feed reports it down.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   swim_feed_t *feed = swim_feed_create();
@@ -235,12 +236,12 @@ TEST_CASE("scale: 4-way partition and heal") {
 // Time: ~16s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Isolate node_10: drop all traffic to/from port 5010.
 // 4. Assert the 63-node majority marks node_10 dead
 //    (all nodes except node_10 stabilise at 62 peers).
-// 5. Heal: clear the filter. node_10 seed-retries node_1 after GC
+// 5. Heal: clear the filter. node_10 seed-retries nodes 1-4 after GC
 //    and rejoins; the cluster reconverges.
 // 6. Verify all 64 nodes see 63 peers.
 // ---------------------------------------------------------------------------
@@ -270,7 +271,7 @@ TEST_CASE("scale: asymmetric partition (1 vs 63)") {
 // Time: ~6s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1 with lossy opts.
+// 1. Start all 64 nodes seeded to nodes 1-4 with lossy opts.
 // 2. Verify initial convergence (each node sees 63 peers).
 // 3. Apply 30% outbound loss to all 64 ports.
 // 4. Assert the cluster remains at 63 peers (no false deaths).
@@ -299,7 +300,7 @@ TEST_CASE("scale: 30% packet loss stress") {
 // Time: ~41s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Kill nodes 50-60 simultaneously (graceful leave).
 // 4. Wait for the 53 survivors to stabilise at 52 peers.
@@ -345,7 +346,7 @@ TEST_CASE("scale: churn stress (restarting nodes)") {
 // Time: ~10s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Kill nodes 1-32 simultaneously (including the seed).
 // 4. Immediately restart nodes 1-32 seeded to surviving
@@ -388,7 +389,7 @@ TEST_CASE("scale: half-cluster immediate restart") {
 // Time: ~12s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. Kill nodes 1-32.
 // 4. Wait for nodes 33-64 to mark nodes 1-32 dead
@@ -430,7 +431,7 @@ TEST_CASE("scale: half-cluster staged revival") {
 // Time: ~31s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1.
+// 1. Start all 64 nodes seeded to nodes 1-4.
 // 2. Verify full convergence (each node sees 63 peers).
 // 3. For each of 8 batches of 8 nodes: leave all 8, restart
 //    them, and wait for full convergence before the next batch.
@@ -475,7 +476,7 @@ TEST_CASE("scale: rolling upgrade simulation") {
 // Time: ~6s
 //
 // Steps:
-// 1. Start all 64 nodes seeded to node_1 with lossy opts.
+// 1. Start all 64 nodes seeded to nodes 1-4 with lossy opts.
 // 2. Verify initial convergence (each node sees 63 peers).
 // 3. Apply random per-node packet-loss bursts (0-20%) to
 //    simulate jitter without triggering false deaths.
@@ -504,9 +505,8 @@ TEST_CASE("scale: high latency jitter and delay stress") {
 // Time: ~6s
 //
 // Steps:
-// 1. Start node_1 as the sole seed.
-// 2. Start nodes 2-64 all at once, each seeded only to node_1.
-// 3. Verify all 64 nodes see 63 peers within a generous timeout.
+// 1. Start all 64 nodes at once, seeded to nodes 1-4.
+// 2. Verify all 64 nodes see 63 peers within a generous timeout.
 // ---------------------------------------------------------------------------
 TEST_CASE("scale: bootstrap storm simulation") {
   reset_cluster(make_opts());

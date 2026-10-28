@@ -57,12 +57,15 @@ Constants and their defaults (from the configuration):
 
 A1. Pick one `target` from the alive/suspect members,
     excluding self, using **round-robin with periodic
-    shuffle**: iterate the member list in order, reshuffle
-    when exhausted. This bounds detection latency to
-    `(N-1) × T`.
+    shuffle**: iterate a shuffled snapshot of the member
+    list, reshuffling when it is exhausted. Every member
+    is probed once per round, so two probes of the same
+    member are at most `2(N-1) - 1` periods apart.
 
 A2. Send a direct `ping(seq)` to `target`, carrying gossip
-    (procedure D), and arm a `ping_timeout`.
+    (procedure D), and arm a `ping_timeout`. If the
+    previous probe is still resolving, wait for it and
+    retry on the next tick instead.
 
 A3. Run failure detection on the outcome (procedure B).
 
@@ -78,22 +81,23 @@ B1. **Direct ack received** within `ping_timeout`: target
     done.
 
 B2. **No direct ack**: ask `ping_req_fanout` (`k`) random
-    alive peers to probe `target` on our behalf
-    (`ping_req`). Each relay pings `target`; if `target`
-    answers, the relay forwards the ack back to us
-    (`fwd_ack`). Arm another `ping_timeout`.
+    other members (alive or suspect) to probe `target` on
+    our behalf (`ping_req`). Each relay pings `target`; if
+    `target` answers, the relay forwards the ack back to
+    us (`fwd_ack`). Arm another `ping_timeout`.
 
 B3. **An ack arrives** (directly or via `fwd_ack`) before
     that timeout: target is alive. Done.
 
-B4. **Still no ack**: declare `target` **suspect** — record
-    it, gossip `suspect(target, inc)` (procedure D), write a
+B4. **Still no ack**: if `target` is still alive, declare
+    it **suspect** — record it, gossip
+    `suspect(target, inc)` (procedure D), write a
     telemetry event (procedure I), and start a
     `suspicion_timeout` timer (procedure E governs the
     timer).
 
 B5. **`suspicion_timeout` fires** and `target` is still
-    suspect at the same incarnation: declare it **dead** —
+    suspect: declare it **dead** —
     gossip `dead(target, inc)` and write a telemetry event
     (procedure I).
 
@@ -105,11 +109,15 @@ node.
 
 ## C. Handle an incoming message
 
-Each packet is decoded, its piggybacked gossip is applied
-(procedure E), and then it is dispatched by type:
+Each packet is authenticated and decoded. Unless it is a
+`leave`, it is first-hand evidence that the sender is
+alive: an unknown sender is added at incarnation 0, and a
+suspected one is cleared at its current incarnation (a
+`dead` sender is not revived). Its piggybacked gossip is
+then applied (procedure E), and it is dispatched by type:
 
-- C1. **`ping`** → mark the sender alive (procedure E) and
-  reply with an `ack` (which itself carries gossip).
+- C1. **`ping`** → reply with an `ack` (which itself
+  carries gossip).
 - C2. **`ack`** → cancel the matching pending probe
   (procedure B1/B3).
 - C3. **`ping_req`** (we are a relay) → ping the requested
@@ -170,7 +178,8 @@ events are accepted by these rules:
 - E1. **`alive(node, inc)`**: accepted for an unknown node
   (a join, recorded at that incarnation), or when `inc`
   beats the current incarnation. A `dead` node is revived
-  only by a strictly **higher** incarnation.
+  only by a strictly **higher** incarnation. A `suspect`
+  or `dead` event about an unknown node is ignored.
 - E2. **`suspect(node, inc)`**: accepted if `inc` is at
   least the current incarnation and the node is alive or
   suspect; starts/keeps a suspicion timer (procedure B4).
@@ -180,8 +189,10 @@ events are accepted by these rules:
   **dead > suspect > alive**.
 
 Whenever an event is *adopted* (it actually changed local
-state), it is re-gossiped (procedure D) and a telemetry event is
-written (procedure I).
+state), it is re-gossiped (procedure D), except a `sync`
+record for a node that was unknown (procedure G3). A
+telemetry event is written (procedure I) when the node's
+status changed.
 
 **Dead-node retention**: dead entries are kept for
 `dead_node_expiry` to reject stale `alive` rumors, then
@@ -210,13 +221,16 @@ itself among its seeds does not ping itself.)
 G1. The node starts immediately and converges in the
     background (async join).
 
-G2. Every `seed_retry_interval`: if the node is **alone**
+G2. One tick after startup, then every
+    `seed_retry_interval`: if the node is **alone**
     (no members), it pings **all** seeds to discover the
     cluster; if it is **already in a cluster**, it pings
     **one** random seed, to detect and heal a partition.
 
-A seed ping is an ordinary probe (procedure A2), so the
-reply pulls the node into the gossip mesh.
+A seed ping is a plain `ping` with no probe timeout:
+the seed's `ack` adds the seed as a member, the seed
+learns the node from the ping, and from then on gossip and
+`sync` pull the node into the cluster.
 
 G3. **Catch-up sync.** A stable member generates no gossip
     about itself, so a node that has just joined or
@@ -245,14 +259,14 @@ G3. **Catch-up sync.** A stable member generates no gossip
 
 ## H. Graceful leave
 
-H1. Bump own incarnation by one, so it outranks any rumor
-    about the node.
+H1. Stop the protocol thread, then bump own incarnation
+    by one, so it outranks any rumor about the node.
 
 H2. Send a `leave` message **directly** (not via the
     gossip queue) to a fanout of `max(ceil(N × 0.25), 8)`
-    random peers, then stop the instance. Each `leave`
-    carries one gossip event, `dead(self, inc)`, at the
-    bumped incarnation.
+    random peers (all of them if fewer), then free the
+    instance. Each `leave` carries one gossip event,
+    `dead(self, inc)`, at the bumped incarnation.
 
 H3. A receiver applies that event like any other gossip
     (procedure E), recording the leaver dead at its real

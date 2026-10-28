@@ -6,8 +6,9 @@
  *
  * Implements the full SWIM+Suspicion protocol: probe
  * selection, direct ping, indirect ping-req via helpers,
- * suspicion timers, dead-node GC, and membership event
- * dissemination via the gossip queue.
+ * suspicion timers, dead-node GC, membership event
+ * dissemination via the gossip queue, and catch-up SYNC
+ * samples for peers that know fewer members.
  *
  * swim_start() allocates a swim_t and returns an opaque
  * handle. Each instance owns its own timer and runs a

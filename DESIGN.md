@@ -2,7 +2,7 @@
 
 This is SWIM membership library:
   - C17
-  - no dependency on any libraries other than standard C and UDP socket
+  - no dependencies beyond libc, pthread and libm
 
 ---
 
@@ -88,8 +88,8 @@ different group name are silently dropped. This is
 the mechanism that partitions independent clusters
 sharing the same network.
 
-The group name also serves as the SipHash-2-4 key
-for packet authentication (see §6).
+The packet-authentication key is derived from the
+group name (see §6 and §21).
 
 ---
 
@@ -99,13 +99,17 @@ for packet authentication (see §6).
 - **IP versions:** IPv4 + IPv6
 - **Port:** UDP port (required, configurable)
 - **MTU:** 1400 bytes (conservative, safe everywhere)
-- **Overflow behaviour:** return error — caller
-  re-encodes with fewer piggyback events
+- **Overflow behaviour:** gossip is packed only up to
+  the MTU; events that do not fit stay queued for a
+  later message, so a packet never exceeds 1400 bytes
 - **Fault injection:** debug builds (without
   `NDEBUG`) expose per-port packet loss and a
   drop filter on the UDP transport
   (`swim_udp_set_packet_loss`,
-  `swim_udp_set_drop_filter`) for tests. There is no
+  `swim_udp_set_drop_filter`) for tests, plus hooks
+  for the hostname cache (`swim_udp_resolve_count`,
+  `swim_udp_advance_clock`,
+  `swim_udp_set_resolve_failure`). There is no
   in-memory transport and no delay or reorder
   injection.
 
@@ -113,8 +117,23 @@ for packet authentication (see §6).
 
 ## 5. Wire Encoding
 
-- **Format:** a compact binary serialization of the
-  message terms (a custom or runtime-native encoding).
+- **Format:** a compact custom binary encoding.
+  Integers are big-endian; strings are
+  length-prefixed:
+
+```
+message := type:u8 seq:u32 known:u16 sender:str
+           [peer:str]   # ping_req target, fwd_ack source
+           record*      # to the end of the packet, <= 64
+str     := len:u16 bytes          # a canonical node ID
+record  := id:str status:u8 incarnation:u64
+type    := 1 ping | 2 ack | 3 ping_req | 4 fwd_ack
+         | 5 leave | 6 sync
+status  := 'A' alive | 'S' suspect | 'D' dead
+```
+
+  A packet with an unknown type or status, a malformed
+  node ID, or more than 64 records is dropped whole.
 - Not polyglot — acceptable for a single-runtime
   library.
 - **Message shape:**
@@ -142,8 +161,10 @@ larger catches the sender up with a `sync`
 {fwd_ack, sender :: host:port/cookie, seq :: non_neg_integer,
           source :: host:port/cookie, updates :: [update]}
 
-# leave
-{leave, sender :: host:port/cookie, seq :: non_neg_integer}
+# leave (updates hold dead(self) at the leaver's new
+# incarnation; see §11)
+{leave, sender :: host:port/cookie, seq :: non_neg_integer,
+        updates :: [update]}
 
 # sync (a random sample of the sender's membership)
 {sync, sender :: host:port/cookie, seq :: non_neg_integer,
@@ -294,10 +315,11 @@ the design choices.
   No user-defined event type.
 - **Priority ordering:** dead → suspect → alive.
   Within the same priority, events with the lowest
-  transmit count are packed first.
+  transmit count are packed first, then by node ID.
 - **Supersession:** when a higher-incarnation event
-  for the same node arrives, the old event is replaced
-  in the queue immediately.
+  for the same node arrives, or one at the same
+  incarnation with a more urgent status, the old
+  event is replaced in the queue immediately.
 - **Expiry:** events are dropped from the queue once
   their transmit count reaches the transmit limit
   (which is the base limit scaled by the event's
@@ -342,8 +364,9 @@ records the design decisions behind them.
 - **Membership list capacity:** unbounded. The array
   starts at 16 slots and doubles on each realloc.
   There is no hard cap. This is reasonable for the
-  intended scale (tens to hundreds of nodes); at
-  1000 members the list is ~340 KB. The risk is
+  intended scale (tens to hundreds of nodes); an
+  entry is 24 bytes, so 1000 members take ~24 KB.
+  The risk is
   runaway growth if a bug or misconfiguration causes
   the node to accept membership for many fake peers —
   there is no defence against that today.
@@ -364,6 +387,14 @@ Join and seed handling are specified in `ALGORITHM.md`
   (default 5000 ms, fixed interval).
 - **Join mode:** async — the node starts immediately
   and membership converges in the background.
+- **Shared seed lists:** a node skips its own ID in
+  its seed list, so every node can use one list.
+- **Catch-up:** a peer that sees a node knows fewer
+  members than it does sends that node a random
+  sample of its membership (`sync`, `ALGORITHM.md`
+  procedure G3), so a joining or restarted node
+  learns the cluster without waiting to probe
+  everyone.
 
 ---
 
@@ -411,8 +442,8 @@ returned by `swim_start`.
 ### Querying membership
 
 ```c
-int count;
-char *p = swim_peers(inst, false, &count);
+char *p;
+int count = swim_peers(inst, false, &p);
 // iterate: char *s = p; for (int i = 0; i < count; i++) { ...; s += strlen(s)+1; }
 free(p);
 ```
@@ -485,7 +516,8 @@ Semantics — local and advisory:
 It cannot override a same-incarnation `suspect` already
 circulating elsewhere; only the peer's own self-refutation
 (a higher incarnation) is authoritative cluster-wide. A
-peer this node has never seen is ignored. The call is
+peer this node has never seen is ignored; a malformed
+`peer` string fails with `SWIM_ERR_INVALID`. The call is
 synchronous: it briefly takes the instance lock, so it
 can wait while the protocol thread holds it.
 
@@ -498,11 +530,12 @@ swim_leave(inst);
 1. Stops and joins the protocol thread.
 2. Increments own incarnation number.
 3. Sends a leave message directly to
-   `max(⌈N×0.25⌉, 8)` random peers (not via gossip
-   queue), where `N` is the number of alive + suspect
-   peers. Each carries `dead(self, inc)` at the new
-   incarnation, so receivers mark the node dead at its
-   real incarnation (see `ALGORITHM.md` procedure H).
+   `max(⌈N×0.25⌉, 8)` random peers (all of them if
+   fewer; not via the gossip queue), where `N` is the
+   number of alive + suspect peers. Each carries
+   `dead(self, inc)` at the new incarnation, so
+   receivers mark the node dead at its real
+   incarnation (see `ALGORITHM.md` procedure H).
 4. Frees the instance; the handle is invalid
    afterwards.
 
@@ -557,14 +590,20 @@ data arrives rather than busy-polling.
 "node"    "suspect" "host:port/cookie"   # a peer became suspect
 "node"    "down"    "host:port/cookie"   # a peer was declared dead
 "ping"    "rtt"     "host:port/cookie" "<ms>"  # direct probe round-trip
-"cluster" "size"    "<n>"               # alive+suspect count, on change
-"warning" "message dropped to host:port/cookie"  # outbound drop
+"cluster" "size"    "<n>"               # alive+suspect peers, on change
+"warning" "<text>"                      # e.g. "message dropped to <node>"
 ```
 
-- A node renders as `host:port/cookie`, with IPv6
-  hosts bracketed (via `swim_node_id_format`). The
-  cookie is carried as its own record string, so no
-  escaping is needed.
+- A node is one string, its canonical ID (§18):
+  `host:port`, or `host:port/cookie` when the cookie
+  is not empty, with IPv6 hosts bracketed.
+- `cluster size` counts the peers this node sees as
+  alive or suspect, not counting itself.
+- Warnings report an unresolvable send destination
+  (`message dropped to <node>`) or an internal
+  failure that degrades the protocol (a timer that
+  could not be armed, an indirect probe skipped for
+  lack of memory).
 - `ping rtt` is reported only for a clean **direct** probe
   round-trip (a direct ack to our ping); indirect/relayed
   resolutions produce no rtt event.
@@ -582,9 +621,10 @@ data arrives rather than busy-polling.
 The node probes one peer per period using
 **round-robin with periodic shuffle** (see
 `ALGORITHM.md` procedure A1). The design rationale:
-this bounds worst-case detection latency to
-`(N-1) × T`, avoiding the unlucky streaks possible
-with pure random selection.
+every member is probed once per round of `N-1`
+periods, so two probes of the same member are at most
+`2(N-1) - 1` periods apart, avoiding the unbounded
+unlucky streaks possible with pure random selection.
 
 ---
 
@@ -601,14 +641,17 @@ with pure random selection.
 - **Large-scale Stress tests:** 64-node clusters
   testing staged startup, churn, and network
   partitions.
-- **Property tests:**
-  1. Encoding roundtrip: `∀ msg → encode → decode = msg`
-  2. State machine: no invalid transitions regardless
-     of event sequence and incarnation values
-  3. Gossip queue: packed output always respects
-     dead > suspect > alive priority regardless of
-     insertion order
-- **CI:** run locally with the test runner.
+- **Codec, membership and gossip-queue tests:**
+  encoding roundtrips and rejection of malformed
+  packets, the incarnation and status precedence
+  rules for every state, and the queue's priority
+  order, supersession and transmit limits. These are
+  example-based; there are no randomized property
+  tests.
+- **CI:** GitHub Actions (`.github/workflows/nix.yml`)
+  runs a debug build, `make test` and `make install`
+  on Ubuntu and macOS for pushes and pull requests to
+  `main`.
 
 ---
 
@@ -631,17 +674,28 @@ with pure random selection.
 |------|---------|
 | `SWIM_OK` | No error |
 | `SWIM_ERR_NOMEM` | Out of memory |
-| `SWIM_ERR_INVALID` | Invalid argument or malformed packet |
-| `SWIM_ERR_FULL` | Gossip queue or feed full |
-| `SWIM_ERR_TIMEOUT` | Operation timed out (e.g., `swim_feed_wait`) |
-| `SWIM_ERR_BAD_STATE` | Object in an illegal state |
+| `SWIM_ERR_INVALID` | Invalid or malformed argument (node ID, group name, feed record), or an address that cannot be resolved |
+| `SWIM_ERR_FULL` | Reserved; not currently returned |
+| `SWIM_ERR_TIMEOUT` | Reserved; not currently returned (`swim_feed_wait` returns 1 on timeout) |
+| `SWIM_ERR_BAD_STATE` | A system call failed: binding the socket, creating the protocol thread, or sending |
 
 ## 17. Resource Usage
 
-- **Membership list** – starts with 16 entries, doubles on growth. For 1000 nodes the list is ~340 KB. No hard cap.
-- **Feed** – 4 KB pages; each record ≤ `SWIM_FEED_MAX_RECORD_SIZE` (1024 B) plus a 4‑byte length header.
-- **Packet size** – maximum 1400 bytes (`SWIM_MAX_PACKET_SIZE`). Larger payloads cause `SWIM_ERR_INVALID`.
-- **Memory overhead** – each node contributes at most a few kilobytes (membership entry + feed page).
+- **Instance** – about 33 KB fixed per `swim_t`, mostly a
+  per-peer table (`SWIM_NODEID_TABLE_SIZE` × 4 bytes)
+  that rate-limits catch-up `sync` messages.
+- **Membership list** – 24 bytes per entry; starts with
+  16 entries and doubles on growth, so 1000 members
+  take ~24 KB. No hard cap.
+- **Node ID pool** – process-wide: a 64 KB table plus
+  one heap string per distinct ID, up to 4000 IDs
+  (§18).
+- **Feed** – 4 KB pages; a record holds at most
+  `SWIM_FEED_MAX_RECORD_SIZE` (1024) bytes of strings
+  plus a 4-byte count header.
+- **Packet size** – at most 1400 bytes
+  (`SWIM_MAX_PACKET_SIZE`); gossip that does not fit
+  waits for a later message.
 
 ## 18. Node Identity Limits
 
@@ -682,18 +736,27 @@ with pure random selection.
 
 ## 19. Thread‑Safety
 
-All public functions are thread‑safe **except** the feed API:
-- `swim_feed_create`, `swim_feed_destroy`, `swim_feed_put`, `swim_feed_get`, `swim_feed_wait`, `swim_feed_wakeall`, `swim_feed_empty` can be called concurrently from multiple threads because they internally protect the data structures with a mutex.
-- The library itself does not perform any global locking; each `swim_t` instance owns its own mutex.
+All public functions are thread-safe, with two
+lifetime rules:
+- The feed functions take the feed's own mutex, so
+  any of them can be called concurrently, except
+  `swim_feed_destroy`: no thread may be using the
+  feed, or blocked in `swim_feed_wait`, when it is
+  destroyed (wake and join readers first).
+- `swim_leave` frees the instance; no other call may
+  use that handle concurrently or afterwards.
+
+Each `swim_t` instance owns its own mutex. The only
+process-wide state is the node ID pool (§18), which has
+its own lock and lock-free lookups.
 ## 20. Protocol Limits
 
 | Constant | Description |
 |----------|-------------|
-| `SWIM_MAX_PACKET_SIZE` | Maximum UDP payload size (1400 bytes). |
-| `SWIM_MAX_EVENTS` | Maximum gossip updates that can be decoded from a packet. |
-| `SWIM_FEED_MAX_RECORD_SIZE` | Maximum size of a telemetry record (1024 bytes). |
-| `SWIM_MAX_PACKET_SIZE` is enforced in `swim_pack_message`; exceeding it returns `SWIM_ERR_INVALID`. |
-| `SWIM_MAX_EVENTS` caps the loop in `swim_unpack_message`. |
+| `SWIM_MAX_PACKET_SIZE` | Maximum UDP payload size (1400 bytes, including the 12-byte auth header). Outgoing messages are packed into this buffer and never exceed it. |
+| `SWIM_MAX_EVENTS` | Maximum records per packet (64). The packer stops at it; the decoder drops a packet that has more. |
+| `SWIM_FEED_MAX_RECORD_SIZE` | Maximum string bytes in a telemetry record (1024). |
+| `SWIM_FEED_MAX_ELEMENTS` | Maximum strings in a telemetry record (10). |
 
 ## 21. Secret Handling
 
@@ -720,11 +783,19 @@ the function returns the **default timing parameters** (T = 1000 ms, etc.)
 
 ## 24. Glossary
 
-- **tval** – 4‑byte big‑endian Unix timestamp prepended to every packet.
-- **hval** – 8‑byte SipHash‑2‑4 MAC over `tval || message`.
-- **Incarnation** – monotonic counter incremented on each change of a node’s state.
-- **Transmit multiplier** – `ceil(log₂(N+1)) × 3` where `N` is the number of alive + suspect nodes.
-- **Ping target selection** – round‑robin with periodic shuffle (procedure A1).
+- **tval** – 4-byte big-endian Unix timestamp prepended
+  to every packet.
+- **hval** – 8-byte SipHash-2-4 MAC over
+  `tval || message`.
+- **Incarnation** – a node's own version number, seeded
+  from the wall clock at startup and raised only by the
+  node itself: to refute a rumor that it is suspect or
+  dead, and when it leaves.
+- **Transmit limit** – `ceil(log₂(N+1)) × 3` sends, where
+  `N` is the number of alive + suspect nodes, scaled by
+  an event's multiplier.
+- **Ping target selection** – round-robin with periodic
+  shuffle (procedure A1).
 
 ## 25. Feed Record Format
 
@@ -736,4 +807,8 @@ char str1\0
 ...
 char str(n‑1)\0
 ```
-The total size must not exceed `SWIM_FEED_MAX_RECORD_SIZE` (including the 4‑byte length header). The `swim_feed_get` API copies the strings into the caller‑provided buffer and returns the count `n`.
+The strings, with their NULs, must total at most
+`SWIM_FEED_MAX_RECORD_SIZE` bytes, not counting the
+4-byte `n` header. The `swim_feed_get` API copies the
+strings into the caller-provided buffer and returns
+the count `n`.

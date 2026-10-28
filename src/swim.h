@@ -29,9 +29,9 @@
 #define SWIM_WAIT_FOREVER UINT64_MAX
 
 /**
- * Return the latest thread-local errno
+ * Return the latest thread-local error code.
  *
- * @return the error message string.
+ * @return the error code (SWIM_OK, SWIM_ERR_*).
  */
 SWIM_EXTERN int swim_errno(void);
 
@@ -152,6 +152,9 @@ SWIM_EXTERN int swim_feed_wait(swim_feed_t *feed, uint64_t timeout_ms);
  * it carries no protocol meaning beyond forming part
  * of the identity. Two nodes on the same host:port
  * but with different cookies are distinct nodes.
+ * Node IDs are normalized (e.g. "[0:0::1]:07000" is
+ * "[::1]:7000"), and the library reports them in that
+ * canonical form; see USAGE.md.
  *
  * The `name` field in swim_start_opts_t is a group
  * name, not an instance name. Only nodes that share
@@ -247,7 +250,8 @@ SWIM_EXTERN swim_start_opts_t swim_opts_for(int n, uint64_t detect_ms);
  *                 that distinguishes nodes sharing the same
  *                 host:port.
  * @param opts     Startup options (opts->name is mandatory).
- * @return Opaque instance handle on success, NULL on failure.
+ * @return Opaque instance handle on success, NULL on failure (sets
+ *         swim_errno).
  */
 SWIM_EXTERN swim_t *swim_start(const char *mynodeid,
                                const swim_start_opts_t *opts);
