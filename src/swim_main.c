@@ -610,13 +610,14 @@ static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
 // per protocol period.
 static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
                             uint16_t peer_known) {
-  int active = swim_membership_count(inst->membership);
-  int mine = active + 1;
-  if (peer_known >= mine)
-    return;
+  // Rate limit first: it is cheap, and counting members is a full scan.
   uint32_t last = inst->sync_tick[peer.v];
   if (last && inst->current_tick + 1 - last <
                   (uint64_t)ms_to_ticks(inst->protocol_period_ms))
+    return;
+  int active = swim_membership_count(inst->membership);
+  int mine = active + 1;
+  if (peer_known >= mine)
     return;
 
   int k = (mine - peer_known + 4) / 5; // ceil(20% of the gap)
