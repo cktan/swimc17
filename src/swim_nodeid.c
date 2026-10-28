@@ -228,6 +228,12 @@ swim_nodeid_idx_t swim_nodeid_get(const char *nodeid) {
   return nodeid_probe(canon);
 }
 
+/* Return 0 if nodeid is well-formed, -1 if not. */
+int swim_nodeid_check(const char *nodeid) {
+  char canon[NODEID_CANON_MAX];
+  return canonicalize(nodeid, canon);
+}
+
 /* Return nodeid string for idx; lock-free. */
 const char *swim_nodeid_lookup(swim_nodeid_idx_t idx) {
   if (idx.v >= SWIM_NODEID_TABLE_SIZE)

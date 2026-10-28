@@ -50,6 +50,9 @@ swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
  * SWIM_NODEID_NONE if absent or malformed. */
 swim_nodeid_idx_t swim_nodeid_get(const char *nodeid);
 
+/* Return 0 if nodeid is well-formed (see swim_nodeid_find), -1 if not. */
+int swim_nodeid_check(const char *nodeid);
+
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */
 void swim_nodeid_destroy(void);
 

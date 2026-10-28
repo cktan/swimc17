@@ -59,6 +59,15 @@ TEST_CASE("nodeid: swim_hint_alive does not register unknown peers") {
   CHECK(swim_hint_alive(inst, peer) == 0);
   CHECK(!nodeid_valid(swim_nodeid_get(peer)));
 
+  // A malformed peer is a caller error, not an unknown peer.
+  const char *bad[] = {"10.0.0.5", "[::1]7000", "h:0", "010.0.0.1:7000"};
+  for (const char *b : bad) {
+    INFO(std::string(b));
+    swim_set_error(SWIM_OK, nullptr);
+    CHECK(swim_hint_alive(inst, b) == -1);
+    CHECK(swim_errno() == SWIM_ERR_INVALID);
+  }
+
   swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }

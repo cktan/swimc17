@@ -1257,8 +1257,11 @@ int swim_hint_alive(swim_t *inst, const char *peer) {
   // Look up without registering: a peer we have never seen cannot be a member,
   // and registering arbitrary caller strings would consume pool slots.
   swim_nodeid_idx_t peer_idx = swim_nodeid_get(peer);
-  if (!nodeid_valid(peer_idx))
+  if (!nodeid_valid(peer_idx)) {
+    if (swim_nodeid_check(peer) != 0)
+      return swim_set_error(SWIM_ERR_INVALID, "Malformed peer node ID");
     return 0;
+  }
 
   pthread_mutex_lock(&inst->mutex);
 

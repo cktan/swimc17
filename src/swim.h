@@ -280,7 +280,8 @@ SWIM_EXTERN int swim_peers(swim_t *inst, bool include_dead, char **out);
  *
  * @param inst The instance handle returned by swim_start.
  * @param peer The node ID of the peer.
- * @return 0 on success, -1 on failure.
+ * @return 0 on success (including an unknown peer), -1 if inst is NULL or
+ *         peer is NULL or malformed (sets swim_errno).
  */
 SWIM_EXTERN int swim_hint_alive(swim_t *inst, const char *peer);
 
