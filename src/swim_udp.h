@@ -84,16 +84,21 @@ SWIM_EXTERN void swim_clear_udp_loss(void);
 
 /**
  * Return how many hostname lookups (getaddrinfo calls for a send
- * destination) have been made, across all transports. Debug builds
- * only.
+ * destination) transport u has made. Debug builds only.
  */
-SWIM_EXTERN int swim_udp_resolve_count(void);
+SWIM_EXTERN int swim_udp_resolve_count(const swim_udp_t *u);
 
 /**
  * Advance the clock the destination cache uses to expire entries, to
  * test lifetimes without waiting. Debug builds only.
  */
 SWIM_EXTERN void swim_udp_advance_clock(uint64_t ms);
+
+/**
+ * Make every hostname lookup fail (on != 0) or behave normally (on ==
+ * 0), to simulate a DNS outage. Debug builds only.
+ */
+SWIM_EXTERN void swim_udp_set_resolve_failure(int on);
 #endif
 
 #endif // SWIM_UDP_H

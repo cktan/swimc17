@@ -11,8 +11,9 @@
  * On send, the destination is resolved with inet_pton
  * first (fast path for numeric IP literals). Hostname
  * destinations go through a per-transport cache: a
- * successful lookup is reused for 60 s and a failed one is
- * retried after 5 s, keeping the previous address meanwhile.
+ * successful lookup is reused for 60 s. A failed refresh
+ * keeps the previous address for another 60 s; a host that
+ * has never resolved is retried after 5 s.
  * A lookup still blocks the protocol loop (under the
  * instance lock) on first use and on each expiry.
  *
@@ -39,7 +40,8 @@
 #include <unistd.h>
 
 // Lifetimes of a cached hostname lookup: a resolved address is reused for
-// RESOLVE_OK_MS; a failed lookup is retried after RESOLVE_FAIL_MS.
+// RESOLVE_OK_MS, as is the old address after a failed refresh; a host that
+// has never resolved is retried after RESOLVE_FAIL_MS.
 #define RESOLVE_OK_MS 60000
 #define RESOLVE_FAIL_MS 5000
 
@@ -60,6 +62,7 @@ struct swim_udp_t {
   resolved_t *cache; // hostname destinations; IP literals bypass it
   int cache_count;
   int cache_cap;
+  int resolve_count; // getaddrinfo calls for destinations, for tests
 };
 
 #ifndef NDEBUG
@@ -78,13 +81,17 @@ void swim_clear_udp_loss(void) {
   g_drop_filter = NULL;
 }
 
-static atomic_int g_resolve_count;
 static _Atomic uint64_t g_clock_offset_ms;
+static atomic_int g_resolve_failure;
 
-int swim_udp_resolve_count(void) { return atomic_load(&g_resolve_count); }
+int swim_udp_resolve_count(const swim_udp_t *u) { return u->resolve_count; }
 
 void swim_udp_advance_clock(uint64_t ms) {
   atomic_fetch_add(&g_clock_offset_ms, ms);
+}
+
+void swim_udp_set_resolve_failure(int on) {
+  atomic_store(&g_resolve_failure, on);
 }
 #endif
 
@@ -131,16 +138,23 @@ static const resolved_t *resolve_cached(swim_udp_t *u, const char *host) {
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = u->family;
     hints.ai_socktype = SOCK_DGRAM;
+    int rc = getaddrinfo(host, NULL, &hints, &res);
+    u->resolve_count++;
 #ifndef NDEBUG
-    atomic_fetch_add(&g_resolve_count, 1);
+    if (rc == 0 && atomic_load(&g_resolve_failure)) {
+      freeaddrinfo(res);
+      rc = EAI_FAIL;
+    }
 #endif
-    if (getaddrinfo(host, NULL, &hints, &res) == 0) {
+    if (rc == 0) {
       memcpy(&r->addr, res->ai_addr, res->ai_addrlen);
       r->addr_len = res->ai_addrlen;
       r->expires_ms = now + RESOLVE_OK_MS;
       freeaddrinfo(res);
     } else {
-      r->expires_ms = now + RESOLVE_FAIL_MS;
+      // With an address still in hand, wait the full lifetime before trying
+      // again: a failing resolver can block every attempt for seconds.
+      r->expires_ms = now + (r->addr_len ? RESOLVE_OK_MS : RESOLVE_FAIL_MS);
     }
   }
   return r->addr_len ? r : NULL;

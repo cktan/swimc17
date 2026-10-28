@@ -42,9 +42,11 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
   `"host:port/cookie"`
   - `host` is a string (IP address or hostname).
     Hostnames are resolved through a per-instance
-    cache: a lookup is reused for 60 s, and a failed
-    one is retried after 5 s while the previous
-    address stays in use. Each lookup is still a
+    cache: a lookup is reused for 60 s. A failed
+    refresh keeps the previous address for another
+    60 s, so a DNS outage costs one lookup per host
+    per minute; a host that has never resolved is
+    retried after 5 s. Each lookup is still a
     synchronous DNS query on the protocol thread
     under the instance lock, so it can stall the
     protocol loop and API callers on first use and

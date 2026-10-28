@@ -234,9 +234,9 @@ TEST_CASE("udp: hostname destinations are resolved once and cached") {
   REQUIRE(u1 != nullptr);
   REQUIRE(u2 != nullptr);
 
-  int before = swim_udp_resolve_count();
+  int before = swim_udp_resolve_count(u1);
   CHECK(send_n(u1, "localhost", 18012, 5) == 5);
-  CHECK(swim_udp_resolve_count() == before + 1);
+  CHECK(swim_udp_resolve_count(u1) == before + 1);
 
   // The cached address reaches the IPv4 socket.
   uint8_t buf[16];
@@ -248,7 +248,7 @@ TEST_CASE("udp: hostname destinations are resolved once and cached") {
   // Past the 60 s lifetime, the next send re-resolves once.
   swim_udp_advance_clock(61000);
   CHECK(send_n(u1, "localhost", 18012, 3) == 3);
-  CHECK(swim_udp_resolve_count() == before + 2);
+  CHECK(swim_udp_resolve_count(u1) == before + 2);
 
   swim_udp_destroy(u1);
   swim_udp_destroy(u2);
@@ -258,14 +258,42 @@ TEST_CASE("udp: failed lookups are retried after 5 s, not on every send") {
   swim_udp_t *u = swim_udp_create("127.0.0.1", 18013);
   REQUIRE(u != nullptr);
 
-  int before = swim_udp_resolve_count();
+  int before = swim_udp_resolve_count(u);
   CHECK(send_n(u, "nonexistent.invalid", 9, 3) == 0);
-  CHECK(swim_udp_resolve_count() == before + 1);
+  CHECK(swim_udp_resolve_count(u) == before + 1);
 
   swim_udp_advance_clock(5100);
   CHECK(send_n(u, "nonexistent.invalid", 9, 3) == 0);
-  CHECK(swim_udp_resolve_count() == before + 2);
+  CHECK(swim_udp_resolve_count(u) == before + 2);
 
   swim_udp_destroy(u);
   swim_set_error(SWIM_OK, nullptr);
+}
+
+// During a DNS outage a known host keeps its old address, and is retried
+// at the normal lifetime: each failing lookup can block the protocol loop
+// for the resolver's whole timeout.
+TEST_CASE("udp: a failed refresh keeps the address and waits 60 s") {
+  swim_udp_t *u = swim_udp_create("127.0.0.1", 18014);
+  REQUIRE(u != nullptr);
+
+  int before = swim_udp_resolve_count(u);
+  CHECK(send_n(u, "localhost", 18015, 1) == 1);
+  CHECK(swim_udp_resolve_count(u) == before + 1);
+
+  swim_udp_set_resolve_failure(1);
+  swim_udp_advance_clock(61000);
+  CHECK(send_n(u, "localhost", 18015, 1) == 1); // old address still used
+  CHECK(swim_udp_resolve_count(u) == before + 2);
+
+  swim_udp_advance_clock(5100);
+  CHECK(send_n(u, "localhost", 18015, 1) == 1);
+  CHECK(swim_udp_resolve_count(u) == before + 2); // not yet retried
+
+  swim_udp_advance_clock(55000);
+  CHECK(send_n(u, "localhost", 18015, 1) == 1);
+  CHECK(swim_udp_resolve_count(u) == before + 3);
+
+  swim_udp_set_resolve_failure(0);
+  swim_udp_destroy(u);
 }
