@@ -167,6 +167,9 @@ static int unpack_membership(swim_member_t *m, const uint8_t *p,
   n = unpack_int8(&status, p, q);
   if (n < 0)
     return -1;
+  if (status != SWIM_STATUS_ALIVE && status != SWIM_STATUS_SUSPECT &&
+      status != SWIM_STATUS_DEAD)
+    return -1;
   m->status = (swim_status_t)status;
   p += n;
 

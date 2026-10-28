@@ -195,3 +195,25 @@ TEST_CASE("codec: fwd_ack roundtrip") {
   CHECK(nodeid_eq(decoded.sender, sender));
   CHECK(nodeid_eq(decoded.peer, peer));
 }
+
+TEST_CASE("codec: gossip with an unknown status is rejected") {
+  swim_nodeid_idx_t sender = swim_nodeid_find("10.0.0.1:7001/s");
+  swim_nodeid_idx_t other = swim_nodeid_find("10.0.0.3:7003/o");
+  REQUIRE(nodeid_valid(sender));
+  REQUIRE(nodeid_valid(other));
+
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  int len = swim_pack_message(SWIM_MSG_PING, sender, 1, SWIM_NODEID_NONE,
+                              nullptr, 0, buf, sizeof(buf));
+  REQUIRE(len > 0);
+  swim_member_t ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.id = other;
+  ev.status = 'X';
+  ev.incarnation = 9;
+  int n = swim_pack_membership(&ev, buf + len, buf + sizeof(buf));
+  REQUIRE(n > 0);
+
+  swim_message_t decoded;
+  CHECK(swim_unpack_message(buf, len + n, &decoded) == -1);
+}
