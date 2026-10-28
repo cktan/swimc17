@@ -9,15 +9,15 @@
  * 0 instead of blocking when no data is available.
  *
  * On send, the destination is resolved with inet_pton
- * first (fast path for numeric IP literals, which is the
- * common case since recv normalizes all peer addresses
- * numerically). getaddrinfo is used only when inet_pton
- * fails, i.e. for hostname destinations. This avoids
- * synchronous DNS lookups in the hot protocol loop.
+ * first (fast path for numeric IP literals). getaddrinfo
+ * is used only when inet_pton fails, i.e. for hostname
+ * destinations, and then runs on every send: a synchronous
+ * DNS lookup in the protocol loop. Destinations come from
+ * node IDs as written, so use IP literals in node IDs to
+ * avoid it.
  *
- * recv populates the out_src node ID with the sender's
- * numeric address and port; the cookie field is cleared
- * because the UDP layer has no knowledge of it.
+ * recv does not report the source address; the protocol
+ * replies to the sender's node ID carried in the message.
  */
 #define _GNU_SOURCE
 #include "swim_udp.h"
@@ -156,10 +156,9 @@ int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
     return 0;
 #endif
 
-  // Resolve the destination to a sockaddr. IP-literal hosts (the common case
-  // here, since recv normalizes every peer to a numeric address) are built
-  // directly with inet_pton, avoiding a synchronous DNS lookup in the protocol
-  // loop. getaddrinfo is used only for actual hostnames.
+  // Resolve the destination to a sockaddr. IP-literal hosts are built directly
+  // with inet_pton; hostnames fall back to a synchronous getaddrinfo on every
+  // send.
   struct sockaddr_storage ss;
   socklen_t ss_len = 0;
   memset(&ss, 0, sizeof(ss));

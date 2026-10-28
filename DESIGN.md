@@ -40,7 +40,11 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
 
 - **Wire and API type:** address string
   `"host:port/cookie"`
-  - `host` is a string (IP address or hostname)
+  - `host` is a string (IP address or hostname).
+    Prefer IP literals: every packet sent to a
+    hostname does a synchronous DNS lookup on the
+    protocol thread while it holds the instance lock,
+    stalling the protocol loop and API callers.
   - `port` is a decimal integer
   - `cookie` is a string (user-defined opaque
     datum). Optionally specified by the caller;
