@@ -72,10 +72,18 @@ static uint64_t get_now_ms(void) {
 // Round n up to the next multiple of 8.
 static inline size_t align8(size_t n) { return (n + 7) & ~(size_t)7; }
 
-// Convert a duration to 100 ms timer ticks, rounding to nearest. Never returns
-// 0: swim_timer_add requires >= 1, and a sub-tick duration still waits a tick.
+// Convert a period (protocol period, seed retry) to 100 ms timer ticks,
+// rounding to nearest: a period sets a rate, so closest is best. Never
+// returns 0: swim_timer_add requires >= 1.
 static inline int ms_to_ticks(uint64_t ms) {
   uint64_t t = (ms + 50) / 100;
+  return t ? (int)t : 1;
+}
+
+// Convert a timeout (ping, suspicion) to ticks, rounding up: a timeout is a
+// minimum wait, and firing early turns a slow but healthy peer into a suspect.
+static inline int timeout_ticks(uint64_t ms) {
+  uint64_t t = (ms + 99) / 100;
   return t ? (int)t : 1;
 }
 
@@ -367,7 +375,7 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
     // Arm timeout alarm. Without it the probe would never resolve and block
     // every later one.
-    if (arm_probe_timeout(inst, ms_to_ticks(inst->ping_timeout_ms), seq) != 0)
+    if (arm_probe_timeout(inst, timeout_ticks(inst->ping_timeout_ms), seq) != 0)
       inst->pending_probe.state = PROBE_NONE;
   }
 
@@ -418,7 +426,7 @@ static void arm_suspicion_timer(swim_instance_t *inst, swim_nodeid_idx_t id) {
     return;
   }
   *suspect_param = id;
-  if (swim_timer_add(inst->timer, ms_to_ticks(inst->suspicion_timeout_ms),
+  if (swim_timer_add(inst->timer, timeout_ticks(inst->suspicion_timeout_ms),
                      alarm_name, suspicion_timer_cb, inst,
                      suspect_param) != 0) {
     free(suspect_param);
@@ -473,7 +481,7 @@ static void probe_timeout_cb(swim_instance_t *inst, uint32_t seq) {
     }
 
     // Arm second timeout alarm for indirect probe
-    if (arm_probe_timeout(inst, ms_to_ticks(inst->ping_timeout_ms), seq) != 0)
+    if (arm_probe_timeout(inst, timeout_ticks(inst->ping_timeout_ms), seq) != 0)
       inst->pending_probe.state = PROBE_NONE;
 
   } else if (inst->pending_probe.state == PROBE_INDIRECT &&
@@ -850,7 +858,7 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         r->target = msg.peer;
         r->seq = msg.seq;
         r->expiry_tick =
-            inst->current_tick + ms_to_ticks(inst->ping_timeout_ms);
+            inst->current_tick + timeout_ticks(inst->ping_timeout_ms);
 
         send_ping(inst, msg.peer, msg.seq);
       }

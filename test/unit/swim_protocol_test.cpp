@@ -1318,3 +1318,59 @@ TEST_CASE("protocol: a pending probe delays the next by a tick, not a period") {
   swim_leave(inst);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// A timeout must never be shorter than configured. 149 ms used to round to
+// one 100 ms tick, so a peer answering in 130 ms missed the direct window
+// (no rtt reported, needless indirect probing).
+TEST_CASE("protocol: ping timeout is never shorter than configured") {
+  clear_obs();
+  swim_nodeid_idx_t m_id = swim_nodeid_find("127.0.0.1:20872/m");
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "timeout_ceil";
+  opts.protocol_period_ms = 1000;
+  opts.ping_timeout_ms = 149;
+  opts.feed = feed;
+  swim_t *inst = swim_start("127.0.0.1:20871/x", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *m = swim_udp_create("127.0.0.1", 20872);
+  REQUIRE(m != nullptr);
+
+  auto send = [&](uint8_t type, uint32_t seq) {
+    uint8_t msg_buf[256];
+    int msglen = swim_pack_message(type, m_id, seq, SWIM_NODEID_NONE, nullptr,
+                                   0, msg_buf, sizeof(msg_buf));
+    uint8_t buf[256 + 12];
+    int len =
+        swim_pack_authed("timeout_ceil", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(m, "127.0.0.1", 20871, buf, len) == 0);
+  };
+  send(SWIM_MSG_PING, 1); // join
+
+  // Answer X's first probe after 130 ms.
+  bool answered = false;
+  for (int i = 0; i < 300 && !answered; i++) {
+    uint8_t rbuf[SWIM_MAX_PACKET_SIZE];
+    int n = swim_udp_recv(m, rbuf, sizeof(rbuf));
+    swim_message_t in;
+    if (n > 12 && swim_unpack_message(rbuf + 12, n - 12, &in) == 0 &&
+        in.type == SWIM_MSG_PING) {
+      usleep(130000);
+      send(SWIM_MSG_ACK, in.seq);
+      answered = true;
+    } else {
+      usleep(10000);
+    }
+  }
+  REQUIRE(answered);
+  usleep(200000);
+  poll_feed_events(feed);
+  CHECK(obs_contains("ping rtt 127.0.0.1:20872/m"));
+
+  swim_udp_destroy(m);
+  swim_leave(inst);
+  swim_feed_destroy(feed);
+  swim_set_error(SWIM_OK, nullptr);
+}

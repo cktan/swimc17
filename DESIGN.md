@@ -231,8 +231,14 @@ opts. Defaults are tuned for an 8-node cluster.
 | `seed_retry_interval` | 5000 ms | `5 × T` |
 | `dead_node_expiry` | 6000 ms | `2 × suspicion_timeout` |
 
-Timers run on 100 ms ticks: each duration is rounded to
-the nearest tick, with a minimum of one. If a probe is
+Timers run on 100 ms ticks, with a minimum of one tick.
+Periods (`protocol_period`, `seed_retry_interval`) round
+to the nearest tick, since they set a rate. Timeouts
+(`ping_timeout`, `suspicion_timeout`) round up, so they
+never fire before their configured duration; one armed by
+an incoming packet rather than on a tick (a suspicion
+learned from gossip) may still fire up to one tick early
+relative to the packet's arrival. If a probe is
 still resolving when the next period starts (possible when
 `2 × ping_timeout ≥ protocol_period`), the next probe waits
 for it rather than abandoning it, starting on the first
