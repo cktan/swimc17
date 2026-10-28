@@ -39,8 +39,8 @@ and libm, and builds down to a single static library.
   a caller-owned feed queue that you can drain, buffer, or
   pipe into whatever logging you already use.
 - **Tested at scale** — unit tests, property tests, and
-  64-node stress tests with simulated packet loss, delay,
-  and reordering via an in-memory transport.
+  64-node stress tests with simulated packet loss and
+  network partitions.
 
 ## Quick example
 

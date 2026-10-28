@@ -93,13 +93,13 @@ for packet authentication (see §6).
 - **MTU:** 1400 bytes (conservative, safe everywhere)
 - **Overflow behaviour:** return error — caller
   re-encodes with fewer piggyback events
-- **Internal abstraction:** an internal `Transport`
-  interface with a UDP implementation shipped. An
-  in-memory implementation lives in the test tree
-  only and is not part of the public API. This
-  boundary allows fault injection (packet loss,
-  delay, reorder) in tests without exposing a
-  pluggable transport contract to callers.
+- **Fault injection:** debug builds (without
+  `NDEBUG`) expose per-port packet loss and a
+  drop filter on the UDP transport
+  (`swim_udp_set_packet_loss`,
+  `swim_udp_set_drop_filter`) for tests. There is no
+  in-memory transport and no delay or reorder
+  injection.
 
 ---
 
@@ -397,7 +397,7 @@ then read records from a separate thread:
 ```c
 swim_feed_t *feed = swim_feed_create();
 opts.feed = feed;  // caller owns; NULL disables telemetry
-swim_start(&opts);
+swim_t *inst = swim_start("10.0.0.1:7771/c1", &opts);
 
 // reader thread:
 char buf[SWIM_FEED_MAX_RECORD_SIZE];
@@ -456,9 +456,10 @@ Semantics — local and advisory:
 
 It cannot override a same-incarnation `suspect` already
 circulating elsewhere; only the peer's own self-refutation
-(a higher incarnation) is authoritative cluster-wide. The
-call is asynchronous (non-blocking) and never blocks the
-caller.
+(a higher incarnation) is authoritative cluster-wide. A
+peer this node has never seen is ignored. The call is
+synchronous: it briefly takes the instance lock, so it
+can wait while the protocol thread holds it.
 
 ### Graceful leave
 
@@ -498,7 +499,7 @@ and destroys it after `swim_leave` returns:
 ```c
 swim_feed_t *feed = swim_feed_create();
 opts.feed = feed;
-swim_start(&opts);
+swim_t *inst = swim_start("10.0.0.1:7771/c1", &opts);
 // ... run ...
 swim_leave(inst);
 swim_feed_destroy(feed);
@@ -564,9 +565,9 @@ with pure random selection.
   gossip piggybacking in relay packets.
 - **Integration tests:** multiple library instances
   in the same process on different ports.
-- **Simulated network:** the in-memory transport
-  (test-only) supports injecting packet loss, delay,
-  and reorder for protocol correctness tests.
+- **Simulated network:** debug-build packet loss and
+  drop filters on the UDP transport (see §4) for
+  protocol correctness tests.
 - **Large-scale Stress tests:** 64-node clusters
   testing staged startup, churn, and network
   partitions.

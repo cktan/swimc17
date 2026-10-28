@@ -137,9 +137,9 @@ D2. **Supersession**: a newer event for the same node
     incarnation) replaces the queued one.
 
 D3. **Pack**: when sending a packet, fill it up to the MTU
-    (1400 bytes, less a 128-byte margin) with queued events
-    in priority order **dead > suspect > alive**, least-sent
-    first.
+    (1400 bytes, less the 12-byte auth header) with queued
+    events in priority order **dead > suspect > alive**,
+    least-sent first.
 
 D4. **Expiry**: each event is dropped once it has been sent
     about `ceil(log2(N+1)) × 3` times (the transmit limit
