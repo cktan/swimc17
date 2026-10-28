@@ -19,7 +19,7 @@ Name: libswimc17
 URL: https://github.com/cktan/swimc17/
 Description: SWIM C library in c17.
 Version: v1.0
-Libs: -L$${prefix}/lib -lswimc17
+Libs: -L$${prefix}/lib -lswimc17 -lm -pthread
 Cflags: -I$${prefix}/include
 endef
 
@@ -39,7 +39,7 @@ install: all
 	install -d $(DESTDIR)${prefix}/lib/pkgconfig
 	install -m 0644 src/swim.h $(DESTDIR)${prefix}/include/
 	install -m 0644 src/libswimc17.a $(DESTDIR)${prefix}/lib/
-	@echo "$$PCFILE" >> $(DESTDIR)${prefix}/lib/pkgconfig/libswimc17.pc
+	@echo "$$PCFILE" > $(DESTDIR)${prefix}/lib/pkgconfig/libswimc17.pc
 
 test: $(TESTDIRS)
 
