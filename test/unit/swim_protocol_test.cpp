@@ -11,6 +11,7 @@ extern "C" {
 }
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <pthread.h>
@@ -1268,4 +1269,52 @@ TEST_CASE("protocol: sync records are applied but not re-gossiped") {
   REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
   for (int i = 0; i < in.gossip_count; i++)
     CHECK(!nodeid_eq(in.gossip[i].id, z_id));
+}
+
+// A probe still resolving when the period ends used to defer the next probe
+// by a whole period. It should start as soon as the pending probe resolves.
+TEST_CASE("protocol: a pending probe delays the next by a tick, not a period") {
+  swim_nodeid_idx_t m_id = swim_nodeid_find("127.0.0.1:20862/m");
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "probe_retry";
+  opts.protocol_period_ms = 1000;
+  opts.ping_timeout_ms = 600; // direct + indirect = 1.2 s > one period
+  swim_t *inst = swim_start("127.0.0.1:20861/x", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *m = swim_udp_create("127.0.0.1", 20862);
+  REQUIRE(m != nullptr);
+
+  // M joins, then never answers: each probe of M runs its full 1.2 s.
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_PING, m_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
+  uint8_t buf[256 + 12];
+  int len = swim_pack_authed("probe_retry", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(swim_udp_send(m, "127.0.0.1", 20861, buf, len) == 0);
+
+  // Record when the first two probes arrive.
+  double t[2];
+  int seen = 0;
+  auto t0 = std::chrono::steady_clock::now();
+  while (seen < 2 &&
+         std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5)) {
+    uint8_t rbuf[SWIM_MAX_PACKET_SIZE];
+    int n = swim_udp_recv(m, rbuf, sizeof(rbuf));
+    swim_message_t in;
+    if (n > 12 && swim_unpack_message(rbuf + 12, n - 12, &in) == 0 &&
+        in.type == SWIM_MSG_PING)
+      t[seen++] =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+              .count();
+    else
+      usleep(5000);
+  }
+  REQUIRE(seen == 2);
+  INFO("gap " << t[1] - t[0] << " s");
+  CHECK(t[1] - t[0] < 1.6); // ~1.2 s; a skipped period made it ~2.0 s
+
+  swim_udp_destroy(m);
+  swim_leave(inst);
+  swim_set_error(SWIM_OK, nullptr);
 }

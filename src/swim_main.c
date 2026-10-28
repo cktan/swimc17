@@ -302,14 +302,15 @@ static void probe_timer_cb(void *ctx, swim_timer_event_t ev, void *param) {
 
   // 2. Select target
   // Retrieve all active members (excluding self). Skip this period if there is
-  // no one to probe, or if the previous probe is still resolving: its two
-  // timeouts can outlast a short protocol period, and starting a new probe
-  // would abandon it before the target could be suspected.
+  // no one to probe. If the previous probe is still resolving (its two
+  // timeouts can outlast a short protocol period), starting a new one would
+  // abandon it before the target could be suspected; retry on the next tick
+  // instead, so the next probe starts as soon as the pending one resolves.
   int active_count = swim_membership_count(inst->membership);
   if (active_count == 0 || inst->pending_probe.state != PROBE_NONE) {
-    // Re-arm probe timer
-    if (swim_timer_add(inst->timer, ms_to_ticks(inst->protocol_period_ms),
-                       "probe", probe_timer_cb, inst, NULL) != 0) {
+    int ticks = active_count == 0 ? ms_to_ticks(inst->protocol_period_ms) : 1;
+    if (swim_timer_add(inst->timer, ticks, "probe", probe_timer_cb, inst,
+                       NULL) != 0) {
       if (inst->feed)
         swim_feed_put(inst->feed, 2, "warning",
                       "probe timer failed to re-arm: probing stopped");

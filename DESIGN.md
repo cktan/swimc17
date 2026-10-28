@@ -234,8 +234,9 @@ opts. Defaults are tuned for an 8-node cluster.
 Timers run on 100 ms ticks: each duration is rounded to
 the nearest tick, with a minimum of one. If a probe is
 still resolving when the next period starts (possible when
-`2 × ping_timeout ≥ protocol_period`), that period's probe
-is skipped rather than abandoning the pending one.
+`2 × ping_timeout ≥ protocol_period`), the next probe waits
+for it rather than abandoning it, starting on the first
+tick after it resolves.
 
 ### Deriving T from detection latency
 
