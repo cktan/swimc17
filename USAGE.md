@@ -40,6 +40,44 @@ completely different nodes. The cookie may be omitted,
 giving the shorter form `"host:port"` (equivalent to an
 empty cookie).
 
+`host` is an IPv4 address, a bracketed IPv6 address
+(`[::1]:7000`, or `[fe80::1%eth0]:7000` with a zone), or
+a hostname of up to 253 bytes. `port` is 1–65535 and the
+cookie is under 64 bytes.
+
+**Node ID normalization** — node IDs are normalized, so
+that different spellings of one endpoint are one node.
+The library reports every ID (in `swim_peers` and the
+feed) in this canonical form, which may differ from the
+string you passed in:
+
+| You write | The library uses |
+|-----------|------------------|
+| `10.0.0.1:07000` | `10.0.0.1:7000` |
+| `[10.0.0.1]:7000` | `10.0.0.1:7000` |
+| `[0:0::1]:7000` | `[::1]:7000` |
+| `[FE80::1%eth0]:7000` | `[fe80::1%eth0]:7000` |
+| `Host.Example:7000` | `host.example:7000` |
+| `host.example:7000/` | `host.example:7000` |
+
+Cookies and IPv6 zones are kept as written, so they stay
+case-sensitive. Ambiguous hosts are rejected as
+malformed: brackets around a hostname, and names that a
+resolver would read as an IPv4 address in another
+spelling (`010.0.0.1` as octal, `0x0a.0.0.1` as hex). A
+hostname and its IP address are always different nodes;
+pick one form and use it everywhere.
+
+**Hostnames and DNS** — a hostname is looked up when the
+library first sends to it, and the result is reused for
+60 s. If a later lookup fails, the previous address stays
+in use and the lookup is retried a minute later; a host
+that has never resolved is retried every 5 s. Lookups
+are blocking DNS queries on the protocol thread, so a
+slow resolver delays the protocol and any API call
+waiting on the instance. IP addresses avoid DNS
+entirely; prefer them when you can.
+
 **Group name** — `swim_start_opts_t.name` is a group name,
 not an instance name. Only nodes that share the same group
 name exchange messages with each other; packets from nodes
@@ -129,7 +167,14 @@ int main() {
 ```
 
 Join is asynchronous. Membership converges in the
-background within a few protocol periods.
+background within a few protocol periods. When a peer
+sees that a newly joined or restarted node knows fewer
+members than it does, it sends that node a random sample
+of its membership, so the newcomer learns the cluster
+without waiting to probe everyone itself.
+
+A seed list may include this node's own ID, so every node
+can share one list; the library skips it.
 
 ---
 
@@ -295,7 +340,9 @@ registers a new cluster membership instance.
 `mynodeid` is this node's identity: `"host:port"` or
 `"host:port/cookie"`. The host and port are used to
 bind and advertise; the cookie is arbitrary text that
-distinguishes nodes sharing the same host:port.
+distinguishes nodes sharing the same host:port. See
+[Node ID normalization](#concepts) for the accepted
+forms.
 
 `mynodeid` and `opts->name` are mandatory.
 `opts->feed` is optional; pass `NULL` to disable
@@ -304,7 +351,7 @@ telemetry.
 Returns an opaque `swim_t *` handle on success, or
 `NULL` on failure. On failure, sets `swim_errno` to:
 - `SWIM_ERR_INVALID`: `mynodeid` or `opts->name` are
-  NULL, empty, or malformed.
+  NULL, empty, or malformed, or a seed is malformed.
 - `SWIM_ERR_NOMEM`: Memory allocation failed.
 
 Thread-safe.
@@ -337,9 +384,10 @@ int swim_peers(swim_t *inst, bool include_dead,
 
 Returns a snapshot of current peers as a packed string
 buffer. Each peer is formatted as `"host:port"` or
-`"host:port/cookie"`; strings are packed consecutively,
-each NUL-terminated. The caller must `free(*out)`.
-`*out` is NULL when there are no peers.
+`"host:port/cookie"`, in canonical form; strings are
+packed consecutively, each NUL-terminated. The caller
+must `free(*out)`. `*out` is NULL when there are no
+peers.
 
 Set `include_dead` to `true` to include
 dead/quarantined entries, or `false` for active nodes
@@ -364,14 +412,14 @@ Feeds an out-of-band reachability signal into the
 failure detector to cancel suspicion and revive a node.
 
 `peer` is a `"host:port"` or `"host:port/cookie"`
-string identifying the target node.
+string identifying the target node, in any spelling
+that normalizes to the node's ID. A peer this instance
+has never seen is ignored.
 
-Returns `0` on success. On failure, returns `-1` and
-sets `swim_errno` to:
-- `SWIM_ERR_INVALID`: `inst` is NULL, or `peer` is
-  NULL.
-- `SWIM_ERR_BAD_STATE`: `inst` is not a valid running
-  instance.
+Returns `0` on success, including for an unknown peer.
+On failure, returns `-1` and sets `swim_errno` to:
+- `SWIM_ERR_INVALID`: `inst` or `peer` is NULL, or
+  `peer` is malformed.
 
 Thread-safe.
 
@@ -453,6 +501,13 @@ Options are configured in the `swim_start_opts_t` struct:
 | `suspicion_timeout_ms` | `uint64_t` | `3000` | Suspect → dead delay |
 | `seed_retry_interval_ms` | `uint64_t` | `5000` | Retry interval if no peers |
 | `dead_node_expiry_ms` | `uint64_t` | `6000` | How long to keep dead entries |
+
+Timers run on 100 ms ticks. Intervals
+(`protocol_period_ms`, `seed_retry_interval_ms`) round to
+the nearest tick; timeouts (`ping_timeout_ms`,
+`suspicion_timeout_ms`) round up, so they never fire
+before the configured time. Every value is at least one
+tick.
 
 ### Tuning for cluster size
 

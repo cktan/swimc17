@@ -30,7 +30,8 @@ and libm, and builds down to a single static library.
   global lock.
 - **UDP only, IPv4 + IPv6**, capped at a conservative
   1400-byte MTU so it works unmodified across typical
-  networks.
+  networks. Nodes are named by IP address or hostname;
+  hostname lookups are cached (see `USAGE.md`).
 - **Built-in packet authentication** — every packet
   carries a SipHash-2-4 MAC plus a timestamp window, so
   nodes without the shared group secret can't inject
