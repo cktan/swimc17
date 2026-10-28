@@ -144,6 +144,9 @@ static int canonicalize(const char *nodeid, char out[NODEID_CANON_MAX]) {
   struct in6_addr a6;
   if (!zone && inet_pton(AF_INET, host, &a4) == 1) {
     inet_ntop(AF_INET, &a4, canon_host, sizeof(canon_host));
+    /* macOS inet_pton accepts leading zeros ("010.0.0.1"); glibc does not. */
+    if (strcmp(canon_host, host) != 0)
+      return -1;
   } else if (inet_pton(AF_INET6, host, &a6) == 1) {
     canon_host[0] = '[';
     inet_ntop(AF_INET6, &a6, canon_host + 1, sizeof(canon_host) - 2);
