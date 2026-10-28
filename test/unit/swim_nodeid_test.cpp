@@ -96,6 +96,8 @@ TEST_CASE("nodeid: equivalent spellings normalize to one identity") {
       {"[::1]:7000", {"[0:0:0:0:0:0:0:1]:7000", "[0::1]:7000/", "[::1]:07000"}},
       {"[2001:db8::a]:80/x", {"[2001:DB8:0:0:0:0:0:A]:80/x"}},
       {"host.example:80/c", {"Host.Example:80/c", "HOST.EXAMPLE:0080/c"}},
+      // A link-local zone is kept as written; only the address is canonical.
+      {"[fe80::1%eth0]:7000", {"[FE80:0::1%eth0]:7000"}},
   };
   for (const auto &c : cases) {
     INFO(std::string(c.canonical));
@@ -122,10 +124,13 @@ TEST_CASE("nodeid: equivalent spellings normalize to one identity") {
 }
 
 TEST_CASE("nodeid: ambiguous hosts are rejected") {
-  const char *bad[] = {"010.0.0.1:7000", // octal-looking, not IPv4
-                       "10.0.0:7000",    // numeric but not dotted-quad
-                       "[myhost]:7000",  // brackets only around IPs
-                       "[fe80::1%eth0]:7000", "a/b:7000"};
+  const char *bad[] = {"010.0.0.1:7000",       // octal-looking, not IPv4
+                       "10.0.0:7000",          // numeric but not dotted-quad
+                       "[myhost]:7000",        // brackets only around IPs
+                       "[fe80::1%]:7000",      // empty zone
+                       "[fe80::1%a/b]:7000",   // zone is an interface name
+                       "[10.0.0.1%eth0]:7000", // zones are IPv6-only
+                       "a/b:7000"};
   for (const char *s : bad) {
     INFO(std::string(s));
     CHECK(!nodeid_valid(swim_nodeid_find(s)));

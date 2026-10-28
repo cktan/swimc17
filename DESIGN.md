@@ -653,7 +653,10 @@ with pure random selection.
   - IPv4 as an unbracketed dotted quad
     (`[10.0.0.1]` → `10.0.0.1`);
   - IPv6 bracketed, in shortest form
-    (`[0:0::1]` → `[::1]`);
+    (`[0:0::1]` → `[::1]`); a link-local zone is kept
+    as written (`[FE80::1%eth0]` → `[fe80::1%eth0]`),
+    so `%eth0` and its interface index `%2` are
+    distinct identities;
   - hostnames lowercased (DNS is case-insensitive);
   - an empty cookie written without the slash
     (`h:7000/` → `h:7000`). Cookies are otherwise

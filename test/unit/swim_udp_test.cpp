@@ -5,7 +5,12 @@ extern "C" {
 #include "swim_udp.h"
 }
 
+#include <arpa/inet.h>
+#include <cstdio>
 #include <cstring>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <string>
 
 TEST_CASE("udp: non-blocking receive on empty socket returns 0") {
   swim_udp_t *u = swim_udp_create("127.0.0.1", 18001);
@@ -71,6 +76,47 @@ TEST_CASE("udp: ipv6 loopback packet exchange") {
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
   CHECK(strcmp((const char *)recv_buf, msg) == 0);
+
+  swim_udp_destroy(u1);
+  swim_udp_destroy(u2);
+}
+
+// A zoned IPv6 destination ("fe80::1%eth0") is not an inet_pton literal; it
+// must still resolve, through getaddrinfo, to a reachable address.
+TEST_CASE("udp: link-local ipv6 destination with a zone") {
+  // Find a link-local address; skip if this machine has none.
+  char host[INET6_ADDRSTRLEN + IF_NAMESIZE + 1] = "";
+  struct ifaddrs *ifs = nullptr;
+  if (getifaddrs(&ifs) != 0)
+    return;
+  for (struct ifaddrs *i = ifs; i && !host[0]; i = i->ifa_next) {
+    if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET6)
+      continue;
+    const struct in6_addr *a =
+        &((const struct sockaddr_in6 *)i->ifa_addr)->sin6_addr;
+    if (!IN6_IS_ADDR_LINKLOCAL(a))
+      continue;
+    char addr[INET6_ADDRSTRLEN];
+    inet_ntop(AF_INET6, a, addr, sizeof(addr));
+    snprintf(host, sizeof(host), "%s%%%s", addr, i->ifa_name);
+  }
+  freeifaddrs(ifs);
+  if (!host[0])
+    return;
+  INFO(std::string(host));
+
+  swim_udp_t *u1 = swim_udp_create(host, 18006);
+  REQUIRE(u1 != nullptr);
+  swim_udp_t *u2 = swim_udp_create(host, 18007);
+  REQUIRE(u2 != nullptr);
+
+  const char *msg = "hello zone";
+  CHECK(swim_udp_send(u1, host, 18007, (const uint8_t *)msg, strlen(msg)) == 0);
+  uint8_t recv_buf[256];
+  int n = 0;
+  for (int i = 0; i < 100 && n <= 0; i++)
+    n = swim_udp_recv(u2, recv_buf, sizeof(recv_buf));
+  CHECK(n == (int)strlen(msg));
 
   swim_udp_destroy(u1);
   swim_udp_destroy(u2);

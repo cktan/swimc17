@@ -108,7 +108,8 @@ static int parse_nodeid(const char *s, const char **host, size_t *host_len,
  * ambiguous.
  *   - port: plain decimal ("07000" -> "7000")
  *   - IPv4: dotted quad, unbracketed ("[10.0.0.1]" -> "10.0.0.1")
- *   - IPv6: shortest form, bracketed ("[0:0::1]" -> "[::1]")
+ *   - IPv6: shortest form, bracketed ("[0:0::1]" -> "[::1]"); a zone
+ *     ("[fe80::1%eth0]") is kept as written
  *   - hostname: lowercase; brackets, '/' and all-numeric names are rejected
  *     (a numeric name that is not a dotted quad, like "010.0.0.1", may be
  *     read as octal by a resolver)
@@ -124,15 +125,30 @@ static int canonicalize(const char *nodeid, char out[NODEID_CANON_MAX]) {
   memcpy(host, h, hl);
   host[hl] = '\0';
 
-  /* Room for a bracketed IPv6 address or a 253-byte hostname. */
+  /* A bracketed IPv6 address may carry a zone ("%eth0"), kept as written. */
+  char *zone = nodeid[0] == '[' ? strchr(host, '%') : NULL;
+  if (zone) {
+    *zone++ = '\0';
+    size_t zl = strlen(zone);
+    if (zl == 0 ||
+        strspn(zone, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                     "0123456789._-") != zl)
+      return -1;
+  }
+
+  /* Room for a bracketed IPv6 address and zone, or a 253-byte hostname. */
   char canon_host[256];
   struct in_addr a4;
   struct in6_addr a6;
-  if (inet_pton(AF_INET, host, &a4) == 1) {
+  if (!zone && inet_pton(AF_INET, host, &a4) == 1) {
     inet_ntop(AF_INET, &a4, canon_host, sizeof(canon_host));
   } else if (inet_pton(AF_INET6, host, &a6) == 1) {
     canon_host[0] = '[';
     inet_ntop(AF_INET6, &a6, canon_host + 1, sizeof(canon_host) - 2);
+    if (zone) {
+      strcat(canon_host, "%");
+      strcat(canon_host, zone);
+    }
     strcat(canon_host, "]");
   } else {
     if (nodeid[0] == '[' || strpbrk(host, "/[]") ||
