@@ -1271,6 +1271,35 @@ TEST_CASE("protocol: sync records are applied but not re-gossiped") {
     CHECK(!nodeid_eq(in.gossip[i].id, z_id));
 }
 
+// A joiner ignores a suspect record for a node it does not know, so suspects
+// in a sample are wasted slots.
+TEST_CASE("protocol: a sync sample holds only alive members") {
+  SyncHarness h("sync_alive", 20891, 20892, 10000);
+  REQUIRE(h.x != nullptr);
+  REQUIRE(h.m != nullptr);
+  h.add_members(20, 20930); // X now sees 20 fakes + M: known = 22
+
+  // Suspect the first 15 fakes.
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  for (int i = 0; i < 15; i++) {
+    char s[64];
+    snprintf(s, sizeof(s), "127.0.0.1:%u/f", 20930 + i);
+    swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, swim_nodeid_find(s), 1,
+                              1);
+  }
+  swim_message_t in;
+  h.send(SWIM_MSG_PING, 2, 22, q);
+  swim_gossip_queue_destroy(q);
+  REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+
+  // k = 16, but only 5 fakes + X are alive.
+  h.send(SWIM_MSG_PING, 3, 1);
+  REQUIRE(h.recv(SWIM_MSG_SYNC, 1000, &in));
+  CHECK(in.gossip_count == 6);
+  for (int i = 0; i < in.gossip_count; i++)
+    CHECK(in.gossip[i].status == SWIM_STATUS_ALIVE);
+}
+
 // A sample too large for one packet must still be random. Packing through the
 // gossip queue sorts records by node ID, so the overflow was always the
 // alphabetically last members, and the last one never reached a joiner.

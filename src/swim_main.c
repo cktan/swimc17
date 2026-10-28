@@ -605,9 +605,9 @@ static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
 // A stable member generates no gossip about itself, so a node that has just
 // joined or restarted would otherwise learn it only by direct contact, up to
 // a full probe cycle later. Send a random sample of k = clamp(ceil(20% of the
-// gap), SYNC_MIN, SYNC_MAX) of our alive and suspect members plus ourselves,
-// fewer if the packet fills first, never the peer's own record, at most once
-// per peer per protocol period.
+// gap), SYNC_MIN, SYNC_MAX) of our alive members plus ourselves, fewer if
+// the packet fills first, never the peer's own record, at most once per peer
+// per protocol period.
 static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
                             uint16_t peer_known) {
   int active = swim_membership_count(inst->membership);
@@ -632,7 +632,8 @@ static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
   int n = swim_membership_list(inst->membership, cand, active, false);
   int w = 0;
   for (int i = 0; i < n; i++) {
-    if (!nodeid_eq(cand[i].id, peer))
+    // A peer ignores a suspect record for a node it does not know.
+    if (cand[i].status == SWIM_STATUS_ALIVE && !nodeid_eq(cand[i].id, peer))
       cand[w++] = cand[i];
   }
   n = w;

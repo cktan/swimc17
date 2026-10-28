@@ -225,9 +225,11 @@ G3. **Catch-up sync.** A stable member generates no gossip
     size, including itself). When a receiver's own view is
     larger by a gap `g`, it sends the sender a `sync`
     holding a random sample of
-    `k = clamp(ceil(0.2 × g), 16, 32)` of its alive and
-    suspect members plus itself, never the sender's own
-    record; fewer if the packet fills first. The receiver
+    `k = clamp(ceil(0.2 × g), 16, 32)` of its alive
+    members plus itself, never the sender's own record;
+    fewer if the packet fills first. (A suspect record
+    for a node the sender does not know would be
+    ignored.) The receiver
     cannot tell which members the sender lacks, so the
     sample must be a sizeable share of the membership to
     fill in the last few. At most one `sync` goes to a
