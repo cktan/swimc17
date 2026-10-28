@@ -92,12 +92,13 @@ TEST_CASE("udp: link-local ipv6 destination with a zone") {
   for (struct ifaddrs *i = ifs; i && !host[0]; i = i->ifa_next) {
     if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET6)
       continue;
-    const struct in6_addr *a =
-        &((const struct sockaddr_in6 *)i->ifa_addr)->sin6_addr;
-    if (!IN6_IS_ADDR_LINKLOCAL(a))
+    struct in6_addr a = ((const struct sockaddr_in6 *)i->ifa_addr)->sin6_addr;
+    if (!IN6_IS_ADDR_LINKLOCAL(&a))
       continue;
+    // BSD/macOS embed the interface index in bytes 2-3; the zone carries it.
+    a.s6_addr[2] = a.s6_addr[3] = 0;
     char addr[INET6_ADDRSTRLEN];
-    inet_ntop(AF_INET6, a, addr, sizeof(addr));
+    inet_ntop(AF_INET6, &a, addr, sizeof(addr));
     snprintf(host, sizeof(host), "%s%%%s", addr, i->ifa_name);
   }
   freeifaddrs(ifs);
