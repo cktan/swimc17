@@ -703,11 +703,6 @@ halves are SipHash-2-4 of the full name under two fixed,
 distinct keys. Every byte of the name therefore affects
 MAC verification, and names of any length work.
 
-This derivation changed from an earlier version that
-used the first 16 bytes of the name directly; nodes
-running that version cannot exchange packets with nodes
-running this one.
-
 ## 22. Seed Retry Behavior
 
 If all seeds are unreachable the node:
