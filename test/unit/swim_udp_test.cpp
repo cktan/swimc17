@@ -173,3 +173,53 @@ TEST_CASE("udp: drop filter blocks packets") {
   swim_udp_destroy(sender);
   swim_udp_destroy(recvr);
 }
+
+// Send `n` packets from `from` to host:port and return how many were sent.
+static int send_n(swim_udp_t *from, const char *host, uint16_t port, int n) {
+  int ok = 0;
+  for (int i = 0; i < n; i++)
+    ok += swim_udp_send(from, host, port, (const uint8_t *)"x", 1) == 0;
+  return ok;
+}
+
+TEST_CASE("udp: hostname destinations are resolved once and cached") {
+  swim_udp_t *u1 = swim_udp_create("127.0.0.1", 18011);
+  swim_udp_t *u2 = swim_udp_create("127.0.0.1", 18012);
+  REQUIRE(u1 != nullptr);
+  REQUIRE(u2 != nullptr);
+
+  int before = swim_udp_resolve_count();
+  CHECK(send_n(u1, "localhost", 18012, 5) == 5);
+  CHECK(swim_udp_resolve_count() == before + 1);
+
+  // The cached address reaches the IPv4 socket.
+  uint8_t buf[16];
+  int got = 0;
+  for (int i = 0; i < 100 && got < 5; i++)
+    got += swim_udp_recv(u2, buf, sizeof(buf)) > 0;
+  CHECK(got == 5);
+
+  // Past the 60 s lifetime, the next send re-resolves once.
+  swim_udp_advance_clock(61000);
+  CHECK(send_n(u1, "localhost", 18012, 3) == 3);
+  CHECK(swim_udp_resolve_count() == before + 2);
+
+  swim_udp_destroy(u1);
+  swim_udp_destroy(u2);
+}
+
+TEST_CASE("udp: failed lookups are retried after 5 s, not on every send") {
+  swim_udp_t *u = swim_udp_create("127.0.0.1", 18013);
+  REQUIRE(u != nullptr);
+
+  int before = swim_udp_resolve_count();
+  CHECK(send_n(u, "nonexistent.invalid", 9, 3) == 0);
+  CHECK(swim_udp_resolve_count() == before + 1);
+
+  swim_udp_advance_clock(5100);
+  CHECK(send_n(u, "nonexistent.invalid", 9, 3) == 0);
+  CHECK(swim_udp_resolve_count() == before + 2);
+
+  swim_udp_destroy(u);
+  swim_set_error(SWIM_OK, nullptr);
+}

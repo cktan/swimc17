@@ -9,12 +9,12 @@
  * 0 instead of blocking when no data is available.
  *
  * On send, the destination is resolved with inet_pton
- * first (fast path for numeric IP literals). getaddrinfo
- * is used only when inet_pton fails, i.e. for hostname
- * destinations, and then runs on every send: a synchronous
- * DNS lookup in the protocol loop. Destinations come from
- * node IDs as written, so use IP literals in node IDs to
- * avoid it.
+ * first (fast path for numeric IP literals). Hostname
+ * destinations go through a per-transport cache: a
+ * successful lookup is reused for 60 s and a failed one is
+ * retried after 5 s, keeping the previous address meanwhile.
+ * A lookup still blocks the protocol loop (under the
+ * instance lock) on first use and on each expiry.
  *
  * recv does not report the source address; the protocol
  * replies to the sender's node ID carried in the message.
@@ -29,17 +29,37 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
+
+// Lifetimes of a cached hostname lookup: a resolved address is reused for
+// RESOLVE_OK_MS; a failed lookup is retried after RESOLVE_FAIL_MS.
+#define RESOLVE_OK_MS 60000
+#define RESOLVE_FAIL_MS 5000
+
+// A cached hostname lookup. addr holds the address without a port; addr_len
+// is 0 until a lookup has succeeded. A failed refresh keeps the old address.
+typedef struct {
+  char host[256];
+  struct sockaddr_storage addr;
+  socklen_t addr_len;
+  uint64_t expires_ms; // monotonic; re-resolve at or after this time
+} resolved_t;
 
 struct swim_udp_t {
   int fd;
+  int family; // address family the socket is bound to
   char host[256];
   uint16_t port;
+  resolved_t *cache; // hostname destinations; IP literals bypass it
+  int cache_count;
+  int cache_cap;
 };
 
 #ifndef NDEBUG
@@ -57,7 +77,74 @@ void swim_clear_udp_loss(void) {
   memset(g_loss, 0, sizeof(g_loss));
   g_drop_filter = NULL;
 }
+
+static atomic_int g_resolve_count;
+static _Atomic uint64_t g_clock_offset_ms;
+
+int swim_udp_resolve_count(void) { return atomic_load(&g_resolve_count); }
+
+void swim_udp_advance_clock(uint64_t ms) {
+  atomic_fetch_add(&g_clock_offset_ms, ms);
+}
 #endif
+
+// Monotonic clock for cache lifetimes; tests can advance it in debug builds.
+static uint64_t cache_now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  uint64_t now = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+#ifndef NDEBUG
+  now += atomic_load(&g_clock_offset_ms);
+#endif
+  return now;
+}
+
+// Look up a hostname destination through the cache, calling getaddrinfo only
+// when the entry is new or expired. Returns the entry, or NULL if no address
+// is known for host (lookup failed and nothing was cached, or out of memory).
+static const resolved_t *resolve_cached(swim_udp_t *u, const char *host) {
+  resolved_t *r = NULL;
+  for (int i = 0; i < u->cache_count && !r; i++) {
+    if (strcmp(u->cache[i].host, host) == 0)
+      r = &u->cache[i];
+  }
+  if (!r) {
+    if (strlen(host) >= sizeof(r->host))
+      return NULL;
+    if (u->cache_count == u->cache_cap) {
+      int cap = u->cache_cap ? u->cache_cap * 2 : 8;
+      resolved_t *grown = realloc(u->cache, (size_t)cap * sizeof(*grown));
+      if (!grown)
+        return NULL;
+      u->cache = grown;
+      u->cache_cap = cap;
+    }
+    r = &u->cache[u->cache_count++];
+    memset(r, 0, sizeof(*r));
+    strcpy(r->host, host);
+  }
+
+  uint64_t now = cache_now_ms();
+  if (now >= r->expires_ms) {
+    // Only addresses of the socket's own family are reachable from it.
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = u->family;
+    hints.ai_socktype = SOCK_DGRAM;
+#ifndef NDEBUG
+    atomic_fetch_add(&g_resolve_count, 1);
+#endif
+    if (getaddrinfo(host, NULL, &hints, &res) == 0) {
+      memcpy(&r->addr, res->ai_addr, res->ai_addrlen);
+      r->addr_len = res->ai_addrlen;
+      r->expires_ms = now + RESOLVE_OK_MS;
+      freeaddrinfo(res);
+    } else {
+      r->expires_ms = now + RESOLVE_FAIL_MS;
+    }
+  }
+  return r->addr_len ? r : NULL;
+}
 
 // Create and bind a non-blocking UDP socket (IPv4 or IPv6). Returns NULL on
 // failure.
@@ -83,6 +170,7 @@ swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
   }
 
   int fd = -1;
+  int family = AF_UNSPEC;
   struct addrinfo *rp;
   for (rp = res; rp != NULL; rp = rp->ai_next) {
     fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
@@ -94,6 +182,7 @@ swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     if (bind(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+      family = rp->ai_family;
       break; // Success
     }
 
@@ -124,6 +213,7 @@ swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
     return NULL;
   }
   u->fd = fd;
+  u->family = family;
   strncpy(u->host, host, sizeof(u->host) - 1);
   u->port = port;
 
@@ -137,6 +227,7 @@ void swim_udp_destroy(swim_udp_t *u) {
   if (u->fd != -1) {
     close(u->fd);
   }
+  free(u->cache);
   free(u);
 }
 
@@ -157,8 +248,7 @@ int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
 #endif
 
   // Resolve the destination to a sockaddr. IP-literal hosts are built directly
-  // with inet_pton; hostnames fall back to a synchronous getaddrinfo on every
-  // send.
+  // with inet_pton; hostnames go through the per-transport cache.
   struct sockaddr_storage ss;
   socklen_t ss_len = 0;
   memset(&ss, 0, sizeof(ss));
@@ -175,23 +265,16 @@ int swim_udp_send(swim_udp_t *u, const char *host, uint16_t port,
     sin6->sin6_port = htons(port);
     ss_len = sizeof(*sin6);
   } else {
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-
-    char port_str[16];
-    snprintf(port_str, sizeof(port_str), "%u", port);
-
-    int s = getaddrinfo(host, port_str, &hints, &res);
-    if (s != 0) {
+    const resolved_t *r = resolve_cached(u, host);
+    if (!r)
       return swim_set_error(SWIM_ERR_INVALID,
-                            "getaddrinfo failed for destination: %s",
-                            gai_strerror(s));
-    }
-    memcpy(&ss, res->ai_addr, res->ai_addrlen);
-    ss_len = res->ai_addrlen;
-    freeaddrinfo(res);
+                            "cannot resolve destination host %s", host);
+    memcpy(&ss, &r->addr, r->addr_len);
+    ss_len = r->addr_len;
+    if (ss.ss_family == AF_INET)
+      sin->sin_port = htons(port);
+    else
+      sin6->sin6_port = htons(port);
   }
 
   // Retry on EINTR (always — not a real failure) and EAGAIN/EWOULDBLOCK

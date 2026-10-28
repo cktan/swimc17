@@ -41,10 +41,14 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
 - **Wire and API type:** address string
   `"host:port/cookie"`
   - `host` is a string (IP address or hostname).
-    Prefer IP literals: every packet sent to a
-    hostname does a synchronous DNS lookup on the
-    protocol thread while it holds the instance lock,
-    stalling the protocol loop and API callers.
+    Hostnames are resolved through a per-instance
+    cache: a lookup is reused for 60 s, and a failed
+    one is retried after 5 s while the previous
+    address stays in use. Each lookup is still a
+    synchronous DNS query on the protocol thread
+    under the instance lock, so it can stall the
+    protocol loop and API callers on first use and
+    on each expiry. IP literals avoid this entirely.
   - `port` is a decimal integer
   - `cookie` is a string (user-defined opaque
     datum). Optionally specified by the caller;

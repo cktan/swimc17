@@ -81,6 +81,19 @@ SWIM_EXTERN void swim_udp_set_drop_filter(swim_udp_drop_fn fn);
  * only.
  */
 SWIM_EXTERN void swim_clear_udp_loss(void);
+
+/**
+ * Return how many hostname lookups (getaddrinfo calls for a send
+ * destination) have been made, across all transports. Debug builds
+ * only.
+ */
+SWIM_EXTERN int swim_udp_resolve_count(void);
+
+/**
+ * Advance the clock the destination cache uses to expire entries, to
+ * test lifetimes without waiting. Debug builds only.
+ */
+SWIM_EXTERN void swim_udp_advance_clock(uint64_t ms);
 #endif
 
 #endif // SWIM_UDP_H
