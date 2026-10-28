@@ -119,6 +119,12 @@ Each packet is decoded, its piggybacked gossip is applied
   cancel our pending indirect probe.
 - C5. **`leave`** → transition the sender node to dead and
   cancel its suspicion timer.
+- C6. **`sync`** → its records are applied by procedure E
+  but are **not** re-gossiped (procedure G3).
+
+After dispatch, if the message is not a `leave` or `sync`
+and the sender's `known` is below our own, catch the
+sender up (procedure G3).
 
 ---
 
@@ -210,6 +216,25 @@ G2. Every `seed_retry_interval`: if the node is **alone**
 
 A seed ping is an ordinary probe (procedure A2), so the
 reply pulls the node into the gossip mesh.
+
+G3. **Catch-up sync.** A stable member generates no gossip
+    about itself, so a node that has just joined or
+    restarted would otherwise learn it only by direct
+    contact, up to a full probe cycle later. Every message
+    carries the sender's `known` (its view of the cluster
+    size, including itself). When a receiver's own view is
+    larger by a gap `g`, it sends the sender a `sync`
+    holding a random sample of
+    `k = clamp(ceil(0.2 × g), 16, 32)` of its alive and
+    suspect members plus itself, never the sender's own
+    record; fewer if the packet fills first. The receiver
+    cannot tell which members the sender lacks, so the
+    sample must be a sizeable share of the membership to
+    fill in the last few. At most one `sync` goes to a
+    given peer per protocol period. Its records update
+    membership like gossip but are not re-gossiped: they
+    are settled state, not news, and re-gossiping them
+    would flood the cluster on every join.
 
 ---
 

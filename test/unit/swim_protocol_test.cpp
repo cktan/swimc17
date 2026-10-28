@@ -1134,3 +1134,138 @@ TEST_CASE("protocol: leave carries dead(self) at the real incarnation") {
   swim_udp_destroy(m);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// Join sync. A peer whose "known" cluster size is below ours gets a SYNC: a
+// random sample of k = clamp(ceil(20% of the gap), 16, 32) of our members
+// (plus ourselves, never the peer itself), at most once per protocol period.
+namespace {
+struct SyncHarness {
+  const char *name;
+  uint16_t x_port, m_port;
+  swim_t *x = nullptr;
+  swim_udp_t *m = nullptr;
+  swim_nodeid_idx_t x_id, m_id;
+
+  SyncHarness(const char *name_, uint16_t xp, uint16_t mp, uint64_t period_ms)
+      : name(name_), x_port(xp), m_port(mp) {
+    char s[64];
+    snprintf(s, sizeof(s), "127.0.0.1:%u/x", xp);
+    x_id = swim_nodeid_find(s);
+    swim_start_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.name = name;
+    opts.protocol_period_ms = period_ms;
+    x = swim_start(s, &opts);
+    snprintf(s, sizeof(s), "127.0.0.1:%u/m", mp);
+    m_id = swim_nodeid_find(s);
+    m = swim_udp_create("127.0.0.1", mp);
+  }
+  ~SyncHarness() {
+    swim_udp_destroy(m);
+    swim_leave(x);
+    swim_set_error(SWIM_OK, nullptr);
+  }
+  // Send from M with the given "known" (active_members = known - 1).
+  void send(uint8_t type, uint32_t seq, uint32_t known,
+            swim_gossip_queue_t *q = nullptr) {
+    uint8_t msg_buf[SWIM_MAX_PACKET_SIZE];
+    int msglen = swim_pack_message(type, m_id, seq, SWIM_NODEID_NONE, q,
+                                   known - 1, msg_buf, sizeof(msg_buf) - 12);
+    REQUIRE(msglen > 0);
+    uint8_t buf[SWIM_MAX_PACKET_SIZE];
+    int len = swim_pack_authed(name, msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(m, "127.0.0.1", x_port, buf, len) == 0);
+  }
+  // Wait up to timeout_ms for a message of `type` on M's socket.
+  bool recv(uint8_t type, int timeout_ms, swim_message_t *in) {
+    for (int waited = 0; waited < timeout_ms; waited += 10) {
+      uint8_t buf[SWIM_MAX_PACKET_SIZE];
+      int n;
+      while ((n = swim_udp_recv(m, buf, sizeof(buf))) > 12) {
+        if (swim_unpack_message(buf + 12, n - 12, in) == 0 && in->type == type)
+          return true;
+      }
+      usleep(10000);
+    }
+    return false;
+  }
+  // Teach X about `count` extra nodes via alive gossip from M.
+  void add_members(int count, uint16_t base_port) {
+    swim_gossip_queue_t *q = swim_gossip_queue_create();
+    for (int i = 0; i < count; i++) {
+      char s[64];
+      snprintf(s, sizeof(s), "127.0.0.1:%u/f", base_port + i);
+      swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, swim_nodeid_find(s), 1,
+                                1);
+    }
+    // M claims a full view, so this ping triggers no sync.
+    send(SWIM_MSG_PING, 1, (uint32_t)count + 2, q);
+    swim_gossip_queue_destroy(q);
+    swim_message_t in;
+    REQUIRE(recv(SWIM_MSG_ACK, 1000, &in));
+  }
+};
+} // namespace
+
+TEST_CASE("protocol: a peer that is behind receives a sync sample") {
+  SyncHarness h("sync_sample", 20821, 20822, 2000);
+  REQUIRE(h.x != nullptr);
+  REQUIRE(h.m != nullptr);
+  h.add_members(20, 20830); // X now sees 20 fakes + M: known = 22
+
+  swim_message_t in;
+  // Not behind: no sync.
+  h.send(SWIM_MSG_PING, 2, 22);
+  REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+  CHECK(!h.recv(SWIM_MSG_SYNC, 300, &in));
+
+  // Behind by 21: k = clamp(ceil(4.2), 16, 32) = 16, drawn from 20 fakes + X.
+  h.send(SWIM_MSG_PING, 3, 1);
+  REQUIRE(h.recv(SWIM_MSG_SYNC, 1000, &in));
+  CHECK(in.gossip_count == 16);
+  CHECK(nodeid_eq(in.sender, h.x_id));
+  for (int i = 0; i < in.gossip_count; i++) {
+    CHECK(!nodeid_eq(in.gossip[i].id, h.m_id));
+    CHECK(in.gossip[i].status == SWIM_STATUS_ALIVE);
+  }
+
+  // Rate limit: at most one sync per peer per protocol period.
+  h.send(SWIM_MSG_PING, 4, 1);
+  CHECK(!h.recv(SWIM_MSG_SYNC, 300, &in));
+  usleep(2000000);
+  h.send(SWIM_MSG_PING, 5, 1);
+  CHECK(h.recv(SWIM_MSG_SYNC, 1000, &in));
+}
+
+TEST_CASE("protocol: sync records are applied but not re-gossiped") {
+  SyncHarness h("sync_apply", 20841, 20842, 10000);
+  REQUIRE(h.x != nullptr);
+  REQUIRE(h.m != nullptr);
+
+  // Drain X's startup self-announcement so later acks carry only new gossip.
+  swim_message_t in;
+  for (uint32_t seq = 1; seq <= 4; seq++) {
+    h.send(SWIM_MSG_PING, seq, 2);
+    REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+  }
+
+  const char *z_str = "127.0.0.1:20849/z";
+  swim_nodeid_idx_t z_id = swim_nodeid_find(z_str);
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, z_id, 7, 1);
+  h.send(SWIM_MSG_SYNC, 5, 3, q);
+  swim_gossip_queue_destroy(q);
+  usleep(200000);
+
+  swim_member_t members[8];
+  int count = swim_members(h.x, members, 8, false);
+  bool has_z = false;
+  for (int i = 0; i < count; i++)
+    has_z |= nodeid_eq(members[i].id, z_id);
+  CHECK(has_z);
+
+  h.send(SWIM_MSG_PING, 6, 3);
+  REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+  for (int i = 0; i < in.gossip_count; i++)
+    CHECK(!nodeid_eq(in.gossip[i].id, z_id));
+}

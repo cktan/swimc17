@@ -13,6 +13,7 @@
 #define SWIM_MSG_PING_REQ 3
 #define SWIM_MSG_FWD_ACK 4
 #define SWIM_MSG_LEAVE 5
+#define SWIM_MSG_SYNC 6 // a sample of the sender's membership, as records
 
 #define SWIM_MAX_PACKET_SIZE 1400
 #define SWIM_MAX_EVENTS 64
@@ -22,6 +23,7 @@ struct swim_message_t {
   uint8_t type;
   swim_nodeid_idx_t sender;
   uint32_t seq;
+  uint16_t known; // sender's cluster size: alive + suspect members, plus itself
   swim_nodeid_idx_t
       peer; // target for ping_req, source for fwd_ack (ignored otherwise)
   uint8_t gossip_count;

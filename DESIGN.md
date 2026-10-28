@@ -117,6 +117,12 @@ for packet authentication (see §6).
   library.
 - **Message shape:**
 
+Every message also carries `known :: uint16`, the
+sender's view of the cluster size (members it sees as
+alive or suspect, plus itself). A receiver whose view is
+larger catches the sender up with a `sync`
+(`ALGORITHM.md` procedure G3).
+
 ```
 # ping
 {ping, sender :: host:port/cookie, seq :: non_neg_integer,
@@ -136,6 +142,10 @@ for packet authentication (see §6).
 
 # leave
 {leave, sender :: host:port/cookie, seq :: non_neg_integer}
+
+# sync (a random sample of the sender's membership)
+{sync, sender :: host:port/cookie, seq :: non_neg_integer,
+       members :: [update]}
 ```
 
 - **Update shape:**

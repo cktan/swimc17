@@ -250,6 +250,10 @@ struct swim_t {
   uint64_t last_cluster_size; // last emitted cluster size, for on-change gating
 
   uint64_t current_tick;
+
+  // Per peer (indexed by node ID slot): current_tick + 1 when we last sent it
+  // a SYNC, or 0 if never. Limits SYNCs to one per peer per protocol period.
+  uint32_t sync_tick[SWIM_NODEID_TABLE_SIZE];
 };
 
 typedef swim_t swim_instance_t;
@@ -582,6 +586,67 @@ static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
                inst->gossip_queue);
 }
 
+// Bounds on the SYNC sample size. The receiver cannot tell which members a
+// peer lacks, so a sample must be a sizeable share of the membership to hit
+// the last few; 32 fits one packet for typical node IDs.
+#define SYNC_MIN 16
+#define SYNC_MAX 32
+
+// Catch up a peer whose view of the cluster size (peer_known) is below ours.
+// A stable member generates no gossip about itself, so a node that has just
+// joined or restarted would otherwise learn it only by direct contact, up to
+// a full probe cycle later. Send a random sample of k = clamp(ceil(20% of the
+// gap), SYNC_MIN, SYNC_MAX) of our alive and suspect members plus ourselves,
+// never the peer's own record, at most once per peer per protocol period.
+static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
+                            uint16_t peer_known) {
+  int active = swim_membership_count(inst->membership);
+  int mine = active + 1;
+  if (peer_known >= mine)
+    return;
+  uint32_t last = inst->sync_tick[peer.v];
+  if (last && inst->current_tick + 1 - last <
+                  (uint64_t)ms_to_ticks(inst->protocol_period_ms))
+    return;
+
+  int k = (mine - peer_known + 4) / 5; // ceil(20% of the gap)
+  k = k < SYNC_MIN ? SYNC_MIN : k > SYNC_MAX ? SYNC_MAX : k;
+
+  swim_member_t *cand = malloc((size_t)(active + 1) * sizeof(*cand));
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  if (!cand || !q) {
+    free(cand);
+    swim_gossip_queue_destroy(q);
+    return;
+  }
+  int n = swim_membership_list(inst->membership, cand, active, false);
+  int w = 0;
+  for (int i = 0; i < n; i++) {
+    if (!nodeid_eq(cand[i].id, peer))
+      cand[w++] = cand[i];
+  }
+  n = w;
+  cand[n++] = (swim_member_t){.id = inst->self_id,
+                              .status = SWIM_STATUS_ALIVE,
+                              .incarnation = inst->incarnation};
+  if (k > n)
+    k = n;
+  // Partial Fisher-Yates: cand[0..k) becomes a uniform random sample.
+  for (int i = 0; i < k; i++) {
+    int j = i + rand_r(&inst->rand_state) % (n - i);
+    swim_member_t tmp = cand[i];
+    cand[i] = cand[j];
+    cand[j] = tmp;
+    swim_gossip_queue_enqueue(q, cand[i].status, cand[i].id,
+                              cand[i].incarnation, 1);
+  }
+  send_message(inst, peer, SWIM_MSG_SYNC, inst->self_id, inst->seq++,
+               SWIM_NODEID_NONE, q);
+  swim_gossip_queue_destroy(q);
+  free(cand);
+  inst->sync_tick[peer.v] = (uint32_t)(inst->current_tick + 1);
+}
+
 // Write a membership-change record to the feed. Caller must hold inst->mutex.
 static void queue_notification(swim_instance_t *inst, const char *verb,
                                swim_nodeid_idx_t id) {
@@ -693,9 +758,12 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
                                          ev->incarnation,
                                          get_monotonic_time_ms());
         if (rc == 0) {
-          // state changed -> re-gossip the event
-          swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, ev->id,
-                                    ev->incarnation, 1);
+          // state changed -> re-gossip the event. Records from a SYNC are a
+          // sample of the sender's settled membership, not news; re-gossiping
+          // them would flood the cluster on every join.
+          if (msg.type != SWIM_MSG_SYNC)
+            swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, ev->id,
+                                      ev->incarnation, 1);
 
           char alarm_name[384];
           if (ev->status == SWIM_STATUS_DEAD) {
@@ -820,7 +888,17 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       }
       break;
     }
+
+    case SWIM_MSG_SYNC:
+      // Its records were applied with the gossip above.
+      break;
     } // end switch
+
+    // Catch up a sender that knows fewer nodes than we do. A leaving node
+    // needs no catching up, and answering a SYNC with a SYNC could ping-pong.
+    if (msg.type != SWIM_MSG_LEAVE && msg.type != SWIM_MSG_SYNC &&
+        !nodeid_eq(msg.sender, inst->self_id))
+      maybe_send_sync(inst, msg.sender, msg.known);
   } // end while
 }
 

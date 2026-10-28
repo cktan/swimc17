@@ -133,9 +133,9 @@ TEST_CASE("codec: error validation and bounds checking") {
   buf[0] = SWIM_MSG_PING;
 
   // 3. Corrupt node ID length leading to out-of-bounds
-  // Wire layout: type(1) + seq(4) + nodeid_str_len(2) + ...
-  // Offset 5 is the high byte of the nodeid string length.
-  buf[5] = 250; // makes string_len huge, overflows bounds check
+  // Wire layout: type(1) + seq(4) + known(2) + nodeid_str_len(2) + ...
+  // Offset 7 is the high byte of the nodeid string length.
+  buf[7] = 250; // makes string_len huge, overflows bounds check
   rc = swim_unpack_message(buf, enc_len, &decoded);
   CHECK(rc == -1);
 
@@ -245,4 +245,48 @@ TEST_CASE("codec: rejected gossip record does not register its node id") {
   swim_message_t decoded;
   CHECK(swim_unpack_message(buf, len, &decoded) == -1);
   CHECK(!nodeid_valid(swim_nodeid_get(id)));
+}
+
+// Every message carries the sender's view of the cluster size (members it
+// sees as alive or suspect, plus itself), so a receiver can tell when the
+// sender is behind.
+TEST_CASE("codec: known cluster size roundtrip") {
+  swim_nodeid_idx_t sender = swim_nodeid_find("10.0.0.1:7001/s");
+  REQUIRE(nodeid_valid(sender));
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  swim_message_t decoded;
+
+  int len = swim_pack_message(SWIM_MSG_ACK, sender, 1, SWIM_NODEID_NONE,
+                              nullptr, 41, buf, sizeof(buf));
+  REQUIRE(len > 0);
+  REQUIRE(swim_unpack_message(buf, len, &decoded) == 0);
+  CHECK(decoded.known == 42);
+
+  // Saturates rather than wrapping.
+  len = swim_pack_message(SWIM_MSG_ACK, sender, 1, SWIM_NODEID_NONE, nullptr,
+                          100000, buf, sizeof(buf));
+  REQUIRE(swim_unpack_message(buf, len, &decoded) == 0);
+  CHECK(decoded.known == 65535);
+}
+
+TEST_CASE("codec: sync roundtrip carries membership records") {
+  swim_nodeid_idx_t sender = swim_nodeid_find("10.0.0.1:7001/s");
+  swim_nodeid_idx_t a = swim_nodeid_find("10.0.0.5:7005/a");
+  swim_nodeid_idx_t b = swim_nodeid_find("10.0.0.6:7006/b");
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  REQUIRE(q != nullptr);
+  swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, a, 5, 1);
+  swim_gossip_queue_enqueue(q, SWIM_STATUS_SUSPECT, b, 6, 1);
+
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  int len = swim_pack_message(SWIM_MSG_SYNC, sender, 9, SWIM_NODEID_NONE, q, 2,
+                              buf, sizeof(buf));
+  swim_gossip_queue_destroy(q);
+  REQUIRE(len > 0);
+
+  swim_message_t decoded;
+  REQUIRE(swim_unpack_message(buf, len, &decoded) == 0);
+  CHECK(decoded.type == SWIM_MSG_SYNC);
+  CHECK(decoded.known == 3);
+  CHECK(decoded.gossip_count == 2);
 }

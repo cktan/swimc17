@@ -4,12 +4,12 @@
 /*
  * swim_codec.c — Wire protocol encoder and decoder.
  *
- * Serializes and deserializes SWIM messages (PING, ACK,
+ * Serializes and deserializes SWIM messages (PING, ACK, SYNC,
  * PING_REQ, FWD_ACK, LEAVE) and their components (node IDs,
  * membership events) into a compact binary format in network
  * byte order.
  *
- * Message layout: [type (1B)] [seq (4B)] [sender node ID]
+ * Message layout: [type (1B)] [seq (4B)] [known (2B)] [sender node ID]
  * [peer node ID, PING_REQ/FWD_ACK only] [gossip payload].
  * The gossip payload is a variable-length list of encoded
  * swim_member_t records that fills whatever space remains in
@@ -47,6 +47,14 @@ static int pack_int8(uint8_t val, uint8_t *p, uint8_t *q) {
   return 1;
 }
 
+static int pack_int16(uint16_t val, uint8_t *p, uint8_t *q) {
+  if (p + 2 > q)
+    return -1;
+  uint16_t net_val = htons(val);
+  memcpy(p, &net_val, 2);
+  return 2;
+}
+
 static int pack_int32(uint32_t val, uint8_t *p, uint8_t *q) {
   if (p + 4 > q)
     return -1;
@@ -78,6 +86,15 @@ static int unpack_int8(uint8_t *val, const uint8_t *p, const uint8_t *q) {
     return -1;
   *val = *p;
   return 1;
+}
+
+static int unpack_int16(uint16_t *val, const uint8_t *p, const uint8_t *q) {
+  if (p + 2 > q)
+    return -1;
+  uint16_t net_val;
+  memcpy(&net_val, p, 2);
+  *val = ntohs(net_val);
+  return 2;
 }
 
 static int unpack_int32(uint32_t *val, const uint8_t *p, const uint8_t *q) {
@@ -210,6 +227,15 @@ int swim_pack_message(uint8_t type, swim_nodeid_idx_t sender, uint32_t seq,
   }
   p += n;
 
+  // The sender's view of the cluster size, so a receiver can tell when the
+  // sender is behind. Saturates at the field's maximum.
+  uint32_t known = active_members < 65535 ? active_members + 1 : 65535;
+  n = pack_int16((uint16_t)known, p, end);
+  if (n < 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Buffer too small for message");
+  }
+  p += n;
+
   const char *sender_str = swim_nodeid_lookup(sender);
   if (!sender_str)
     return swim_set_error(SWIM_ERR_INVALID, "Buffer too small for message");
@@ -264,7 +290,7 @@ int swim_unpack_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Buffer too short for message type");
   }
-  if (msg->type < SWIM_MSG_PING || msg->type > SWIM_MSG_LEAVE) {
+  if (msg->type < SWIM_MSG_PING || msg->type > SWIM_MSG_SYNC) {
     return swim_set_error(SWIM_ERR_INVALID, "Invalid message type value");
   }
   p += n;
@@ -273,6 +299,12 @@ int swim_unpack_message(const uint8_t *buf, size_t size, swim_message_t *msg) {
   if (n < 0) {
     return swim_set_error(SWIM_ERR_INVALID,
                           "Buffer too short for sequence number");
+  }
+  p += n;
+
+  n = unpack_int16(&msg->known, p, end);
+  if (n < 0) {
+    return swim_set_error(SWIM_ERR_INVALID, "Buffer too short for known size");
   }
   p += n;
 
