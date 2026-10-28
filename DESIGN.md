@@ -466,17 +466,18 @@ caller.
 swim_leave(inst);
 ```
 
-1. Increments own incarnation number.
-2. Broadcasts a leave message directly to
+1. Stops and joins the protocol thread.
+2. Sends a leave message directly to
    `max(⌈N×0.25⌉, 8)` random peers (not via gossip
    queue), where `N` is the number of alive + suspect
-   peers.
-3. Stops the protocol task. A supervising owner may
-   restart it; perform a full shutdown afterward for a
-   complete teardown.
+   peers. Receivers mark the node dead (see
+   `ALGORITHM.md` procedure H).
+3. Frees the instance; the handle is invalid
+   afterwards.
 
-For a silent stop (no dead broadcast), shut down the
-library directly without calling `swim_leave`.
+There is no silent-stop API. If a process exits without
+calling `swim_leave`, its peers detect the failure by
+probing.
 
 ---
 

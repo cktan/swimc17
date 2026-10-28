@@ -965,3 +965,42 @@ TEST_CASE("protocol: group names differing after 16 bytes stay isolated") {
   swim_leave(nb);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// A LEAVE is not a sign of life: a leave from a node we never knew must not
+// add it (it used to emit "node up" then "node down").
+TEST_CASE("protocol: leave from an unknown node is ignored") {
+  clear_obs();
+  swim_nodeid_idx_t z_id = swim_nodeid_find("127.0.0.1:20782/z");
+
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "leave_unknown";
+  opts.protocol_period_ms = 10000;
+  opts.feed = feed;
+  swim_t *inst = swim_start("127.0.0.1:20781/c1", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *z = swim_udp_create("127.0.0.1", 20782);
+  REQUIRE(z != nullptr);
+
+  uint8_t msg_buf[256];
+  int msglen = swim_pack_message(SWIM_MSG_LEAVE, z_id, 1, SWIM_NODEID_NONE,
+                                 nullptr, 0, msg_buf, sizeof(msg_buf));
+  REQUIRE(msglen > 0);
+  uint8_t buf[256 + 12];
+  int len =
+      swim_pack_authed("leave_unknown", msg_buf, msglen, buf, sizeof(buf));
+  REQUIRE(swim_udp_send(z, "127.0.0.1", 20781, buf, len) == 0);
+  usleep(300000);
+
+  swim_member_t members[4];
+  CHECK(swim_members(inst, members, 4, true) == 0);
+  poll_feed_events(feed);
+  CHECK(!obs_contains("node up 127.0.0.1:20782/z"));
+
+  swim_udp_destroy(z);
+  swim_leave(inst);
+  swim_feed_destroy(feed);
+  swim_set_error(SWIM_OK, nullptr);
+}

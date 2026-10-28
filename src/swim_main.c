@@ -670,8 +670,10 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 
   while (recv_message(inst, &msg) == 0) {
 
-    // Apply gossip rules for incoming sender status first
-    update_node_alive(inst, msg.sender);
+    // Apply gossip rules for incoming sender status first. A LEAVE is not a
+    // sign of life; it is handled below.
+    if (msg.type != SWIM_MSG_LEAVE)
+      update_node_alive(inst, msg.sender);
 
     // 1. Process Piggybacked Gossip Events
     for (int i = 0; i < msg.gossip_count; i++) {
@@ -787,15 +789,14 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       break;
 
     case SWIM_MSG_LEAVE: {
-      // Graceful leave notification: transition the sender node to DEAD.
-      uint64_t inc = 0;
+      // Graceful leave notification: transition the sender node to DEAD, one
+      // incarnation above what we know so it outranks rumors we hold. A LEAVE
+      // carries no incarnation, and an unknown sender has nothing to mark.
       const swim_member_t *m_info =
           swim_membership_get(inst->membership, msg.sender);
-      if (m_info) {
-        inc = m_info->incarnation + 1;
-      } else {
-        inc = get_now_ms();
-      }
+      if (!m_info)
+        break;
+      uint64_t inc = m_info->incarnation + 1;
       rc =
           swim_membership_apply_event(inst->membership, SWIM_STATUS_DEAD,
                                       msg.sender, inc, get_monotonic_time_ms());
@@ -1076,9 +1077,6 @@ int swim_leave(swim_t *inst) {
       uint32_t fanout = (uint32_t)ceil(count * 0.25);
       if (fanout < 8)
         fanout = 8;
-
-      // Bump incarnation first
-      inst->incarnation = get_now_ms();
 
       for (uint32_t i = 0; i < fanout && count > 0; i++) {
         int idx = rand_r(&inst->rand_state) % count;
