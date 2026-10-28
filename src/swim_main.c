@@ -682,7 +682,11 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
       // Exclude self-events from direct updates (dealt with via refutation
       // below)
       if (!nodeid_eq(ev->id, inst->self_id)) {
-        // Apply the event to local membership state
+        // Apply the event to local membership state. Feed events report
+        // status transitions, so note the status it had before.
+        const swim_member_t *prev =
+            swim_membership_get(inst->membership, ev->id);
+        bool changed = !prev || prev->status != ev->status;
         rc = swim_membership_apply_event(inst->membership, ev->status, ev->id,
                                          ev->incarnation,
                                          get_monotonic_time_ms());
@@ -693,15 +697,18 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
 
           char alarm_name[384];
           if (ev->status == SWIM_STATUS_DEAD) {
-            queue_notification(inst, "down", ev->id);
+            if (changed)
+              queue_notification(inst, "down", ev->id);
             // Cancel suspicion timer if any
             suspect_key(alarm_name, sizeof(alarm_name), ev->id);
             swim_timer_cancel(inst->timer, alarm_name);
           } else if (ev->status == SWIM_STATUS_SUSPECT) {
-            queue_notification(inst, "suspect", ev->id);
+            if (changed)
+              queue_notification(inst, "suspect", ev->id);
             arm_suspicion_timer(inst, ev->id);
           } else if (ev->status == SWIM_STATUS_ALIVE) {
-            queue_notification(inst, "up", ev->id);
+            if (changed)
+              queue_notification(inst, "up", ev->id);
             // Cancel suspicion timer
             suspect_key(alarm_name, sizeof(alarm_name), ev->id);
             swim_timer_cancel(inst->timer, alarm_name);

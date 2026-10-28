@@ -60,6 +60,17 @@ bool obs_contains(const char *needle) {
   return found;
 }
 
+size_t obs_count(const char *needle) {
+  pthread_mutex_lock(&g_obs_mutex);
+  size_t n = 0;
+  for (const auto &s : g_obs) {
+    if (s.find(needle) != std::string::npos)
+      n++;
+  }
+  pthread_mutex_unlock(&g_obs_mutex);
+  return n;
+}
+
 size_t obs_size() {
   pthread_mutex_lock(&g_obs_mutex);
   size_t sz = g_obs.size();
@@ -1000,6 +1011,54 @@ TEST_CASE("protocol: leave from an unknown node is ignored") {
   CHECK(!obs_contains("node up 127.0.0.1:20782/z"));
 
   swim_udp_destroy(z);
+  swim_leave(inst);
+  swim_feed_destroy(feed);
+  swim_set_error(SWIM_OK, nullptr);
+}
+
+// Feed node events report status transitions; an incarnation change that
+// keeps the status (alive -> alive, suspect -> suspect) is not one.
+TEST_CASE("protocol: incarnation-only changes emit no node events") {
+  clear_obs();
+  swim_nodeid_idx_t y_id = swim_nodeid_find("127.0.0.1:20792/y");
+  swim_nodeid_idx_t x_id = swim_nodeid_find("127.0.0.1:20793/x");
+
+  swim_feed_t *feed = swim_feed_create();
+  REQUIRE(feed != nullptr);
+  swim_start_opts_t opts;
+  memset(&opts, 0, sizeof(opts));
+  opts.name = "dup_events";
+  opts.protocol_period_ms = 10000;
+  opts.feed = feed;
+  swim_t *inst = swim_start("127.0.0.1:20791/c1", &opts);
+  REQUIRE(inst != nullptr);
+  swim_udp_t *y = swim_udp_create("127.0.0.1", 20792);
+  REQUIRE(y != nullptr);
+
+  auto gossip = [&](swim_status_t status, uint64_t inc, uint32_t seq) {
+    swim_gossip_queue_t *q = swim_gossip_queue_create();
+    REQUIRE(q != nullptr);
+    swim_gossip_queue_enqueue(q, status, x_id, inc, 1);
+    uint8_t msg_buf[512];
+    int msglen = swim_pack_message(SWIM_MSG_PING, y_id, seq, SWIM_NODEID_NONE,
+                                   q, 1, msg_buf, sizeof(msg_buf));
+    swim_gossip_queue_destroy(q);
+    REQUIRE(msglen > 0);
+    uint8_t buf[512 + 12];
+    int len = swim_pack_authed("dup_events", msg_buf, msglen, buf, sizeof(buf));
+    REQUIRE(swim_udp_send(y, "127.0.0.1", 20791, buf, len) == 0);
+    usleep(100000);
+  };
+
+  gossip(SWIM_STATUS_ALIVE, 5, 1);
+  gossip(SWIM_STATUS_ALIVE, 6, 2);
+  gossip(SWIM_STATUS_SUSPECT, 6, 3);
+  gossip(SWIM_STATUS_SUSPECT, 7, 4);
+  poll_feed_events(feed);
+  CHECK(obs_count("node up 127.0.0.1:20793/x") == 1);
+  CHECK(obs_count("node suspect 127.0.0.1:20793/x") == 1);
+
+  swim_udp_destroy(y);
   swim_leave(inst);
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
