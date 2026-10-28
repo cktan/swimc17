@@ -1,6 +1,27 @@
 
 **Before starting any work on this project, read `DESIGN.md`.**
 
+## C++/C Coding Style
+
+- use snake_case for names
+- class names and struct names end with '_t'
+- C++ class private and protected member variable names should
+  have prefixed 'm_'.
+- for calls that trigger a significant operation (starting/
+  stopping a service, acquiring a lock, chdir, logger setup,
+  etc.), add a short comment explaining why it is done, even if the
+  call itself looks self-explanatory
+- every function in `.cc`, `.cpp` or `.c` files needs a doc comment
+  (one or two lines above the definition)
+- do not use strncpy(), instead memcpy and assign NUL-terminator.
+
+## Git Rules
+
+- when writing git commit messages, use concise sentences and
+  bullet points.
+- on git commit, if source files are not involved, do not run tests.
+
+
 ## Guidelines
 
 ### 1. General guidelines
