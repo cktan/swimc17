@@ -185,7 +185,9 @@ TEST_CASE("scale: staged startup, failure detection, pause/unpause") {
   g_nodes[14] = nullptr;
   CHECK(drain_feed_for(feed, "down", ":5014", 10000));
 
-  // Cleanup
+  // Cleanup: node_1 writes to the feed, so stop it before freeing the feed.
+  swim_leave(g_nodes[1]);
+  g_nodes[1] = nullptr;
   swim_feed_destroy(feed);
 }
 
