@@ -1539,16 +1539,18 @@ TEST_CASE("protocol: a relay waits at least the ping timeout") {
     return false;
   };
 
-  // The target answers each relayed ping after 80 ms.
+  // The target answers each relayed ping after 50 ms: at least 50 ms inside
+  // the window, enough for coarse CI timers, while an early-closing window
+  // misses about half the answers.
   int relayed = 0;
-  for (uint32_t seq = 100; seq < 104; seq++) {
+  for (uint32_t seq = 100; seq < 108; seq++) {
     send(m, m_id, SWIM_MSG_PING_REQ, seq, t_id);
     REQUIRE(wait_for(t, SWIM_MSG_PING, seq, 1000));
-    usleep(80000);
+    usleep(50000);
     send(t, t_id, SWIM_MSG_ACK, seq, SWIM_NODEID_NONE);
     relayed += wait_for(m, SWIM_MSG_FWD_ACK, seq, 300);
   }
-  CHECK(relayed == 4);
+  CHECK(relayed == 8);
 
   swim_udp_destroy(t);
   swim_udp_destroy(m);
