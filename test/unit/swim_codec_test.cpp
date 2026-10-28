@@ -8,6 +8,7 @@ extern "C" {
 #include "swim_nodeid.h"
 }
 
+#include <arpa/inet.h>
 #include <cstring>
 #include <string>
 
@@ -216,4 +217,32 @@ TEST_CASE("codec: gossip with an unknown status is rejected") {
 
   swim_message_t decoded;
   CHECK(swim_unpack_message(buf, len + n, &decoded) == -1);
+}
+
+// A record rejected for its status must not register its node ID: pool
+// slots are limited and never freed.
+TEST_CASE("codec: rejected gossip record does not register its node id") {
+  swim_nodeid_idx_t sender = swim_nodeid_find("10.0.0.1:7001/s");
+  REQUIRE(nodeid_valid(sender));
+
+  uint8_t buf[SWIM_MAX_PACKET_SIZE];
+  int len = swim_pack_message(SWIM_MSG_PING, sender, 1, SWIM_NODEID_NONE,
+                              nullptr, 0, buf, sizeof(buf));
+  REQUIRE(len > 0);
+
+  // Hand-encode [len 2B][id][status 1B][incarnation 8B] so the id is never
+  // registered by the encoder.
+  const char *id = "10.9.9.9:7009/never-registered";
+  uint16_t idlen = htons((uint16_t)strlen(id));
+  memcpy(buf + len, &idlen, 2);
+  len += 2;
+  memcpy(buf + len, id, strlen(id));
+  len += (int)strlen(id);
+  buf[len++] = 'X';
+  memset(buf + len, 0, 8);
+  len += 8;
+
+  swim_message_t decoded;
+  CHECK(swim_unpack_message(buf, len, &decoded) == -1);
+  CHECK(!nodeid_valid(swim_nodeid_get(id)));
 }

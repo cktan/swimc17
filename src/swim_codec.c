@@ -159,9 +159,6 @@ static int unpack_membership(swim_member_t *m, const uint8_t *p,
   if (n < 0)
     return -1;
   p += n;
-  m->id = swim_nodeid_find(id_str);
-  if (!nodeid_valid(m->id))
-    return -1;
 
   uint8_t status;
   n = unpack_int8(&status, p, q);
@@ -177,6 +174,12 @@ static int unpack_membership(swim_member_t *m, const uint8_t *p,
   if (n < 0)
     return -1;
   p += n;
+
+  // Register the id only once the record is fully decoded: pool slots are
+  // limited and never freed.
+  m->id = swim_nodeid_find(id_str);
+  if (!nodeid_valid(m->id))
+    return -1;
 
   m->dead_at = 0;
 
