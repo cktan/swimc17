@@ -120,7 +120,8 @@ Each packet is decoded, its piggybacked gossip is applied
 - C5. **`leave`** → transition the sender node to dead and
   cancel its suspicion timer.
 - C6. **`sync`** → its records are applied by procedure E
-  but are **not** re-gossiped (procedure G3).
+  but re-gossiped only if they change a node the
+  receiver already knew (procedure G3).
 
 After dispatch, if the message is not a `leave` or `sync`
 and the sender's `known` is below our own, catch the
@@ -234,9 +235,11 @@ G3. **Catch-up sync.** A stable member generates no gossip
     sample must be a sizeable share of the membership to
     fill in the last few. At most one `sync` goes to a
     given peer per protocol period. Its records update
-    membership like gossip but are not re-gossiped: they
-    are settled state, not news, and re-gossiping them
-    would flood the cluster on every join.
+    membership like gossip, but a record for a node the
+    receiver did not know is not re-gossiped: it is
+    settled state, not news, and re-gossiping it would
+    flood the cluster on every join. A record that
+    changes a known node is news and is re-gossiped.
 
 ---
 

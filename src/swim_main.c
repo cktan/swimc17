@@ -776,15 +776,17 @@ static void swim_protocol_handle_incoming(swim_instance_t *inst) {
         // status transitions, so note the status it had before.
         const swim_member_t *prev =
             swim_membership_get(inst->membership, ev->id);
+        bool known = prev != NULL;
         bool changed = !prev || prev->status != ev->status;
         rc = swim_membership_apply_event(inst->membership, ev->status, ev->id,
                                          ev->incarnation,
                                          get_monotonic_time_ms());
         if (rc == 0) {
-          // state changed -> re-gossip the event. Records from a SYNC are a
-          // sample of the sender's settled membership, not news; re-gossiping
-          // them would flood the cluster on every join.
-          if (msg.type != SWIM_MSG_SYNC)
+          // state changed -> re-gossip the event. A SYNC record for a node we
+          // did not know is the sender's settled membership, not news, and
+          // re-gossiping those would flood the cluster on every join; one
+          // that changes a node we knew is news.
+          if (msg.type != SWIM_MSG_SYNC || known)
             swim_gossip_queue_enqueue(inst->gossip_queue, ev->status, ev->id,
                                       ev->incarnation, 1);
 

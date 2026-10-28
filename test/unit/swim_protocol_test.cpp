@@ -1271,6 +1271,44 @@ TEST_CASE("protocol: sync records are applied but not re-gossiped") {
     CHECK(!nodeid_eq(in.gossip[i].id, z_id));
 }
 
+// A sync record that changes a node the receiver already knew is news (here
+// a refutation the receiver missed) and is re-gossiped like any other.
+TEST_CASE("protocol: sync news about a known node is re-gossiped") {
+  SyncHarness h("sync_news", 20901, 20902, 10000);
+  REQUIRE(h.x != nullptr);
+  REQUIRE(h.m != nullptr);
+
+  // X learns Z, then suspects it.
+  const char *z_str = "127.0.0.1:20909/z";
+  swim_nodeid_idx_t z_id = swim_nodeid_find(z_str);
+  swim_message_t in;
+  uint32_t seq = 1;
+  for (swim_status_t st : {SWIM_STATUS_ALIVE, SWIM_STATUS_SUSPECT}) {
+    swim_gossip_queue_t *q = swim_gossip_queue_create();
+    swim_gossip_queue_enqueue(q, st, z_id, 1, 1);
+    h.send(SWIM_MSG_PING, seq++, 3, q);
+    swim_gossip_queue_destroy(q);
+    REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+  }
+
+  // A sync carries Z's refutation.
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, z_id, 2, 1);
+  h.send(SWIM_MSG_SYNC, seq++, 3, q);
+  swim_gossip_queue_destroy(q);
+  usleep(200000);
+
+  h.send(SWIM_MSG_PING, seq++, 3);
+  REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+  bool refuted = false;
+  for (int i = 0; i < in.gossip_count; i++) {
+    if (nodeid_eq(in.gossip[i].id, z_id))
+      refuted = in.gossip[i].status == SWIM_STATUS_ALIVE &&
+                in.gossip[i].incarnation == 2;
+  }
+  CHECK(refuted);
+}
+
 // A joiner ignores a suspect record for a node it does not know, so suspects
 // in a sample are wasted slots.
 TEST_CASE("protocol: a sync sample holds only alive members") {
