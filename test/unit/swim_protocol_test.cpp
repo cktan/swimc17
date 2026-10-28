@@ -1271,6 +1271,57 @@ TEST_CASE("protocol: sync records are applied but not re-gossiped") {
     CHECK(!nodeid_eq(in.gossip[i].id, z_id));
 }
 
+// A sample too large for one packet must still be random. Packing through the
+// gossip queue sorts records by node ID, so the overflow was always the
+// alphabetically last members, and the last one never reached a joiner.
+TEST_CASE("protocol: a sync sample that overflows a packet stays random") {
+  SyncHarness h("sync_overflow", 20881, 20882, 200);
+  REQUIRE(h.x != nullptr);
+  REQUIRE(h.m != nullptr);
+
+  // 16 fakes with 122-byte records (long IPv6 address, 63-byte cookie): only
+  // about 11 fit in a packet, but the sample is k = 16 of 17 (16 fakes + X).
+  // The last address group orders the IDs; the highest sorts last.
+  std::string cookie(63, 'c');
+  swim_nodeid_idx_t fakes[16];
+  for (int i = 0; i < 16; i++) {
+    char s[160];
+    snprintf(s, sizeof(s), "[fd00:1111:2222:3333:4444:5555:6666:%x]:7000/%s",
+             0xa000 + i, cookie.c_str());
+    fakes[i] = swim_nodeid_find(s);
+    REQUIRE(nodeid_valid(fakes[i]));
+  }
+  // Announce the fakes alive at a fresh incarnation, so X's failed probes of
+  // them never get as far as declaring them dead.
+  uint32_t seq = 1;
+  auto announce = [&](uint64_t inc) {
+    swim_message_t in;
+    for (int batch = 0; batch < 2; batch++) {
+      swim_gossip_queue_t *q = swim_gossip_queue_create();
+      for (int i = 0; i < 8; i++)
+        swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, fakes[batch * 8 + i],
+                                  inc, 1);
+      h.send(SWIM_MSG_PING, seq++, 18, q); // full view: no sync
+      swim_gossip_queue_destroy(q);
+      REQUIRE(h.recv(SWIM_MSG_ACK, 1000, &in));
+    }
+  };
+
+  // Each sync carries the last fake with probability about 11/17.
+  bool seen_last = false;
+  for (uint64_t inc = 1; inc <= 10 && !seen_last; inc++) {
+    usleep(220000); // past the once-per-period rate limit
+    announce(inc);
+    h.send(SWIM_MSG_PING, seq++, 1);
+    swim_message_t in;
+    REQUIRE(h.recv(SWIM_MSG_SYNC, 1000, &in));
+    CHECK(in.gossip_count >= 10);
+    for (int i = 0; i < in.gossip_count; i++)
+      seen_last |= nodeid_eq(in.gossip[i].id, fakes[15]);
+  }
+  CHECK(seen_last);
+}
+
 // A probe still resolving when the period ends used to defer the next probe
 // by a whole period. It should start as soon as the pending probe resolves.
 TEST_CASE("protocol: a pending probe delays the next by a tick, not a period") {

@@ -606,7 +606,8 @@ static void send_fwd_ack(swim_instance_t *inst, swim_nodeid_idx_t dest,
 // joined or restarted would otherwise learn it only by direct contact, up to
 // a full probe cycle later. Send a random sample of k = clamp(ceil(20% of the
 // gap), SYNC_MIN, SYNC_MAX) of our alive and suspect members plus ourselves,
-// never the peer's own record, at most once per peer per protocol period.
+// fewer if the packet fills first, never the peer's own record, at most once
+// per peer per protocol period.
 static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
                             uint16_t peer_known) {
   int active = swim_membership_count(inst->membership);
@@ -640,12 +641,24 @@ static void maybe_send_sync(swim_instance_t *inst, swim_nodeid_idx_t peer,
                               .incarnation = inst->incarnation};
   if (k > n)
     k = n;
+  // The queue packs records sorted by node ID, so if the sample overflowed
+  // the packet the same members would always be cut. Stop sampling once the
+  // packet is full instead.
+  uint8_t scratch[SWIM_MAX_PACKET_SIZE];
+  int room =
+      SWIM_MAX_PACKET_SIZE - 12 -
+      swim_pack_message(SWIM_MSG_SYNC, inst->self_id, 0, SWIM_NODEID_NONE, NULL,
+                        0, scratch, (int)sizeof(scratch));
   // Partial Fisher-Yates: cand[0..k) becomes a uniform random sample.
   for (int i = 0; i < k; i++) {
     int j = i + rand_r(&inst->rand_state) % (n - i);
     swim_member_t tmp = cand[i];
     cand[i] = cand[j];
     cand[j] = tmp;
+    int len = swim_pack_membership(&cand[i], scratch, scratch + room);
+    if (len < 0)
+      break;
+    room -= len;
     swim_gossip_queue_enqueue(q, cand[i].status, cand[i].id,
                               cand[i].incarnation, 1);
   }
