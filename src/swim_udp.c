@@ -228,7 +228,9 @@ swim_udp_t *swim_udp_create(const char *host, uint16_t port) {
   }
   u->fd = fd;
   u->family = family;
-  strncpy(u->host, host, sizeof(u->host) - 1);
+  size_t host_len = strnlen(host, sizeof(u->host) - 1);
+  memcpy(u->host, host, host_len);
+  u->host[host_len] = '\0';
   u->port = port;
 
   return u;
