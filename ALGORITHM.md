@@ -88,12 +88,14 @@ B3. **An ack arrives** (directly or via `fwd_ack`) before
 
 B4. **Still no ack**: declare `target` **suspect** — record
     it, gossip `suspect(target, inc)` (procedure D), write a
-    telemetry event (procedure I), and start a `suspicion_timeout` timer
-    (procedure E governs the timer).
+    telemetry event (procedure I), and start a
+    `suspicion_timeout` timer (procedure E governs the
+    timer).
 
 B5. **`suspicion_timeout` fires** and `target` is still
     suspect at the same incarnation: declare it **dead** —
-    gossip `dead(target, inc)` and write a telemetry event (procedure I).
+    gossip `dead(target, inc)` and write a telemetry event
+    (procedure I).
 
 At any moment, an `alive` rumor with a high enough
 incarnation (procedure F) cancels suspicion and revives the
@@ -228,19 +230,23 @@ detect the failure by probing.
 
 ## I. Telemetry feed (membership and instrumentation events)
 
-If a telemetry feed is attached, the node writes status transitions and
-other instrumentation records to it.
+If a telemetry feed is attached, the node writes status
+transitions and other instrumentation records to it.
 
-I1. Telemetry records are written to a growable FIFO queue of 4 KB pages
-    (the feed). If memory is exhausted, the oldest unread pages are
-    dropped to make room for new records.
+I1. Telemetry records are written to a growable FIFO queue
+    of 4 KB pages (the feed). If memory is exhausted, the
+    oldest unread pages are dropped to make room for new
+    records.
 
-I2. When a node status change is adopted (procedure E), the node writes
-    an event record: `["node", "up" | "suspect" | "down", target_id]`
-    to the feed.
+I2. When a node status change is adopted (procedure E), the
+    node writes an event record:
+    `["node", "up" | "suspect" | "down", target_id]` to the
+    feed.
 
-I3. On a successful direct probe ack (procedure B1), the node writes a
-    latency record: `["ping", "rtt", target_id, latency_ms]` to the feed.
+I3. On a successful direct probe ack (procedure B1), the
+    node writes a latency record:
+    `["ping", "rtt", target_id, latency_ms]` to the feed.
 
-I4. Outbound message drops or cluster size changes also write records
-    (e.g., `["cluster", "size", count]`, `["warning", message]`).
+I4. Outbound message drops or cluster size changes also
+    write records (e.g., `["cluster", "size", count]`,
+    `["warning", message]`).
