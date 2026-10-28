@@ -1126,7 +1126,8 @@ int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
 // Internal only.
 int swim_pack_authed(const char *name, const uint8_t *msg, int msglen,
                      uint8_t *out, int outsz) {
-  if (!name || !msg || msglen < 0 || outsz < 12 + msglen)
+  if (!name || !msg || msglen < 0 || msglen > SWIM_MAX_PACKET_SIZE - 12 ||
+      outsz < 12 + msglen)
     return -1;
   uint32_t tval = (uint32_t)(get_now_ms() / 1000);
   uint32_t tval_be = htonl(tval);

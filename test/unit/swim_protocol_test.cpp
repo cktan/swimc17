@@ -1063,3 +1063,14 @@ TEST_CASE("protocol: incarnation-only changes emit no node events") {
   swim_feed_destroy(feed);
   swim_set_error(SWIM_OK, nullptr);
 }
+
+// swim_pack_authed must refuse a message that cannot fit a packet, rather than
+// overrun its internal hash buffer.
+TEST_CASE("protocol: swim_pack_authed rejects oversized messages") {
+  static uint8_t msg[2000];
+  static uint8_t out[2100];
+  const int max_msg = SWIM_MAX_PACKET_SIZE - 12;
+  CHECK(swim_pack_authed("g", msg, max_msg, out, sizeof(out)) == max_msg + 12);
+  CHECK(swim_pack_authed("g", msg, max_msg + 1, out, sizeof(out)) == -1);
+  CHECK(swim_pack_authed("g", msg, 2000, out, sizeof(out)) == -1);
+}

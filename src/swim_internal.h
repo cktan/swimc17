@@ -34,7 +34,8 @@ SWIM_EXTERN int swim_members(swim_t *inst, swim_member_t *out_list, int max_len,
  * @param msglen Length of msg.
  * @param out    Output buffer; must be at least msglen + 12 bytes.
  * @param outsz  Size of out.
- * @return msglen + 12 on success, -1 if out is too small.
+ * @return msglen + 12 on success, -1 if out is too small or msglen exceeds
+ *         SWIM_MAX_PACKET_SIZE - 12.
  */
 SWIM_EXTERN int swim_pack_authed(const char *name, const uint8_t *msg,
                                  int msglen, uint8_t *out, int outsz);
