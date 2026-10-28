@@ -2,7 +2,8 @@
  * https://github.com/cktan/swimc17/blob/main/LICENSE
  */
 #define _POSIX_C_SOURCE 200809L
-#define _DEFAULT_SOURCE /* inet_aton */
+#define _DEFAULT_SOURCE  /* inet_aton (glibc) */
+#define _DARWIN_C_SOURCE /* inet_aton (macOS) */
 #include "swim_nodeid.h"
 
 #include <arpa/inet.h>
