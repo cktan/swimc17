@@ -928,6 +928,8 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
     swim_set_error(SWIM_ERR_NOMEM, "Failed to allocate swim_instance_t");
     return NULL;
   }
+  // Initialize thread synchronization first so every error path can destroy it
+  pthread_mutex_init(&inst->mutex, NULL);
 
   // Populate configuration
   derive_key(opts->name, inst->key);
@@ -1009,8 +1011,6 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
     }
   }
 
-  // Initialize thread synchronization
-  pthread_mutex_init(&inst->mutex, NULL);
   atomic_store_explicit(&inst->running, true, memory_order_relaxed);
 
   // Seed this instance's private PRNG. Mix in the instance pointer so
@@ -1041,7 +1041,6 @@ swim_t *swim_start(const char *mynodeid, const swim_start_opts_t *opts) {
   if (pthread_create(&inst->thread, NULL, swim_thread_entry, inst) != 0) {
     swim_set_error(SWIM_ERR_BAD_STATE, "Failed to create protocol thread");
     atomic_store_explicit(&inst->running, false, memory_order_relaxed);
-    pthread_mutex_destroy(&inst->mutex);
     goto error_cleanup;
   }
 
@@ -1057,6 +1056,7 @@ error_cleanup:
   if (inst->gossip_queue)
     swim_gossip_queue_destroy(inst->gossip_queue);
   free(inst->seeds);
+  pthread_mutex_destroy(&inst->mutex);
   free(inst);
   return NULL;
 }
