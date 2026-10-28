@@ -76,9 +76,6 @@ static int compare_entries(const void *a, const void *b) {
 
 // Integer-only ceil(log2(n)) limit multiplier helper
 static inline uint32_t get_transmit_limit(uint32_t cluster_size) {
-  if (cluster_size == 0) {
-    return 1;
-  }
   uint32_t n = cluster_size + 1;
   uint32_t val = 0;
   while ((1U << val) < n) {
