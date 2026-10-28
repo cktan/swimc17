@@ -146,7 +146,10 @@ D3. **Pack**: when sending a packet, fill it up to the MTU
 D4. **Expiry**: each event is dropped once it has been sent
     about `ceil(log2(N+1)) × 3` times (the transmit limit
     for cluster size `N`), so each rumor reaches the whole
-    cluster with high probability and then stops.
+    cluster with high probability and then stops. Sends
+    made while the node has no peers (`N = 0`, only seed
+    pings) are not counted, so its startup announcement
+    reaches every seed.
 
 ---
 

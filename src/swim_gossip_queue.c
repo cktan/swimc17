@@ -76,10 +76,8 @@ static int compare_entries(const void *a, const void *b) {
 
 // Integer-only ceil(log2(n)) limit multiplier helper
 static inline uint32_t get_transmit_limit(uint32_t cluster_size) {
-  // A node with no peers yet is pinging its seeds; size the limit as for a
-  // one-peer cluster so its self-announcement reaches more than one seed.
   if (cluster_size == 0) {
-    cluster_size = 1;
+    return 1;
   }
   uint32_t n = cluster_size + 1;
   uint32_t val = 0;
@@ -224,9 +222,13 @@ int swim_gossip_queue_pack(swim_gossip_queue_t *queue, uint32_t cluster_size,
     p += n;
     packed++;
 
-    // Increment transmit count and check pruning threshold
-    entry->transmit_count++;
-    keep[i] = (entry->transmit_count < limit * entry->multiplier);
+    // Increment transmit count and check pruning threshold. A node with no
+    // peers yet is only pinging its seeds, which may be down or many; count
+    // nothing until it has joined, so its self-announcement reaches them all.
+    if (cluster_size > 0) {
+      entry->transmit_count++;
+      keep[i] = (entry->transmit_count < limit * entry->multiplier);
+    }
   }
 
   // Second loop: Squeeze out all pruned (not-keep) entries

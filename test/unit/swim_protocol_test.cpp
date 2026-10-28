@@ -766,11 +766,17 @@ TEST_CASE("protocol: stale suspicion about self is refuted") {
 // first.
 TEST_CASE("protocol: self-announcement reaches all seeds") {
   const char *x_str = "127.0.0.1:20711/x";
-  const char *seeds[] = {x_str, "127.0.0.1:20712/a", "127.0.0.1:20713/b",
-                         "127.0.0.1:20714/c", nullptr};
+  const char *seeds[] = {x_str,
+                         "127.0.0.1:20712/a",
+                         "127.0.0.1:20713/b",
+                         "127.0.0.1:20714/c",
+                         "127.0.0.1:20715/d",
+                         "127.0.0.1:20716/e",
+                         nullptr};
+  const int nmocks = 5;
 
-  swim_udp_t *mocks[3];
-  for (int i = 0; i < 3; i++) {
+  swim_udp_t *mocks[nmocks];
+  for (int i = 0; i < nmocks; i++) {
     mocks[i] = swim_udp_create("127.0.0.1", (uint16_t)(20712 + i));
     REQUIRE(mocks[i] != nullptr);
   }
@@ -783,11 +789,11 @@ TEST_CASE("protocol: self-announcement reaches all seeds") {
   swim_t *inst = swim_start(x_str, &opts);
   REQUIRE(inst != nullptr);
 
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < nmocks; i++)
     CHECK(recv_alive_inc(mocks[i], x_str) > 0);
 
   swim_leave(inst);
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < nmocks; i++)
     swim_udp_destroy(mocks[i]);
   swim_set_error(SWIM_OK, nullptr);
 }

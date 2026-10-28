@@ -276,7 +276,8 @@ the design choices.
 - **Expiry:** events are dropped from the queue once
   their transmit count reaches the transmit limit
   (which is the base limit scaled by the event's
-  own multiplier).
+  own multiplier). Sends made while the node has no
+  peers are not counted.
 
 ---
 

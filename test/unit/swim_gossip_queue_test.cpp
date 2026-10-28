@@ -342,3 +342,25 @@ TEST_CASE("gossip_queue: invalid args return error") {
 
   swim_gossip_queue_destroy(q);
 }
+
+// A node with no peers yet is only pinging its seeds, which may be down or
+// many; packing must not spend transmissions until it has joined.
+TEST_CASE("gossip_queue: no transmissions are counted while alone") {
+  swim_gossip_queue_t *q = swim_gossip_queue_create();
+  REQUIRE(q != nullptr);
+  swim_nodeid_idx_t idA = swim_nodeid_find("127.0.0.1:8001");
+  REQUIRE(swim_gossip_queue_enqueue(q, SWIM_STATUS_ALIVE, idA, 1, 1) == 0);
+
+  uint8_t buf[100];
+  for (int i = 0; i < 20; i++) {
+    REQUIRE(swim_gossip_queue_pack(q, 0, buf, buf + sizeof(buf)) == 25);
+    CHECK(swim_gossip_queue_size(q) == 1);
+  }
+
+  // Once it has a peer, the normal limit applies: ceil(log2(2)) * 3 = 3.
+  for (int i = 0; i < 3; i++)
+    swim_gossip_queue_pack(q, 1, buf, buf + sizeof(buf));
+  CHECK(swim_gossip_queue_size(q) == 0);
+
+  swim_gossip_queue_destroy(q);
+}
