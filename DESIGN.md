@@ -49,7 +49,9 @@ step detail are in `ALGORITHM.md` (procedures A, B, F).
   - `cookie` is a string (user-defined opaque
     datum). Optionally specified by the caller;
     defaults to `""` (empty string).
-- **Identity key:** the full `host:port/cookie` string
+- **Identity key:** the canonical `host:port/cookie`
+  string. Equivalent spellings resolve to one identity
+  (see §18).
 - **Assigned by:** caller
 - **Stability:** stable across restarts (same
   address string, new incarnation number). A
@@ -621,6 +623,23 @@ with pure random selection.
   be empty. Malformed IDs are rejected: by `swim_start`
   for self and seeds, and by the decoder, which drops the
   packet.
+- Node IDs are stored, compared, gossiped and reported in
+  canonical form, so equivalent spellings are one node:
+  - port in plain decimal (`07000` → `7000`);
+  - IPv4 as an unbracketed dotted quad
+    (`[10.0.0.1]` → `10.0.0.1`);
+  - IPv6 bracketed, in shortest form
+    (`[0:0::1]` → `[::1]`);
+  - hostnames lowercased (DNS is case-insensitive);
+  - an empty cookie written without the slash
+    (`h:7000/` → `h:7000`). Cookies are otherwise
+    opaque and case-sensitive.
+
+  Ambiguous hosts are rejected: brackets around anything
+  but an IP, and all-numeric names that are not a dotted
+  quad (`010.0.0.1`, which a resolver may read as
+  octal). A hostname and its IP address remain distinct
+  identities; merging them would need DNS.
 - Node IDs are interned in a process-wide pool shared by
   all instances, capped at 4000 distinct strings
   (`SWIM_NODEID_POOL_MAX`) and never shrunk. Every ID ever

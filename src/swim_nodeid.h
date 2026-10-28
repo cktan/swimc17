@@ -40,11 +40,14 @@ const char *swim_nodeid_lookup(swim_nodeid_idx_t idx);
 
 /* Find nodeid, registering it if absent. Returns SWIM_NODEID_NONE if nodeid
  * is not "host:port[/cookie]" (host may be a bracketed IPv6 literal, port is
- * 1..65535, cookie is under 64 bytes) or if the pool is full.
+ * 1..65535, cookie is under 64 bytes) or if the pool is full. Equivalent
+ * spellings ("10.0.0.1:07000/", "[10.0.0.1]:7000") resolve to one identity,
+ * stored in canonical form ("10.0.0.1:7000"); see canonicalize().
  */
 swim_nodeid_idx_t swim_nodeid_find(const char *nodeid);
 
-/* Find nodeid without registering it. Returns SWIM_NODEID_NONE if absent. */
+/* Find nodeid (any spelling) without registering it. Returns
+ * SWIM_NODEID_NONE if absent or malformed. */
 swim_nodeid_idx_t swim_nodeid_get(const char *nodeid);
 
 /* Free all registered nodeids and destroy the pool mutex. Call at shutdown. */

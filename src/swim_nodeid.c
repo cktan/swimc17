@@ -4,10 +4,17 @@
 #define _POSIX_C_SOURCE 200809L
 #include "swim_nodeid.h"
 
+#include <arpa/inet.h>
+#include <ctype.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Large enough for any canonical nodeid: 253-byte host, ":65535", and "/" plus
+ * a 63-byte cookie, with room to spare. */
+#define NODEID_CANON_MAX 384
 
 /* Sentinel 0xFFFF must not be a valid slot index. */
 _Static_assert(
@@ -95,6 +102,54 @@ static int parse_nodeid(const char *s, const char **host, size_t *host_len,
   return 0;
 }
 
+/*
+ * Write the canonical spelling of nodeid into out, so that every spelling of
+ * one endpoint maps to a single identity. Returns 0, or -1 if malformed or
+ * ambiguous.
+ *   - port: plain decimal ("07000" -> "7000")
+ *   - IPv4: dotted quad, unbracketed ("[10.0.0.1]" -> "10.0.0.1")
+ *   - IPv6: shortest form, bracketed ("[0:0::1]" -> "[::1]")
+ *   - hostname: lowercase; brackets, '/' and all-numeric names are rejected
+ *     (a numeric name that is not a dotted quad, like "010.0.0.1", may be
+ *     read as octal by a resolver)
+ *   - empty cookie: no slash ("h:1/" -> "h:1"); cookies are otherwise opaque
+ */
+static int canonicalize(const char *nodeid, char out[NODEID_CANON_MAX]) {
+  const char *h, *cookie;
+  size_t hl;
+  int port;
+  if (parse_nodeid(nodeid, &h, &hl, &port, &cookie) != 0)
+    return -1;
+  char host[254];
+  memcpy(host, h, hl);
+  host[hl] = '\0';
+
+  /* Room for a bracketed IPv6 address or a 253-byte hostname. */
+  char canon_host[256];
+  struct in_addr a4;
+  struct in6_addr a6;
+  if (inet_pton(AF_INET, host, &a4) == 1) {
+    inet_ntop(AF_INET, &a4, canon_host, sizeof(canon_host));
+  } else if (inet_pton(AF_INET6, host, &a6) == 1) {
+    canon_host[0] = '[';
+    inet_ntop(AF_INET6, &a6, canon_host + 1, sizeof(canon_host) - 2);
+    strcat(canon_host, "]");
+  } else {
+    if (nodeid[0] == '[' || strpbrk(host, "/[]") ||
+        strspn(host, "0123456789.") == hl)
+      return -1;
+    for (char *q = host; *q; q++)
+      *q = (char)tolower((unsigned char)*q);
+    strcpy(canon_host, host);
+  }
+
+  if (*cookie)
+    snprintf(out, NODEID_CANON_MAX, "%s:%d/%s", canon_host, port, cookie);
+  else
+    snprintf(out, NODEID_CANON_MAX, "%s:%d", canon_host, port);
+  return 0;
+}
+
 /* Lock-free probe; returns SWIM_NODEID_NONE if absent. */
 static swim_nodeid_idx_t nodeid_probe(const char *nodeid) {
   uint16_t slot = hash_slot(nodeid_hash(nodeid));
@@ -109,20 +164,13 @@ static swim_nodeid_idx_t nodeid_probe(const char *nodeid) {
   return SWIM_NODEID_NONE;
 }
 
-/* Register nodeid; idempotent. Returns SWIM_NODEID_NONE if malformed or pool
- * is full. Fast path: lock-free probe first; only locks when the entry is
+/* Register a canonical nodeid; idempotent. Returns SWIM_NODEID_NONE if the
+ * pool is full. Fast path: lock-free probe first; only locks when the entry is
  * absent. */
 static swim_nodeid_idx_t swim_nodeid_register(const char *nodeid) {
   swim_nodeid_idx_t existing = nodeid_probe(nodeid);
   if (nodeid_valid(existing))
     return existing;
-
-  /* Only well-formed ids may take one of the pool's limited slots. */
-  const char *h, *c;
-  size_t hl;
-  int port;
-  if (parse_nodeid(nodeid, &h, &hl, &port, &c) != 0)
-    return SWIM_NODEID_NONE;
 
   pthread_mutex_lock(&g_mu); /* acquire registration lock */
   if (atomic_load_explicit(&g_count, memory_order_relaxed) >=
@@ -158,12 +206,26 @@ none:
  * or pool full.
  */
 swim_nodeid_idx_t swim_nodeid_find(const char *nodeid) {
-  return swim_nodeid_register(nodeid);
+  /* Fast path: the table holds only canonical strings, so an id that is
+   * already canonical (as every id on the wire is) is found directly. */
+  swim_nodeid_idx_t idx = nodeid_probe(nodeid);
+  if (nodeid_valid(idx))
+    return idx;
+  char canon[NODEID_CANON_MAX];
+  if (canonicalize(nodeid, canon) != 0)
+    return SWIM_NODEID_NONE;
+  return swim_nodeid_register(canon);
 }
 
 /* Find nodeid without registering it; lock-free. */
 swim_nodeid_idx_t swim_nodeid_get(const char *nodeid) {
-  return nodeid_probe(nodeid);
+  swim_nodeid_idx_t idx = nodeid_probe(nodeid);
+  if (nodeid_valid(idx))
+    return idx;
+  char canon[NODEID_CANON_MAX];
+  if (canonicalize(nodeid, canon) != 0)
+    return SWIM_NODEID_NONE;
+  return nodeid_probe(canon);
 }
 
 /* Return nodeid string for idx; lock-free. */
