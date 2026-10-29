@@ -13,6 +13,14 @@ extern "C" {
 #include <poll.h>
 #include <string>
 
+// Wait up to 1 s for a packet on u, then receive it. macOS delivers
+// loopback packets asynchronously, so a sent packet is not readable at once.
+static int recv_wait(swim_udp_t *u, uint8_t *buf, size_t size) {
+  struct pollfd pfd = {swim_udp_fd(u), POLLIN, 0};
+  poll(&pfd, 1, 1000);
+  return swim_udp_recv(u, buf, size);
+}
+
 TEST_CASE("udp: non-blocking receive on empty socket returns 0") {
   swim_udp_t *u = swim_udp_create("127.0.0.1", 18001);
   REQUIRE(u != nullptr);
@@ -36,12 +44,7 @@ TEST_CASE("udp: ipv4 loopback packet exchange") {
   REQUIRE(rc == 0);
 
   uint8_t recv_buf[256];
-  int n = 0;
-  for (int i = 0; i < 100; i++) {
-    n = swim_udp_recv(u2, recv_buf, sizeof(recv_buf));
-    if (n > 0)
-      break;
-  }
+  int n = recv_wait(u2, recv_buf, sizeof(recv_buf));
 
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
@@ -67,12 +70,7 @@ TEST_CASE("udp: ipv6 loopback packet exchange") {
   REQUIRE(rc == 0);
 
   uint8_t recv_buf[256];
-  int n = 0;
-  for (int i = 0; i < 100; i++) {
-    n = swim_udp_recv(u2, recv_buf, sizeof(recv_buf));
-    if (n > 0)
-      break;
-  }
+  int n = recv_wait(u2, recv_buf, sizeof(recv_buf));
 
   REQUIRE(n == (int)strlen(msg));
   recv_buf[n] = '\0';
@@ -115,9 +113,7 @@ TEST_CASE("udp: link-local ipv6 destination with a zone") {
   const char *msg = "hello zone";
   CHECK(swim_udp_send(u1, host, 18007, (const uint8_t *)msg, strlen(msg)) == 0);
   uint8_t recv_buf[256];
-  int n = 0;
-  for (int i = 0; i < 100 && n <= 0; i++)
-    n = swim_udp_recv(u2, recv_buf, sizeof(recv_buf));
+  int n = recv_wait(u2, recv_buf, sizeof(recv_buf));
   CHECK(n == (int)strlen(msg));
 
   swim_udp_destroy(u1);
@@ -180,9 +176,7 @@ TEST_CASE("udp: clear_udp_loss restores delivery") {
                         strlen(msg)) == 0);
 
   uint8_t buf[64];
-  int n = 0;
-  for (int i = 0; i < 100 && n == 0; i++)
-    n = swim_udp_recv(recvr, buf, sizeof(buf));
+  int n = recv_wait(recvr, buf, sizeof(buf));
 
   CHECK(n == (int)strlen(msg));
 
@@ -213,9 +207,7 @@ TEST_CASE("udp: drop filter blocks packets") {
 
   REQUIRE(swim_udp_send(sender, "127.0.0.1", 18013, (const uint8_t *)msg,
                         strlen(msg)) == 0);
-  n = 0;
-  for (int i = 0; i < 100 && n == 0; i++)
-    n = swim_udp_recv(recvr, buf, sizeof(buf));
+  n = recv_wait(recvr, buf, sizeof(buf));
   CHECK(n == (int)strlen(msg));
 
   swim_udp_destroy(sender);
@@ -240,13 +232,11 @@ TEST_CASE("udp: hostname destinations are resolved once and cached") {
   CHECK(send_n(u1, "localhost", 18012, 5) == 5);
   CHECK(swim_udp_resolve_count(u1) == before + 1);
 
-  // The cached address reaches the IPv4 socket. Wait for each packet:
-  // macOS delivers loopback packets asynchronously.
+  // The cached address reaches the IPv4 socket.
   uint8_t buf[16];
   int got = 0;
-  struct pollfd pfd = {swim_udp_fd(u2), POLLIN, 0};
-  while (got < 5 && poll(&pfd, 1, 1000) > 0)
-    got += swim_udp_recv(u2, buf, sizeof(buf)) > 0;
+  for (int i = 0; i < 5; i++)
+    got += recv_wait(u2, buf, sizeof(buf)) > 0;
   CHECK(got == 5);
 
   // Past the 60 s lifetime, the next send re-resolves once.
