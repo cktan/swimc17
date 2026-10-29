@@ -10,6 +10,7 @@ extern "C" {
 #include <cstring>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <poll.h>
 #include <string>
 
 TEST_CASE("udp: non-blocking receive on empty socket returns 0") {
@@ -239,10 +240,12 @@ TEST_CASE("udp: hostname destinations are resolved once and cached") {
   CHECK(send_n(u1, "localhost", 18012, 5) == 5);
   CHECK(swim_udp_resolve_count(u1) == before + 1);
 
-  // The cached address reaches the IPv4 socket.
+  // The cached address reaches the IPv4 socket. Wait for each packet:
+  // macOS delivers loopback packets asynchronously.
   uint8_t buf[16];
   int got = 0;
-  for (int i = 0; i < 100 && got < 5; i++)
+  struct pollfd pfd = {swim_udp_fd(u2), POLLIN, 0};
+  while (got < 5 && poll(&pfd, 1, 1000) > 0)
     got += swim_udp_recv(u2, buf, sizeof(buf)) > 0;
   CHECK(got == 5);
 
